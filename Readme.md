@@ -1,3 +1,135 @@
+# CausalityRAG: Token-Level RAG Answer Resilience
+
+CausalityRAG measures how efficiently valid retrieved-context token revisions
+can disrupt a reader's clean answer.  The current method avoids answer-string
+matching and does not modify generated answer tokens.
+
+```text
+clean RAG trajectory
+-> sentence-removal ARC-JSD shifts
+-> attention-routed, conservation-preserving token lift
+-> signed token vectors and positive supermodular envelope
+-> exact unrestricted ratio optimization by max-flow
+-> contextually valid token replacement
+-> reader rerun and answer-change verification
+```
+
+The optimized surrogate is
+
+```text
+max over nonempty token sets S: F(S) / cost(S)
+
+F(S) = sum_i a_i + sum_{i<j} b_ij
+a_i  = ||z_i||^2
+b_ij = max(0, 2 z_i^T z_j)
+```
+
+The sentence-to-token lift preserves each signed sentence intervention vector:
+
+```text
+sum_{i in sentence s} z_i = g_s.
+```
+
+For a fixed ratio parameter, the positive pairwise objective reduces to
+maximum-weight closure.  Dinkelbach iterations plus sparse `s-t` max-flow
+therefore return the global optimum of the graph surrogate.  A successful
+reader rerun makes the selected edit cost a verified upper bound on the true
+minimum-edit resilience.  It does not make the surrogate an exact solution to
+the original black-box reader problem.
+
+## Main Entry Point
+
+The main experiment is:
+
+```bash
+scripts/run_arc_jsd_sentence_lift_attack.py
+```
+
+The complete-pair and singleton-Fisher scripts are retained as expensive
+validation baselines.  The direct-activation, cut, dense-subgraph, and ILP
+scripts are earlier baselines and ablations.
+
+## Server Setup
+
+The GPU scorer requires PyTorch and Transformers.  spaCy is isolated behind a
+localhost service so that it can use a separate environment without introducing
+binary conflicts into the GPU environment.
+
+Start the annotation service:
+
+```bash
+YVETTE_SPACY_MODEL=en_core_web_lg \
+/data1/yujia/envs/spacyner/bin/python \
+  scripts/spacy_annotation_server.py --port 8021
+```
+
+Required services and environment variables:
+
+```bash
+export YVETTE_LLM_BASE_URL=http://127.0.0.1:8000/v1
+export YVETTE_LLM_MODEL=qwen2.5-7b
+export CAUSALITYRAG_SPACY_BASE_URL=http://127.0.0.1:8021
+```
+
+Run HotpotQA:
+
+```bash
+CUDA_VISIBLE_DEVICES=2 \
+/data1/yujia/envs/graphrag/bin/python \
+  scripts/run_arc_jsd_sentence_lift_attack.py \
+  --input /data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl \
+  --out out/sentence_lift_hotpotqa.jsonl \
+  --cf-pools /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/cf_pools.json \
+  --n 100 --k 5 --batch-size 16 --feature-top-k 64
+```
+
+Each JSONL row records sentence scores, lift diagnostics, ratio-solver details,
+selected units, rejected uneditable units, validated replacements, clean and
+edited answers, runtime, and whether the reader answer changed.
+
+## Contextual Type and Replacement Rules
+
+Types are assigned from contextual spaCy NER, numeric/date patterns, or
+explicit relation cues.  A word is never treated as an entity merely because
+it appeared as a component of a value in an old replacement pool.
+
+For multi-token entities, replacements use the same slot of a same-type,
+same-length entity candidate.  For example, a surname slot is replaced with a
+surname slot.  Every candidate is re-annotated in its modified sentence and
+must preserve coarse POS, strict function/verb tags, and relevant morphology.
+Invalid candidates are removed from the editable graph and the exact ratio is
+solved again.
+
+The current validator covers contextual NER, POS, and morphology.  Long-range
+agreement and discourse consistency, such as gendered coreference outside the
+edited token's sentence, remain an explicit limitation and require a stronger
+semantic validator before final benchmark claims.
+
+## Validation
+
+The repository includes focused tests for:
+
+- sentence JSD and conservation-preserving token lifting;
+- signed Fisher interactions and positive supermodular envelopes;
+- exact ratio optimization and the SciPy sparse max-flow backend;
+- contextual NER/POS annotation and entity-slot replacement;
+- rejection of POS- and morphology-changing revisions;
+- exact-offset non-deleting context edits.
+
+On Server A, run all tests without installing pytest:
+
+```bash
+/data1/yujia/envs/spacyner/bin/python scripts/run_tests.py
+```
+
+Standard `python -m pytest -q` also works in a development environment.
+
+## Historical Design Notes
+
+The remainder of this document records the earlier reboot plan, ILP reference,
+and graph/cut baselines.  It is retained for experiment provenance; the signed
+sentence-lift ratio pipeline above is the current method.
+
 # Repository Reboot Guide: RAG Answer Resilience
 
 This document defines the new repository direction. The old pipeline was mainly
@@ -850,3 +982,82 @@ If P0 does not beat answer-string and top-attribution baselines, keep the graph
 selector as an ablation and return to the benchmark framing. If P0 works, the
 new repository should be written as a method paper around RAG answer resilience.
 
+## 17. Current Minimal Implementation
+
+The first runnable baseline is a token-level ILP selector:
+
+```bash
+/data1/yujia/envs/spacyner/bin/python scripts/run_token_ilp.py \
+  --input /data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl \
+  --out /data1/yujia/CausalityRAG/out/token_ilp_smoke.jsonl \
+  --n 10 \
+  --k 5 \
+  --tau-graph 0.2
+```
+
+It produces one JSONL audit row per question with token units, support scores,
+the selected minimum evidence cut, cut cost, and top candidate tokens.
+
+Implementation scope:
+
+- token units are single retrieved-context tokens with character offsets;
+- default support is a deterministic proxy from answer overlap, question overlap,
+  token type, and retrieval rank;
+- if a record contains `token_supports`, the same ILP can consume precomputed
+  attribution/support scores;
+- the selector implements both `min-cost` and `budgeted` objectives;
+- `scipy.optimize.milp` is used when available, with an exact integer-cost DP
+  fallback for the unit-cost token baseline.
+
+Typed revision can reuse the previous YVETTE rule artifacts:
+
+```bash
+/data1/yujia/envs/spacyner/bin/python scripts/run_token_attack.py \
+  --input /data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl \
+  --cf-pools /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/cf_pools.json \
+  --type-rules /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/type_rules_llm.yaml \
+  --out /data1/yujia/CausalityRAG/out/token_attack_typed_smoke.jsonl \
+  --n 3 \
+  --k 5 \
+  --objective budgeted \
+  --budget 8 \
+  --verify-reader
+```
+
+This runs ILP selection, applies typed token-level replacements from the rule
+library / value pools, reruns the reader, and records whether the answer changed.
+
+For a no-`tau_graph` reader-verified search, use:
+
+```bash
+/data1/yujia/envs/spacyner/bin/python scripts/run_token_attack.py \
+  --input /data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl \
+  --cf-pools /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/cf_pools.json \
+  --type-rules /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/type_rules_llm.yaml \
+  --out /data1/yujia/CausalityRAG/out/token_attack_search_flip.jsonl \
+  --n 10 \
+  --k 5 \
+  --objective search-flip \
+  --max-budget 20
+```
+
+This tries edit budgets from 1 upward. For each budget, ILP selects the token
+set with maximum predicted support removed; the reader is rerun immediately, and
+the search stops at the first budget that changes the answer.
+
+For the graph/max-flow selector:
+
+```bash
+/data1/yujia/envs/spacyner/bin/python scripts/run_token_flow.py \
+  --input /data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl \
+  --cf-pools /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/cf_pools.json \
+  --type-rules /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/type_rules_llm.yaml \
+  --out /data1/yujia/CausalityRAG/out/token_flow_hotpotqa_10.jsonl \
+  --n 10 \
+  --k 5 \
+  --target reader
+```
+
+This builds a query-token to context-token to clean-answer support graph. Context
+tokens are node-split with edit cost as capacity, and max-flow/min-cut returns
+the minimum token vertex cut.

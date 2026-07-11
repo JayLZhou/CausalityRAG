@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+out/
+logs/
+tmp/
+.DS_Store
+*.prof
