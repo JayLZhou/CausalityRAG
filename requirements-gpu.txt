@@ -1,0 +1,5 @@
+numpy>=1.26
+scipy>=1.11
+torch>=2.4
+transformers>=4.48
+PyYAML>=6
