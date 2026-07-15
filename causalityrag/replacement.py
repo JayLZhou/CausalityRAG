@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
+from threading import Lock
 
 from causalityrag.reader import parse_json_object
 
@@ -16,6 +17,13 @@ class GenericReplacementClient:
         self.base_url = (base_url or os.environ.get("YVETTE_LLM_BASE_URL") or "http://127.0.0.1:8000/v1").rstrip("/")
         self.model = model or os.environ.get("YVETTE_LLM_MODEL") or "qwen2.5-7b"
         self.timeout = timeout
+        self._calls = 0
+        self._calls_lock = Lock()
+
+    @property
+    def calls(self) -> int:
+        with self._calls_lock:
+            return self._calls
 
     def replace(
         self,
@@ -27,6 +35,8 @@ class GenericReplacementClient:
         tag_hint: str = "",
         forbidden: tuple[str, ...] = (),
     ) -> dict:
+        with self._calls_lock:
+            self._calls += 1
         prompt = (
             "Replace exactly one target word in the passage. Return STRICT JSON only: "
             '{"replacement":"..."}. The replacement must be one non-empty word, '
@@ -80,15 +90,18 @@ def generate_valid_replacement(
     nlp,
     *,
     max_generic_attempts: int = 2,
+    allow_relaxed_fallback: bool = True,
 ) -> dict:
     """Generate and contextually validate one non-deleting token replacement."""
 
     rejected = []
+    relaxed_candidates = []
     typed = library.replacement_for_unit(unit, context)
     if typed.get("ok"):
         validation = validate_contextual_replacement(unit, context, typed, nlp)
         if validation["valid"]:
             return {**typed, "validation": validation}
+        relaxed_candidates.append((typed, validation))
         rejected.append(str(typed.get("new", "")))
     for _ in range(max_generic_attempts):
         candidate = generic_editor.replace(
@@ -102,7 +115,32 @@ def generate_valid_replacement(
         validation = validate_contextual_replacement(unit, context, candidate, nlp)
         if candidate.get("ok") and validation["valid"]:
             return {**candidate, "validation": validation}
+        if candidate.get("ok"):
+            relaxed_candidates.append((candidate, validation))
         rejected.append(str(candidate.get("new", "")))
+    if allow_relaxed_fallback:
+        fallback = deterministic_fallback(
+            str(unit.get("text", "")),
+            str(unit.get("type", "")),
+            error="strict_contextual_validation_failed",
+        )
+        relaxed_candidates.append((fallback, validate_contextual_replacement(
+            unit,
+            context,
+            fallback,
+            nlp,
+        )))
+        for candidate, strict_validation in relaxed_candidates:
+            surface_validation = validate_surface_replacement(unit, context, candidate)
+            if surface_validation["valid"]:
+                return {
+                    **candidate,
+                    "policy": str(candidate.get("policy", "replacement")) + "_relaxed",
+                    "validation": {
+                        **surface_validation,
+                        "strict_validation": strict_validation,
+                    },
+                }
     return {
         "ok": False,
         "old": str(unit.get("text", "")),
@@ -110,6 +148,71 @@ def generate_valid_replacement(
         "policy": "no_valid_contextual_replacement",
         "rejected": [item for item in rejected if item],
         "validation": {"valid": False, "reason": "no_valid_candidate"},
+    }
+
+
+def build_selected_replacements(
+    selected: list[dict],
+    contexts: list[dict],
+    library,
+    generic_editor: GenericReplacementClient,
+    nlp,
+    replacement_cache: dict[str, dict] | None = None,
+    *,
+    allow_relaxed_fallback: bool = True,
+) -> tuple[dict[str, dict], list[dict]]:
+    """Resolve one frozen replacement for every selected surface token."""
+
+    context_by_id = {
+        str(context["chunk_id"]): str(context["text"]) for context in contexts
+    }
+    replacements = {}
+    rejected = []
+    for unit in selected:
+        unit_id = str(unit["unit_id"])
+        context = context_by_id[str(unit["chunk_id"])]
+        replacement = (
+            replacement_cache.get(unit_id)
+            if replacement_cache is not None
+            else None
+        )
+        if replacement is None:
+            replacement = generate_valid_replacement(
+                unit,
+                context,
+                library,
+                generic_editor,
+                nlp,
+                allow_relaxed_fallback=allow_relaxed_fallback,
+            )
+            if replacement_cache is not None:
+                replacement_cache[unit_id] = replacement
+        if replacement.get("ok"):
+            replacements[unit_id] = replacement
+        else:
+            rejected.append({
+                **unit,
+                "replacement_failure": replacement,
+            })
+    return replacements, rejected
+
+
+def validate_surface_replacement(unit: dict, context: str, replacement: dict) -> dict:
+    """Validate the intervention contract when every chunk token is endogenous."""
+
+    new = str(replacement.get("new", ""))
+    old = str(unit.get("text", ""))
+    start = int(unit.get("chunk_char_start", -1))
+    end = int(unit.get("chunk_char_end", -1))
+    if start < 0 or end <= start or context[start:end] != old:
+        return {"valid": False, "reason": "offset_mismatch"}
+    if not new or new.lower() == old.lower() or any(char.isspace() for char in new):
+        return {"valid": False, "reason": "invalid_surface_form"}
+    return {
+        "valid": True,
+        "reason": "relaxed_all_tokens_endogenous",
+        "original_surface": old,
+        "replacement_surface": new,
     }
 
 

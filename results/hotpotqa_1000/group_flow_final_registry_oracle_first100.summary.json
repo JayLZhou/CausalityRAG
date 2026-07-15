@@ -1,0 +1,18 @@
+{
+  "queries": 100,
+  "feasible_both_oracles_optimal": 99,
+  "proven_infeasible": 1,
+  "algorithm_candidate_queries": 99,
+  "algorithm_same_threshold_optimal": 89,
+  "mean_same_threshold_size_ratio": 1.05,
+  "median_same_threshold_size_ratio": 1.0,
+  "maximum_same_threshold_size_ratio": 2.0,
+  "theorem_max_k_guess": 10,
+  "theorem_applicable_queries": 96,
+  "theorem_residual_bound_violations": 0,
+  "theorem_cardinality_bound_violations": 0,
+  "mean_strict_oracle_seconds": 0.6484963246807456,
+  "mean_relaxed_oracle_seconds": 0.6823186451103538,
+  "mean_editable_labels": 39.78,
+  "mean_group_rank": 7.86
+}

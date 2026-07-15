@@ -1,0 +1,47 @@
+{
+  "queries": 400,
+  "selection_mode": "budget",
+  "token_budget": 3,
+  "remaining_flow_threshold": 0.9,
+  "clean_correct_policy": "exact",
+  "reader_calls": 689,
+  "residual_flow": {
+    "total_queries": 400,
+    "candidate_queries": 400,
+    "valid_queries": 400,
+    "no_candidate_queries": 0,
+    "replacement_failures": 0,
+    "flips": 262,
+    "flip_rate": 0.655,
+    "overall_flip_rate": 0.655,
+    "candidate_coverage": 1.0,
+    "mean_selected_tokens": 2.9675
+  },
+  "unary_matched": {
+    "total_queries": 400,
+    "candidate_queries": 400,
+    "valid_queries": 400,
+    "no_candidate_queries": 0,
+    "replacement_failures": 0,
+    "flips": 245,
+    "flip_rate": 0.6125,
+    "overall_flip_rate": 0.6125,
+    "candidate_coverage": 1.0,
+    "mean_selected_tokens": 2.9675
+  },
+  "paired": {
+    "valid_queries": 400,
+    "same_token_sets": 111,
+    "different_token_sets": 289,
+    "residual_only_flips": 30,
+    "unary_only_flips": 13,
+    "both_flip": 165,
+    "neither_flips": 81,
+    "flip_rate_difference": 0.0425,
+    "paired_bootstrap_95_ci": [
+      0.0125,
+      0.075
+    ],
+    "mcnemar_exact_two_sided_p": 0.0137181850586785
+  }
+}

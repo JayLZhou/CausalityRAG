@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from collections import Counter
@@ -269,3 +270,22 @@ def _terms(text: str) -> Counter:
         for token in WORD_RE.findall(text or "")
         if token and token.lower() not in STOPWORDS
     )
+
+
+def units_from_cache_row(record: dict, row: dict, *, k: int) -> list[dict]:
+    identifier = record_id(record)
+    if str(row.get("id", "")) != identifier:
+        raise ValueError(f"token-units ID mismatch for {identifier}")
+    if int(row.get("top_k", k)) != k:
+        raise ValueError(f"token-units top-k mismatch for {identifier}")
+    stored_hashes = row.get("context_sha256", {})
+    if stored_hashes:
+        current_hashes = {
+            str(context["chunk_id"]): hashlib.sha256(
+                str(context["text"]).encode("utf-8")
+            ).hexdigest()
+            for context in retrieved_contexts(record)[:k]
+        }
+        if stored_hashes != current_hashes:
+            raise ValueError(f"token-units context hash mismatch for {identifier}")
+    return list(row.get("units", []))

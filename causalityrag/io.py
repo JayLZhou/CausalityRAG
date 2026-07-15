@@ -65,6 +65,18 @@ def retrieved_contexts(record: dict) -> list[dict]:
 
 
 def iter_records(path: str | Path, limit: int = 0) -> Iterable[dict]:
+    path = Path(path)
+    if path.suffix == ".jsonl":
+        with path.open(encoding="utf-8") as source:
+            emitted = 0
+            for line in source:
+                if not line.strip():
+                    continue
+                if limit and emitted >= limit:
+                    break
+                yield json.loads(line)
+                emitted += 1
+        return
     for i, record in enumerate(load_records(path)):
         if limit and i >= limit:
             break

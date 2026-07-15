@@ -15,8 +15,8 @@ from causalityrag.attribution_graph import (
     DirectActivationAttributionGraphBuilder,
     NativeMLPAttributionGraphBuilder,
 )
-from causalityrag.io import iter_records, retrieved_contexts
-from causalityrag.reader import ReaderClient
+from causalityrag.io import iter_records, record_id, retrieved_contexts
+from causalityrag.reader import ReaderClient, parse_json_object
 
 
 def main() -> None:
@@ -26,7 +26,8 @@ def main() -> None:
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--n", type=int, default=10)
     parser.add_argument("--k", type=int, default=5)
-    parser.add_argument("--target", choices=["gold", "reader"], default="reader")
+    parser.add_argument("--target", choices=["gold", "reader", "results"], default="reader")
+    parser.add_argument("--target-results", nargs="+", default=[])
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--max-context-tokens", type=int, default=800)
     parser.add_argument("--max-length", type=int, default=1024)
@@ -34,21 +35,42 @@ def main() -> None:
     parser.add_argument("--max-receivers-per-layer", type=int, default=48)
     parser.add_argument("--max-edges", type=int, default=5000)
     parser.add_argument("--top-tokens", type=int, default=50)
+    parser.add_argument("--closed-flow", action="store_true")
+    parser.add_argument("--absorbing-flow", action="store_true")
     parser.add_argument(
         "--graph-method",
         choices=["direct-activation", "native-mlp", "attention-rollout"],
         default="direct-activation",
     )
     args = parser.parse_args()
+    if args.closed_flow and args.graph_method != "direct-activation":
+        parser.error("--closed-flow requires --graph-method direct-activation")
+    if args.absorbing_flow and args.graph_method != "direct-activation":
+        parser.error("--absorbing-flow requires --graph-method direct-activation")
+    if args.closed_flow and args.absorbing_flow:
+        parser.error("--closed-flow and --absorbing-flow are mutually exclusive")
 
     records = list(iter_records(args.input, args.n))
     reader = ReaderClient() if args.target == "reader" else None
-    targets = []
-    for record in records:
-        if reader:
-            targets.append(reader.answer(str(record.get("question", "")), retrieved_contexts(record)[: args.k]))
-        else:
-            targets.append(str(record.get("answer") or record.get("clean_answer") or ""))
+    if args.target == "results":
+        if not args.target_results:
+            parser.error("--target-results is required with --target results")
+        target_by_id = load_targets_by_id(args.target_results)
+        missing = [
+            record_id(record)
+            for record in records
+            if record_id(record) not in target_by_id
+        ]
+        if missing:
+            raise ValueError(f"missing cached clean targets: {missing[:5]}")
+        targets = [target_by_id[record_id(record)] for record in records]
+    else:
+        targets = []
+        for record in records:
+            if reader:
+                targets.append(reader.answer(str(record.get("question", "")), retrieved_contexts(record)[: args.k]))
+            else:
+                targets.append(str(record.get("answer") or record.get("clean_answer") or ""))
 
     builder_cls = {
         "direct-activation": DirectActivationAttributionGraphBuilder,
@@ -63,6 +85,8 @@ def main() -> None:
         edge_topk=args.edge_topk,
         max_receivers_per_layer=args.max_receivers_per_layer,
         max_edges=args.max_edges,
+        closed_flow=args.closed_flow,
+        absorbing_flow=args.absorbing_flow,
     )
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     rows = []
@@ -89,6 +113,36 @@ def main() -> None:
         "method": builder.method,
         "out": args.out,
     }, ensure_ascii=False))
+
+
+def answer_from_response(response: str) -> str:
+    parsed = parse_json_object(response)
+    if isinstance(parsed, dict):
+        return str(parsed.get("answer", "")).strip()
+    return response.strip()
+
+
+def answer_from_result_row(row: dict) -> str:
+    """Read a cached clean target without issuing another reader call."""
+
+    response = str(row.get("clean_response", "")).strip()
+    if response:
+        return answer_from_response(response)
+    for key in ("clean_answer", "stored_clean_answer", "target_answer", "answer"):
+        value = str(row.get(key, "")).strip()
+        if value:
+            return value
+    raise ValueError(f"target result row {row.get('id')} has no clean answer")
+
+
+def load_targets_by_id(paths: list[str]) -> dict[str, str]:
+    targets = {}
+    for path in paths:
+        for row in iter_records(path):
+            identifier = record_id(row)
+            if identifier:
+                targets[identifier] = answer_from_result_row(row)
+    return targets
 
 
 if __name__ == "__main__":

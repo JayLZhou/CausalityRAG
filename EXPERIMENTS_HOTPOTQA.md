@@ -9,12 +9,13 @@ verifier.
 
 - **RQ1 Effectiveness.** Does the method find small valid context-token sets
   whose replacement changes a clean RAG answer?
-- **RQ2 Attribution fidelity.** Does the sentence-to-token lift predict actual
-  singleton and pair intervention effects?
-- **RQ3 Interaction value.** Do signed pair interactions improve over unary
-  attribution rankings at equal edit cost?
-- **RQ4 Optimization.** Does exact max-flow return the same graph optimum faster
-  than MILP and improve over greedy selection?
+- **RQ2 Graph fidelity.** Does residual contribution flow predict which strict
+  token-replacement sets change the reader answer?
+- **RQ3 Structural value.** Does path-aware grouped flow improve over the same
+  ARC-JSD unary scores at equal edit cost?
+- **RQ4 Optimization.** What accuracy/runtime tradeoff is induced by active
+  group rank, and how tight is K-guess min-cut rounding against restricted
+  exact optima?
 - **RQ5 Efficiency.** How many logical model evaluations, GPU batches, reader
   generations, and editor generations are required relative to YVETTE and
   perturbation-based attribution baselines?
@@ -53,7 +54,9 @@ Selection and replacement generation must be separated.
 3. Generate and cache one deterministic valid replacement per token.
 4. Reuse that exact replacement for every method selecting the token.
 5. If a token has no valid replacement, ranking methods skip it and graph
-   methods remove it and re-solve.
+   methods keep its paths but make all gates with that label uncuttable.
+6. Repeat registry construction and selection until no newly selected token is
+   missing from the registry.
 
 This registry prevents a method from winning because it received stronger or
 more numerous replacements.  It also prevents replacement generation from
@@ -64,8 +67,8 @@ seeing the clean answer or method identity.
 ### 4.1 Native One-Shot
 
 Each method emits its natural set once and receives one reader verification.
-This is the primary end-to-end setting for the unrestricted ratio method and
-system baselines.
+This is the primary end-to-end setting for grouped contribution-flow and system
+baselines.
 
 ### 4.2 Size-Matched Selection
 
@@ -85,6 +88,17 @@ As a secondary, call-intensive protocol, verify prefixes in increasing `k` and
 stop at the first valid flip.  Report reader calls separately; do not mix this
 result with one-shot efficiency.
 
+### 4.5 Reader Backend Consistency
+
+Attribution and answer-change verification must use the same model weights,
+attention implementation, dtype, prompt, and greedy decoding backend.  Results
+produced by the round-robin vLLM proxy are diagnostic only: different attention
+kernels or replicas can change a greedy trajectory even at temperature zero.
+For final flip metrics, re-run every unique edited context with the local HF
+`eager` reader used to produce the clean trajectory.  Cache identical edit sets
+across methods and use `scripts/reverify_core_comparison_hf.py`; do not count a
+backend-induced answer difference as a token-intervention flip.
+
 ## 5. Baselines
 
 ### 5.1 Main Token-Selection Baselines (1,000 Queries)
@@ -96,18 +110,33 @@ result with one-shot efficiency.
    the same clean trajectory as the proposed method.
 4. **ARC-JSD Unary.** Use sentence ARC-JSD plus the conservative token lift,
    but retain only unary node weights `a_i`; rank by `a_i / c_i`.
-5. **MIRAGE.** Gradient-based context-token saliency adapted from the official
-   model-internals answer-attribution method.
+5. **MIRAGE.** Follow the official two-stage model-internals method: select
+   response tokens whose full-vs-contextless KL is at least the example mean
+   plus one population standard deviation, then score context tokens by the L2
+   embedding gradient of the contrastive log-probability difference between
+   the clean token and its contextless foil.  Sum saliency across selected
+   response tokens.  For editable surface words spanning multiple model
+   subwords, take the L2 norm of the concatenated subword gradients.  Evaluate
+   the resulting unary ranking at fixed Top-1/3/5 budgets and size-matched
+   budgets using `scripts/run_mirage_topk_attack.py`.
 6. **ALTI-Logit.** Layerwise input-token logit contribution accumulated over
    the generated response.
 7. **ContextCite+Attention.** Compute ContextCite segment scores and rank tokens
    within segments using clean attention routing.
-8. **Proposed.** Signed sentence-to-token lift, positive pairwise supermodular
-   envelope, and exact unrestricted ratio optimization.
+8. **Proposed.** Build a path-preserving absorbing contribution DAG from direct
+   local target-logit writes. Preserve transformer layers and give every
+   editable layer copy its input-token label. Add normalized ARC-JSD unary
+   support as independent paths with the same labels, then solve grouped
+   residual-flow interdiction using K weighted min-cuts, label rounding, and
+   feasibility-preserving label pruning.
 
-ARC-JSD Unary is the most important controlled baseline: it holds the sentence
-intervention oracle and lift fixed, isolating the contribution of pair
-interactions and ratio optimization.
+ARC-JSD Unary is the most important controlled baseline: it holds unary scores,
+the editable domain, replacements, and edit count fixed, isolating the value of
+the contribution paths and grouped flow optimizer.
+
+Do not interpret a native threshold result against MIRAGE Top-5 as a
+size-controlled comparison. Claims about graph structure must use the
+size-matched protocol in Section 4.2.
 
 ### 5.2 End-to-End System Baseline
 
@@ -122,11 +151,17 @@ interactions and ratio optimization.
   pool of at most 10 valid tokens from the union of baseline rankings.  Enumerate
   fixed-replacement subsets in increasing size with batched reader calls.  This
   gives the exact minimum flip set only within that pool.
-- **MILP-Ratio.** Optimize the same pairwise graph objective using Dinkelbach
-  plus a linearized MILP (`y_ij = x_i AND x_j`) with a 60-second timeout.
-- **Greedy-Ratio.** Use a deterministic marginal-density greedy algorithm on
-  the same graph.
-- **Max-Flow Ratio.** The proposed exact maximum-closure solver.
+- **Grouped MILP Oracle.** Use one binary variable per token label, cut-side
+  variables for layer copies, and finite-edge crossing variables. Enforce all
+  copies of a label jointly and solve with HiGHS, using a 60-second timeout on
+  graphs not proved optimal.
+- **Contracted Min-Cut.** Contract equal token positions across layers and solve
+  one ordinary min-cut. This is fast but may create impossible cross-layer
+  paths.
+- **Copy Min-Cut.** Ignore shared labels and solve the weighted copy relaxation
+  without rounding.
+- **K-Guess Group Flow.** The proposed weighted copy min-cut plus token-label
+  rounding.
 
 The full black-box minimum-edit problem is not labeled an ILP oracle: its reader
 constraints are unavailable without enumerating interventions.
@@ -135,35 +170,35 @@ constraints are unavailable without enumerating interventions.
 
 Run all ablations on the same 1,000-query manifest:
 
-- uniform sentence-to-token allocation instead of attention routing;
-- absolute shift vectors instead of signed shift vectors;
-- signed lift with unary weights only;
-- signed lift with pair edges but greedy optimization;
-- signed lift with pair edges and exact max-flow;
-- no contextual type gate;
-- no pair-edge clipping diagnostic (analysis only; not a supermodular method).
+- ARC-JSD unary only (`alpha = 0`);
+- contribution graph only (`alpha = 1`);
+- `alpha in {0.25, 0.5, 0.75}` fixed globally on development data;
+- absorbing flow versus closed flow with synthetic background mass;
+- path-preserving DAG versus global edge pruning;
+- layer-preserving groups versus layer-copy contraction;
+- active-copy cap in `{4, 8, 16, all}`;
+- K-guess threshold output versus heuristic reverse-delete budget chains;
+- rounded K-guess output versus feasibility-preserving threshold pruning;
+- strict contextual registry versus surface-only replacements as a diagnostic;
+- one versus three deterministic replacement-registry seeds.
 
-Record positive-edge fraction, dropped negative interaction mass, selected-set
-median/P90/max, and the fraction of sets larger than 20 tokens.
+Record realized maximum/mean group rank, excluded copy throughput, absorbed
+mass, min-cut calls, candidate sizes, registry misses, and strict validity.
 
 ## 7. Fidelity Experiments
 
-### 7.1 Singleton Fidelity
+### 7.1 Residual-Flow Fidelity
 
-On 100 fixed queries, sample at least 20 valid tokens per query.  Apply the
-shared replacement individually and compute true response JSD.  Compare it with
-the lifted unary score using Spearman, Pearson, and top-k overlap.
+On 100 fixed queries, evaluate the proposed candidate chain plus stratified
+random and unary-matched sets. Compare predicted residual flow with clean-answer
+logit drop, output JSD, and verified answer change using Spearman, AUROC, and
+calibration plots.
 
-### 7.2 Pair Fidelity
+### 7.2 Structural Complementarity
 
-On the same queries, sample at least 100 valid token pairs per query, stratified
-by predicted positive, near-zero, and negative raw inner product.  Compare
-
-```text
-true synergy = D({i,j}) - D({i}) - D({j})
-```
-
-with the raw signed interaction and positive envelope weight.
+At budgets 1, 3, and 5, report paired proposed-only and unary-only flips. Audit
+the selected paths for proposed-only wins and test whether their tokens occupy
+shared internal bottlenecks that unary scores cannot represent.
 
 ### 7.3 Restricted Optimality Gap
 
@@ -214,8 +249,8 @@ for flip outcomes and report five-seed variation for Random-Valid.
 | Main native + size-matched | 1,000 | cheap baselines, attribution baselines, proposed |
 | Budget curves | 1,000 | all token rankings + proposed ranking variants |
 | YVETTE comparison | 1,000 | YVETTE, proposed |
-| Singleton fidelity | 100 | lifted unary vs true intervention |
-| Pair fidelity | 100 | lifted edge vs true pair synergy |
+| Residual-flow fidelity | 100 | graph candidates, unary-matched, random-matched |
+| Registry robustness | 1,000 | three fixed strict replacement seeds |
 | Restricted reader oracle | 50 | exhaustive pool oracle, proposed, rankings |
 | Solver comparison | 1,000 graphs | max-flow, MILP timeout, greedy |
 | Human validity audit | 200 answer pairs + 200 edits | stratified by method/outcome |
@@ -228,12 +263,13 @@ Run stages independently and never regenerate upstream artifacts implicitly.
 00 manifest
 01 clean trajectories
 02 contextual token annotations
-03 sentence interventions and routing
-04 method scores/graphs
-05 selector outputs
-06 shared valid replacement registry
+03 absorbing contribution graphs and ARC-JSD unary scores
+04 provisional selector outputs
+05 iterative shared strict replacement registry
+06 final grouped-flow and baseline outputs on the closed editable domain
 07 edited reader outputs
-08 metrics and bootstrap tables
+08 local-HF eager re-verification
+09 metrics and bootstrap tables
 ```
 
 Each artifact must contain a configuration hash and parent-artifact hash.  A
@@ -246,7 +282,8 @@ resumed stage must reject incompatible parents instead of silently mixing runs.
 - all methods use identical top-5 chunks and cached clean responses;
 - size-matched baselines use the same replacement registry;
 - primary flip claims are reported on the clean-correct subset;
-- max-flow and MILP agree on all graphs solved to MILP optimality;
-- restricted-oracle and fidelity experiments are complete;
+- weighted min-cut identity holds numerically and grouped MILP agrees on all
+  small graphs solved to optimality;
+- restricted-oracle, graph-fidelity, and registry-seed experiments are complete;
 - latency and call counts include every attribution, editing, and verification
   stage.

@@ -1,53 +1,62 @@
 # CausalityRAG: Token-Level RAG Answer Resilience
 
-CausalityRAG measures how efficiently valid retrieved-context token revisions
-can disrupt a reader's clean answer.  The current method avoids answer-string
-matching and does not modify generated answer tokens.
+CausalityRAG asks for the smallest set of retrieved-context tokens whose fixed,
+type-valid replacement changes a frozen RAG reader's clean answer. Query tokens
+and generated answer tokens are never edited, and chunk tokens are never
+matched against the clean answer string.
+
+The current pipeline is:
 
 ```text
-clean RAG trajectory
--> sentence-removal ARC-JSD shifts
--> attention-routed, conservation-preserving token lift
--> signed token vectors and positive supermodular envelope
--> exact unrestricted ratio optimization by max-flow
--> contextually valid token replacement
--> reader rerun and answer-change verification
+clean reader trajectory
+-> path-preserving absorbing contribution DAG
+-> ARC-JSD unary support augmentation
+-> grouped layer-copy flow interdiction
+-> K exact weighted min-cuts plus token-label rounding
+-> feasibility-preserving token-label pruning
+-> shared strict replacement registry
+-> frozen-reader rerun and answer-change verification
 ```
 
-The optimized surrogate is
+The true reader objective is a black-box, potentially non-monotone set problem.
+The optimized surrogate is instead explicit:
 
 ```text
-max over nonempty token sets S: F(S) / cost(S)
-
-F(S) = sum_i a_i + sum_{i<j} b_ij
-a_i  = ||z_i||^2
-b_ij = max(0, 2 z_i^T z_j)
+r_G(B) = min |S|  subject to residual contribution flow Phi(S) <= B.
 ```
 
-The sentence-to-token lift preserves each signed sentence intervention vector:
+Every layer-copy gate is labelled by its input chunk token. Editing one token
+removes all of its editable layer copies without contracting the layered DAG.
+The ungrouped threshold objective is known as Maximum Flow Blocker; shared token
+labels additionally induce a minimum-label-cut structure, so this is not one
+ordinary min-cut. For maximum active group rank `r`, threshold slack `eta`, and
+an optimum of size `k <= K`, the implemented `K`-guess algorithm returns a
+graph candidate satisfying
 
 ```text
-sum_{i in sentence s} z_i = g_s.
+|S| <= r (1 + 1/eta) k
+Phi(S) <= (1 + eta) B
 ```
 
-For a fixed ratio parameter, the positive pairwise objective reduces to
-maximum-weight closure.  Dinkelbach iterations plus sparse `s-t` max-flow
-therefore return the global optimum of the graph surrogate.  A successful
-reader rerun makes the selected edit cost a verified upper bound on the true
-minimum-edit resilience.  It does not make the surrogate an exact solution to
-the original black-box reader problem.
+using `K` weighted `s-t` min-cuts. Threshold pruning can only reduce the set
+while retaining its residual-flow feasibility, so it preserves this bound. The
+guarantee is only for the graph surrogate. A successful reader rerun is a
+verified upper bound on true replacement resilience; no unconditional
+reader-level approximation is claimed. See
+[METHOD_GROUP_FLOW.md](METHOD_GROUP_FLOW.md) for definitions, the proof sketch,
+and the exact grouped-flow MILP used as an evaluation oracle.
 
-## Main Entry Point
+## Main Entry Points
 
-The main experiment is:
+- `scripts/run_kdd_graph.py`: direct-activation absorbing contribution graph.
+- `scripts/build_replacement_registry.py`: shared answer-blind strict edits.
+- `scripts/run_raw_mixed_cut_gate.py`: grouped K-guess min-cut and rounding.
+- `scripts/run_residual_flow_attack.py`: fixed-budget or native-threshold reader
+  verification.
+- `scripts/analyze_group_flow_oracle.py`: exact graph-optimum audit with HiGHS.
 
-```bash
-scripts/run_arc_jsd_sentence_lift_attack.py
-```
-
-The complete-pair and singleton-Fisher scripts are retained as expensive
-validation baselines.  The direct-activation, cut, dense-subgraph, and ILP
-scripts are earlier baselines and ablations.
+Sentence-lift pair ratios, contracted token graphs, closed-background flow,
+dense subgraphs, and the original ILP are retained as baselines or ablations.
 
 ## Server Setup
 
@@ -71,21 +80,38 @@ export YVETTE_LLM_MODEL=qwen2.5-7b
 export CAUSALITYRAG_SPACY_BASE_URL=http://127.0.0.1:8021
 ```
 
-Run HotpotQA:
+Build the contribution graph on HotpotQA:
 
 ```bash
 CUDA_VISIBLE_DEVICES=2 \
 /data1/yujia/envs/graphrag/bin/python \
-  scripts/run_arc_jsd_sentence_lift_attack.py \
+  scripts/run_kdd_graph.py \
   --input /data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl \
-  --out out/sentence_lift_hotpotqa.jsonl \
-  --cf-pools /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/cf_pools.json \
-  --n 100 --k 5 --batch-size 16 --feature-top-k 64
+  --out out/absorbing_graph_hotpotqa.jsonl \
+  --model-path /data1/yujia/models/Qwen2.5-7B-Instruct \
+  --graph-method direct-activation --absorbing-flow --n 100 --k 5
 ```
 
-Each JSONL row records sentence scores, lift diagnostics, ratio-solver details,
-selected units, rejected uneditable units, validated replacements, clean and
-edited answers, runtime, and whether the reader answer changed.
+The graph, unary cache, replacement registry, structural gate, and reader
+results are separate immutable JSONL stages. Final experiments must use a
+frozen manifest and local-HF eager re-verification; round-robin vLLM results are
+diagnostic only.
+
+## Frozen HotpotQA-1000 Result
+
+The first closed-domain run is complete. On 397 local-HF exact-clean queries,
+grouped flow improves over size-matched ARC-JSD unary by 3.53 points at budget
+3 and 3.27 points at budget 5. The native threshold improves by 4.33 points on
+393 covered exact-clean queries while selecting 2.64 tokens on average. All
+three multi-token comparisons are significant under exact paired McNemar tests;
+the one-token methods tie.
+
+The final strict replacement registry is at a fixed point with zero evaluated
+candidate misses. A first-100 exact MILP audit finds a mean same-threshold size
+ratio of 1.05 and zero theorem-bound violations on all 96 theorem-applicable
+instances. Exact counts, confidence intervals, artifacts, and limitations are
+in [RESULTS_HOTPOTQA_1000.md](RESULTS_HOTPOTQA_1000.md). This is a strong
+single-dataset result, not yet a VLDB-ready empirical package.
 
 ## Contextual Type and Replacement Rules
 
@@ -97,8 +123,8 @@ For multi-token entities, replacements use the same slot of a same-type,
 same-length entity candidate.  For example, a surname slot is replaced with a
 surname slot.  Every candidate is re-annotated in its modified sentence and
 must preserve coarse POS, strict function/verb tags, and relevant morphology.
-Invalid candidates are removed from the editable graph and the exact ratio is
-solved again.
+Invalid candidates stay in the contribution DAG but receive uncuttable gates;
+the grouped flow problem is solved again over the valid shared token domain.
 
 The current validator covers contextual NER, POS, and morphology.  Long-range
 agreement and discourse consistency, such as gendered coreference outside the
@@ -111,7 +137,9 @@ The repository includes focused tests for:
 
 - sentence JSD and conservation-preserving token lifting;
 - signed Fisher interactions and positive supermodular envelopes;
-- exact ratio optimization and the SciPy sparse max-flow backend;
+- absorbing contribution-flow construction;
+- weighted mixed min-cut, K guessing, grouped rounding, threshold pruning,
+  exact grouped-flow MILP, and registry filtering;
 - contextual NER/POS annotation and entity-slot replacement;
 - rejection of POS- and morphology-changing revisions;
 - exact-offset non-deleting context edits.
@@ -127,8 +155,8 @@ Standard `python -m pytest -q` also works in a development environment.
 ## Historical Design Notes
 
 The remainder of this document records the earlier reboot plan, ILP reference,
-and graph/cut baselines.  It is retained for experiment provenance; the signed
-sentence-lift ratio pipeline above is the current method.
+and graph/cut baselines. It is retained for experiment provenance; the grouped
+contribution-flow pipeline above is the current method.
 
 # Repository Reboot Guide: RAG Answer Resilience
 

@@ -1,0 +1,13 @@
+{
+  "queries": 1000,
+  "candidate_tokens": 7749,
+  "valid_tokens": 7407,
+  "invalid_tokens": 342,
+  "editor_llm_calls": 48,
+  "workers": 16,
+  "backend": "local-process",
+  "max_budget": 5,
+  "max_native_tokens": 10,
+  "contract": "strict_contextual_pos_tag_morphology",
+  "answer_blind": true
+}

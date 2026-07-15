@@ -113,6 +113,7 @@ class TypedRuleLibrary:
                 inferred,
                 int(unit.get("entity_token_index", 0)),
                 int(unit.get("entity_token_count", 1)),
+                entity_text=str(unit.get("entity_text", "")),
             )
             return _replacement(token, replacement, inferred, "same_type_entity_slot")
         return self.replacement_for_token(token, unit_type, context)
@@ -141,20 +142,35 @@ class TypedRuleLibrary:
         ner_type: str,
         slot: int,
         token_count: int,
+        *,
+        entity_text: str = "",
     ) -> str | None:
         """Replace an entity component with the same slot of a same-type entity."""
 
-        candidates = []
+        original_parts = WORD_RE.findall(entity_text)
+        candidates: list[list[str]] = []
         for value in self.type_pool.get(ner_type, []):
             parts = WORD_RE.findall(str(value))
             if len(parts) != token_count or slot < 0 or slot >= len(parts):
                 continue
-            candidate = parts[slot]
-            if candidate.lower() != token.lower() and candidate.lower() not in STOPWORDS:
-                candidates.append(candidate)
+            if len(original_parts) == token_count:
+                if any(
+                    candidate.lower() == original.lower()
+                    for candidate, original in zip(parts, original_parts)
+                ):
+                    continue
+            elif parts[slot].lower() == token.lower():
+                continue
+            if any(part.lower() in STOPWORDS for part in parts):
+                continue
+            candidates.append(parts)
         if not candidates:
             return None
-        return preserve_case(token, candidates[seed(token + ner_type + str(slot)) % len(candidates)])
+        identity = entity_text or token
+        replacement = candidates[
+            seed(identity + ner_type + str(token_count)) % len(candidates)
+        ][slot]
+        return preserve_case(token, replacement)
 
     def gen_entity_component(self, token: str, ner_type: str) -> str | None:
         candidates = [
