@@ -7,6 +7,7 @@ import os
 import re
 import string
 import urllib.request
+from collections import Counter
 
 
 READ_SYSTEM = "Answer the question using ONLY the passages. Give the shortest answer span. Output JSON only."
@@ -80,3 +81,25 @@ def answers_match(a: str, b: str) -> bool:
         return True
     na, nb = normalize_answer(a), normalize_answer(b)
     return bool(na and nb and (na == nb or na in nb or nb in na))
+
+
+def answers_exact_match(a: str, b: str) -> bool:
+    """Hotpot-style normalized exact match without substring containment."""
+
+    na, nb = normalize_answer(a), normalize_answer(b)
+    return bool(na and nb and na == nb)
+
+
+def answer_token_f1(a: str, b: str) -> float:
+    """Token F1 after the same normalization used by exact match."""
+
+    left = normalize_answer(a).split()
+    right = normalize_answer(b).split()
+    if not left or not right:
+        return float(left == right)
+    overlap = sum((Counter(left) & Counter(right)).values())
+    if overlap == 0:
+        return 0.0
+    precision = overlap / len(left)
+    recall = overlap / len(right)
+    return 2.0 * precision * recall / (precision + recall)

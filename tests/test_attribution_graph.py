@@ -92,3 +92,67 @@ def test_direct_pruning_always_keeps_answer_logit_edges() -> None:
     assert len(kept) == 3
     assert weak_sink in kept
     assert sum(edge["kind"] == "answer_logit" for edge in kept) == 1
+
+
+def test_closed_flow_diagnostics_preserve_mass_and_expose_background() -> None:
+    token_meta = [
+        {"position": 0, "region": "context"},
+        {"position": 1, "region": "answer"},
+    ]
+    context_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
+        0, 0, 1, 1, "attention_ov_write", 3.0, 0.6, 0
+    )
+    background_edge = (
+        DirectActivationAttributionGraphBuilder._closed_background_edge(
+            1, 1, 0.4, 0, "attention_beam"
+        )
+    )
+    answer_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
+        1, 1, 2, 1, "answer_logit", 2.0, 1.0, 0
+    )
+    answer_edge["dst"] = "answer_target"
+
+    diagnostics = DirectActivationAttributionGraphBuilder._closed_flow_diagnostics(
+        [context_edge, background_edge, answer_edge],
+        token_meta,
+    )
+
+    assert abs(diagnostics["sink_inflow"] - 1.0) < 1e-12
+    assert abs(diagnostics["source_total_flow"] - 1.0) < 1e-12
+    assert abs(diagnostics["background_flow"] - 0.4) < 1e-12
+    assert diagnostics["input_region_flow"] == {"context": 0.6}
+    assert diagnostics["maximum_internal_conservation_error"] < 1e-12
+
+
+def test_region_mass_labels_closed_flow_background_explicitly() -> None:
+    tokens = [{"position": 0, "region": "context"}]
+    edge = DirectActivationAttributionGraphBuilder._closed_background_edge(
+        1, 0, 0.25, 0, "attention_beam"
+    )
+
+    assert DirectActivationAttributionGraphBuilder._region_edge_mass(
+        [edge], tokens
+    ) == {"background->context": 0.25}
+
+
+def test_absorbing_flow_removes_background_edges_and_records_mass() -> None:
+    context_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
+        0, 0, 1, 1, "attention_ov_write", 3.0, 0.6, 0
+    )
+    background_edge = (
+        DirectActivationAttributionGraphBuilder._closed_background_edge(
+            1, 1, 0.4, 0, "attention_beam"
+        )
+    )
+
+    retained, diagnostics = (
+        DirectActivationAttributionGraphBuilder._absorbing_flow_subgraph(
+            [context_edge, background_edge],
+            {"background_flow": 0.4},
+        )
+    )
+
+    assert retained == [context_edge]
+    assert diagnostics["absorbed_background_mass"] == 0.4
+    assert diagnostics["removed_background_edges"] == 1
+    assert diagnostics["retained_background_flow"] == 0.0

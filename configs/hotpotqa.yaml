@@ -1,0 +1,53 @@
+experiment: hotpotqa_token_resilience_v1
+seed: 20260711
+
+data:
+  input: /data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl
+  start: 0
+  count: 1000
+  retrieved_chunks: 5
+
+reader:
+  model_path: /data1/yujia/models/Qwen2.5-7B-Instruct
+  served_model: qwen2.5-7b
+  base_url: http://127.0.0.1:8000/v1
+  decoding: greedy
+  max_new_tokens: 96
+
+annotation:
+  spacy_model: en_core_web_lg
+  base_url: http://127.0.0.1:8021
+
+lift:
+  sentence_metric: jsd
+  signed: true
+  feature_top_k: 64
+  routing_last_layers: 8
+  pair_envelope: positive_part
+
+optimization:
+  objective: max_supermodular_value_per_edit_cost
+  solver: dinkelbach_maximum_closure
+  max_iterations: 100
+  tolerance: 1.0e-9
+
+replacement:
+  mode: shared_registry
+  deletion_allowed: false
+  require_single_token: true
+  require_contextual_pos: true
+  require_contextual_morphology: true
+  entity_policy: same_type_same_length_same_slot
+  generic_attempts: 2
+
+evaluation:
+  budgets: [1, 2, 3, 5, 10]
+  random_seeds: 5
+  bootstrap_samples: 10000
+  restricted_oracle_queries: 50
+  restricted_oracle_pool: 10
+  fidelity_queries: 100
+  singleton_samples_per_query: 20
+  pair_samples_per_query: 100
+  human_answer_audit: 200
+  human_edit_audit: 200

@@ -1,0 +1,10 @@
+{
+  "queries": 1000,
+  "ok_queries": 1000,
+  "mean_seconds": 0.407358,
+  "p90_seconds": 0.495,
+  "mean_retained_edges": 5235.42,
+  "mean_edges_before_absorption": 5235.42,
+  "mean_absorbed_background_mass": 0.9595313180640549,
+  "method": "qwen_direct_activation_target_logit_attribution_absorbing_flow"
+}

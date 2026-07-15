@@ -1,0 +1,28 @@
+{
+  "queries": 1000,
+  "ok_queries": 1000,
+  "status_histogram": {
+    "ok": 1000
+  },
+  "queries_with_multiple_nonempty_sets": 996,
+  "queries_with_any_set_different_from_unary": 831,
+  "mean_distinct_nonempty_sets": 6.846,
+  "candidate_comparisons": 6846,
+  "mixed_flow_better_than_unary": 5037,
+  "mixed_flow_equal_to_unary": 1284,
+  "mixed_flow_worse_than_unary": 525,
+  "all_cardinality_sweeps_monotone": true,
+  "k_guessing_queries": 1000,
+  "k_guessing_strict_candidate_queries": 953,
+  "k_guessing_bicriteria_candidate_queries": 993,
+  "k_guessing_mincut_calls": 9995,
+  "total_seconds": 4154.326735,
+  "mean_seconds": 4.154326735,
+  "p90_seconds": 10.583252,
+  "gate_pass": true,
+  "registry_fixed_point": true,
+  "registry_candidate_tokens": 7749,
+  "registry_valid_tokens": 7407,
+  "registry_invalid_tokens": 342,
+  "evaluated_candidate_registry_misses": 0
+}

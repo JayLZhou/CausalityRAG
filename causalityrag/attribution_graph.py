@@ -8,6 +8,7 @@ transcoder graph from the KDD paper.
 
 from __future__ import annotations
 
+from collections import defaultdict
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -42,6 +43,8 @@ class AttentionAttributionGraphBuilder:
         max_receivers_per_layer: int = 48,
         max_edges: int = 5000,
         residual_mix: float = 0.5,
+        closed_flow: bool = False,
+        absorbing_flow: bool = False,
     ) -> None:
         import torch
         from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
@@ -54,6 +57,10 @@ class AttentionAttributionGraphBuilder:
         self.max_receivers_per_layer = max_receivers_per_layer
         self.max_edges = max_edges
         self.residual_mix = residual_mix
+        self.closed_flow = closed_flow
+        self.absorbing_flow = absorbing_flow
+        if self.closed_flow and self.absorbing_flow:
+            raise ValueError("closed_flow and absorbing_flow are mutually exclusive")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
         config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
@@ -238,8 +245,18 @@ class AttentionAttributionGraphBuilder:
 
         mass: dict[str, float] = {}
         for edge in edges:
-            src_region = str(token_meta[int(edge["src_position"])]["region"])
-            dst_region = str(token_meta[int(edge["dst_position"])]["region"])
+            src_position = int(edge["src_position"])
+            dst_position = int(edge["dst_position"])
+            src_region = (
+                str(token_meta[src_position]["region"])
+                if 0 <= src_position < len(token_meta)
+                else "background"
+            )
+            dst_region = (
+                str(token_meta[dst_position]["region"])
+                if 0 <= dst_position < len(token_meta)
+                else "target"
+            )
             key = f"{src_region}->{dst_region}"
             mass[key] = mass.get(key, 0.0) + float(edge.get("contribution", 0.0))
         return {key: round(value, 10) for key, value in sorted(mass.items())}
@@ -612,14 +629,45 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 target_logit_tensor = torch.stack(target_logits).mean()
                 target_logit_tensor.backward()
 
-            edges = self._direct_edges(output.attentions, trace, token_meta, target_positions)
-            context_tokens, chunk_token_counts = self._direct_context_support(
-                embeddings, token_meta, edges, target_positions
-            )
+            if self.closed_flow or self.absorbing_flow:
+                edges, flow_diagnostics = self._closed_flow_edges(
+                    output.attentions,
+                    trace,
+                    token_meta,
+                    target_positions,
+                )
+                if self.absorbing_flow:
+                    edges, flow_diagnostics = self._absorbing_flow_subgraph(
+                        edges,
+                        flow_diagnostics,
+                    )
+                context_tokens, chunk_token_counts = self._closed_context_support(
+                    embeddings,
+                    token_meta,
+                    edges,
+                )
+            else:
+                edges = self._direct_edges(
+                    output.attentions,
+                    trace,
+                    token_meta,
+                    target_positions,
+                )
+                flow_diagnostics = {}
+                context_tokens, chunk_token_counts = self._direct_context_support(
+                    embeddings,
+                    token_meta,
+                    edges,
+                    target_positions,
+                )
         finally:
             trace.close()
 
-        kept_edges = self._prune_direct_edges(edges, self.max_edges)
+        kept_edges = (
+            edges
+            if self.closed_flow or self.absorbing_flow
+            else self._prune_direct_edges(edges, self.max_edges)
+        )
         nodes = self._direct_nodes(kept_edges, token_meta, len(output.attentions), target_positions)
         target_outputs = [
             {
@@ -639,7 +687,15 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             "gold_answer": str(record.get("answer", "")),
             "target_answer": target_answer,
             "status": "ok",
-            "method": self.method,
+            "method": (
+                f"{self.method}_closed_flow"
+                if self.closed_flow
+                else (
+                    f"{self.method}_absorbing_flow"
+                    if self.absorbing_flow
+                    else self.method
+                )
+            ),
             "target_logit": round(float(target_logit_tensor.detach()), 8),
             "target_outputs": target_outputs,
             "top_context_tokens": context_tokens[:top_tokens],
@@ -658,19 +714,421 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 "edges": kept_edges,
                 "edge_count_before_cap": len(edges),
                 "edge_weight_semantics": (
-                    "signed local target-logit contribution: target gradient dotted with the "
-                    "actual residual, attention OV, or MLP output write"
+                    (
+                        "backward-conserved positive flow allocated in proportion to signed "
+                        "local target-logit contribution from the actual residual, attention "
+                        "OV, or MLP output write"
+                    )
+                    if self.closed_flow or self.absorbing_flow
+                    else (
+                        "signed local target-logit contribution: target gradient dotted with "
+                        "the actual residual, attention OV, or MLP output write"
+                    )
                 ),
                 "support_capacity_field": "contribution",
-                "signed_weight_field": "signed_contribution",
+                "signed_weight_field": (
+                    "raw_signed_contribution"
+                    if self.closed_flow or self.absorbing_flow
+                    else "signed_contribution"
+                ),
                 "negative_weight_field": "negative_contribution",
                 "target_objective": "mean raw logit over clean-answer tokens",
                 "context_support_semantics": (
-                    "sum of positive context-to-answer-predictor attention OV contributions"
+                    (
+                        "closed conserved flow terminating at context input tokens"
+                        if self.closed_flow
+                        else "retained absorbing flow terminating at context input tokens"
+                    )
+                    if self.closed_flow or self.absorbing_flow
+                    else (
+                        "sum of positive context-to-answer-predictor attention OV contributions"
+                    )
                 ),
+                "flow_construction": (
+                    "closed_backward_beam_with_explicit_background"
+                    if self.closed_flow
+                    else (
+                        "absorbing_backward_beam_without_background_edges"
+                        if self.absorbing_flow
+                        else "none"
+                    )
+                ),
+                "flow_diagnostics": flow_diagnostics,
                 "uses_transcoder": False,
             },
         }
+
+    def _closed_flow_edges(
+        self,
+        attentions: tuple[Any, ...],
+        trace: _NativeTrace,
+        token_meta: list[dict],
+        target_positions: list[int],
+    ) -> tuple[list[dict], dict]:
+        """Trace a sparse conserved positive flow backward from the answer."""
+
+        edges: list[dict] = []
+        final_layer = len(attentions) - 1
+        final_stage = 2 * len(attentions)
+        final_output = trace.layer_outputs[final_layer][0].detach().float()
+        final_grad = trace.layer_outputs[final_layer].grad[0].detach().float()
+        final_contribution = (final_grad * final_output).sum(dim=-1)
+        predictors = sorted({position - 1 for position in target_positions})
+        positive_outputs = {
+            predictor: max(0.0, float(final_contribution[predictor]))
+            for predictor in predictors
+        }
+        output_total = sum(positive_outputs.values())
+        active_post: dict[int, float] = defaultdict(float)
+        sink_position = target_positions[-1]
+        if output_total <= 1e-15:
+            edge = self._closed_background_edge(
+                final_stage + 1,
+                sink_position,
+                1.0,
+                final_layer,
+                "answer_output",
+            )
+            edge["dst"] = "answer_target"
+            edge["target_positions"] = list(target_positions)
+            edges.append(edge)
+        else:
+            for predictor, raw_value in positive_outputs.items():
+                if raw_value <= 0:
+                    continue
+                flow = raw_value / output_total
+                edge = self._closed_flow_edge(
+                    final_stage,
+                    predictor,
+                    final_stage + 1,
+                    sink_position,
+                    "answer_logit",
+                    raw_value,
+                    flow,
+                    final_layer,
+                )
+                edge["dst"] = "answer_target"
+                edge["target_positions"] = list(target_positions)
+                edges.append(edge)
+                active_post[predictor] += flow
+
+        for layer_index in range(len(attentions) - 1, -1, -1):
+            if not active_post:
+                break
+            pre_stage = 2 * layer_index
+            mid_stage = pre_stage + 1
+            post_stage = pre_stage + 2
+
+            mlp_output = trace.mlp_outputs[layer_index][0].detach().float()
+            mlp_grad = trace.mlp_outputs[layer_index].grad[0].detach().float()
+            mlp_write = (mlp_grad * mlp_output).sum(dim=-1)
+            mid_residual = (
+                trace.layer_outputs[layer_index][0].detach().float() - mlp_output
+            )
+            mlp_residual = (mlp_grad * mid_residual).sum(dim=-1)
+            active_mid: dict[int, float] = defaultdict(float)
+            for receiver, mass in active_post.items():
+                values = (
+                    ("mlp_residual", max(0.0, float(mlp_residual[receiver]))),
+                    ("mlp_output_write", max(0.0, float(mlp_write[receiver]))),
+                )
+                total = sum(value for _, value in values)
+                if total <= 1e-15:
+                    edges.append(self._closed_background_edge(
+                        post_stage,
+                        receiver,
+                        mass,
+                        layer_index,
+                        "mlp",
+                    ))
+                    continue
+                for kind, raw_value in values:
+                    if raw_value <= 0:
+                        continue
+                    flow = mass * raw_value / total
+                    edges.append(self._closed_flow_edge(
+                        mid_stage,
+                        receiver,
+                        post_stage,
+                        receiver,
+                        kind,
+                        raw_value,
+                        flow,
+                        layer_index,
+                    ))
+                    active_mid[receiver] += flow
+
+            if not active_mid:
+                active_post = {}
+                continue
+            attention_matrix = self._direct_attention_matrix(
+                layer_index,
+                attentions[layer_index],
+                trace.attn_outputs[layer_index].grad,
+                trace.attn_inputs[layer_index],
+            )
+            layer_input = trace.layer_inputs[layer_index][0].detach().float()
+            attention_grad = trace.attn_outputs[layer_index].grad[0].detach().float()
+            attention_residual = (attention_grad * layer_input).sum(dim=-1)
+
+            allocations: list[dict] = []
+            dropped_by_receiver: dict[int, float] = defaultdict(float)
+            source_mass: dict[int, float] = defaultdict(float)
+            for receiver, mass in active_mid.items():
+                positive_row = attention_matrix[receiver, : receiver + 1].clamp_min(0)
+                residual_value = max(0.0, float(attention_residual[receiver]))
+                total = residual_value + float(positive_row.sum())
+                if total <= 1e-15:
+                    dropped_by_receiver[receiver] += mass
+                    continue
+
+                retained_mass = 0.0
+                source_count = min(max(0, self.edge_topk), positive_row.numel())
+                if source_count:
+                    values, sources = self.torch.topk(positive_row, source_count)
+                    for raw_value, source in zip(values.tolist(), sources.tolist()):
+                        if raw_value <= 0:
+                            continue
+                        flow = mass * float(raw_value) / total
+                        allocations.append({
+                            "receiver": receiver,
+                            "source": int(source),
+                            "kind": "attention_ov_write",
+                            "raw_value": float(raw_value),
+                            "flow": flow,
+                        })
+                        source_mass[int(source)] += flow
+                        retained_mass += flow
+                if residual_value > 0:
+                    flow = mass * residual_value / total
+                    allocations.append({
+                        "receiver": receiver,
+                        "source": receiver,
+                        "kind": "attention_residual",
+                        "raw_value": residual_value,
+                        "flow": flow,
+                    })
+                    source_mass[receiver] += flow
+                    retained_mass += flow
+                dropped_by_receiver[receiver] += max(0.0, mass - retained_mass)
+
+            selected_sources = {
+                source
+                for source, _ in sorted(
+                    source_mass.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )[: max(0, self.max_receivers_per_layer)]
+            }
+            active_pre: dict[int, float] = defaultdict(float)
+            for allocation in allocations:
+                receiver = int(allocation["receiver"])
+                source = int(allocation["source"])
+                flow = float(allocation["flow"])
+                if source not in selected_sources:
+                    dropped_by_receiver[receiver] += flow
+                    continue
+                edges.append(self._closed_flow_edge(
+                    pre_stage,
+                    source,
+                    mid_stage,
+                    receiver,
+                    str(allocation["kind"]),
+                    float(allocation["raw_value"]),
+                    flow,
+                    layer_index,
+                ))
+                active_pre[source] += flow
+            for receiver, flow in dropped_by_receiver.items():
+                if flow <= 1e-15:
+                    continue
+                edges.append(self._closed_background_edge(
+                    mid_stage,
+                    receiver,
+                    flow,
+                    layer_index,
+                    "attention_beam",
+                ))
+            active_post = dict(active_pre)
+
+        diagnostics = self._closed_flow_diagnostics(edges, token_meta)
+        diagnostics.update({
+            "edge_topk": self.edge_topk,
+            "receiver_beam": self.max_receivers_per_layer,
+            "flow_edges": len(edges),
+        })
+        return edges, diagnostics
+
+    @staticmethod
+    def _closed_flow_edge(
+        src_stage: int,
+        src_position: int,
+        dst_stage: int,
+        dst_position: int,
+        kind: str,
+        raw_value: float,
+        flow: float,
+        model_layer: int,
+    ) -> dict:
+        return {
+            "src": f"s{src_stage}:t{src_position}",
+            "dst": f"s{dst_stage}:t{dst_position}",
+            "src_layer": src_stage,
+            "dst_layer": dst_stage,
+            "src_position": src_position,
+            "dst_position": dst_position,
+            "model_layer": model_layer,
+            "kind": kind,
+            "weight": round(raw_value, 10),
+            "raw_signed_contribution": round(raw_value, 10),
+            "signed_contribution": round(raw_value, 10),
+            "contribution": round(max(0.0, flow), 12),
+            "negative_contribution": 0.0,
+            "relevance": round(max(0.0, flow), 12),
+        }
+
+    @staticmethod
+    def _closed_background_edge(
+        dst_stage: int,
+        dst_position: int,
+        flow: float,
+        model_layer: int,
+        reason: str,
+    ) -> dict:
+        return {
+            "src": f"background::{reason}:s{dst_stage}:t{dst_position}",
+            "dst": f"s{dst_stage}:t{dst_position}",
+            "src_layer": 0,
+            "dst_layer": dst_stage,
+            "src_position": -1,
+            "dst_position": dst_position,
+            "model_layer": model_layer,
+            "kind": f"background_{reason}",
+            "weight": 0.0,
+            "raw_signed_contribution": 0.0,
+            "signed_contribution": 0.0,
+            "contribution": round(max(0.0, flow), 12),
+            "negative_contribution": 0.0,
+            "relevance": round(max(0.0, flow), 12),
+        }
+
+    @staticmethod
+    def _absorbing_flow_subgraph(
+        edges: list[dict],
+        closed_diagnostics: dict,
+    ) -> tuple[list[dict], dict]:
+        """Drop synthetic background routes and record their mass as absorbed."""
+
+        retained = [
+            edge
+            for edge in edges
+            if not str(edge.get("src", "")).startswith("background::")
+        ]
+        removed = [
+            edge
+            for edge in edges
+            if str(edge.get("src", "")).startswith("background::")
+        ]
+        absorbed_mass = sum(
+            float(edge.get("contribution", 0.0)) for edge in removed
+        )
+        return retained, {
+            **closed_diagnostics,
+            "proposal_background_flow": closed_diagnostics.get(
+                "background_flow",
+                absorbed_mass,
+            ),
+            "absorbed_background_mass": absorbed_mass,
+            "removed_background_edges": len(removed),
+            "retained_flow_edges": len(retained),
+            "retained_background_flow": 0.0,
+        }
+
+    @staticmethod
+    def _closed_flow_diagnostics(
+        edges: list[dict],
+        token_meta: list[dict],
+    ) -> dict:
+        incoming: dict[str, float] = defaultdict(float)
+        outgoing: dict[str, float] = defaultdict(float)
+        source_positions: dict[str, int] = {}
+        for edge in edges:
+            flow = float(edge.get("contribution", 0.0))
+            if flow <= 0:
+                continue
+            src = str(edge["src"])
+            dst = str(edge["dst"])
+            outgoing[src] += flow
+            incoming[dst] += flow
+            source_positions[src] = int(edge.get("src_position", -1))
+        internal = set(incoming) & set(outgoing)
+        source_nodes = set(outgoing) - set(incoming)
+        source_total = sum(outgoing[node] for node in source_nodes)
+        background_flow = sum(
+            outgoing[node] for node in source_nodes if node.startswith("background::")
+        )
+        region_flow: dict[str, float] = defaultdict(float)
+        for node in source_nodes:
+            if node.startswith("background::"):
+                continue
+            position = source_positions.get(node, -1)
+            region = (
+                str(token_meta[position]["region"])
+                if 0 <= position < len(token_meta)
+                else "unknown"
+            )
+            region_flow[region] += outgoing[node]
+        return {
+            "sink_inflow": incoming.get("answer_target", 0.0),
+            "source_total_flow": source_total,
+            "background_flow": background_flow,
+            "model_input_flow": source_total - background_flow,
+            "input_region_flow": {
+                key: round(value, 12) for key, value in sorted(region_flow.items())
+            },
+            "maximum_internal_conservation_error": max(
+                (abs(incoming[node] - outgoing[node]) for node in internal),
+                default=0.0,
+            ),
+            "source_nodes": len(source_nodes),
+            "internal_nodes": len(internal),
+        }
+
+    def _closed_context_support(
+        self,
+        embeddings: Any,
+        token_meta: list[dict],
+        edges: list[dict],
+    ) -> tuple[list[dict], dict[str, int]]:
+        if embeddings.grad is None:
+            raise RuntimeError("input embedding gradients were not retained")
+        embedding_signed = (
+            embeddings.grad[0].detach().float() * embeddings[0].detach().float()
+        ).sum(dim=-1)
+        input_flow: dict[int, float] = defaultdict(float)
+        for edge in edges:
+            position = int(edge.get("src_position", -1))
+            if int(edge.get("src_layer", -1)) == 0 and position >= 0:
+                input_flow[position] += float(edge.get("contribution", 0.0))
+        context_tokens = []
+        chunk_token_counts: dict[str, int] = {}
+        for item, embedding_value in zip(token_meta, embedding_signed.tolist()):
+            if item["region"] != "context":
+                continue
+            position = int(item["position"])
+            flow = input_flow.get(position, 0.0)
+            chunk_id = str(item["chunk_id"])
+            chunk_token_counts[chunk_id] = chunk_token_counts.get(chunk_id, 0) + 1
+            context_tokens.append({
+                **item,
+                "support": round(flow, 12),
+                "signed_support": round(flow, 12),
+                "negative_support": 0.0,
+                "relevance": round(flow, 12),
+                "embedding_support": round(max(0.0, float(embedding_value)), 10),
+                "signed_embedding_support": round(float(embedding_value), 10),
+            })
+        context_tokens.sort(key=lambda item: (-float(item["support"]), item["position"]))
+        return context_tokens, chunk_token_counts
 
     def _direct_context_support(
         self,
@@ -894,13 +1352,28 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
     ) -> list[dict]:
         sink_stage = 2 * layer_count + 1
         used = set()
+        background_nodes: dict[str, dict] = {}
         has_sink = False
         for edge in edges:
-            used.add((int(edge["src_layer"]), int(edge["src_position"])))
+            src_position = int(edge["src_position"])
+            if src_position >= 0:
+                used.add((int(edge["src_layer"]), src_position))
+            else:
+                background_nodes[str(edge["src"])] = {
+                    "node_id": str(edge["src"]),
+                    "stage": int(edge["src_layer"]),
+                    "stage_name": "background",
+                    "model_layer": int(edge.get("model_layer", -1)),
+                    "position": -1,
+                    "region": "background",
+                    "text": "<background>",
+                }
             if edge["dst"] == "answer_target":
                 has_sink = True
             else:
-                used.add((int(edge["dst_layer"]), int(edge["dst_position"])))
+                dst_position = int(edge["dst_position"])
+                if dst_position >= 0:
+                    used.add((int(edge["dst_layer"]), dst_position))
         nodes = []
         for stage, position in sorted(used):
             if stage % 2 == 0:
@@ -916,6 +1389,7 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 "model_layer": model_layer,
                 **token_meta[position],
             })
+        nodes.extend(background_nodes[node] for node in sorted(background_nodes))
         if has_sink:
             nodes.append({
                 "node_id": "answer_target",

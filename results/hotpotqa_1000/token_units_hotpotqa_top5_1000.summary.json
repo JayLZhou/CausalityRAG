@@ -1,0 +1,11 @@
+{
+  "queries": 1000,
+  "top_k": 5,
+  "spacy_model": "en_core_web_lg",
+  "backend": "local-process",
+  "units": 427132,
+  "mean_units": 427.132,
+  "total_worker_seconds": 155.56188499999993,
+  "mean_seconds": 0.15556188499999998,
+  "workers": 16
+}
