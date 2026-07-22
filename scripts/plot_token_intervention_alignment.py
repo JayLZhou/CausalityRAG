@@ -52,14 +52,23 @@ def main() -> None:
     attention = np.asarray([row["attention_score"] for row in rows])
     reflow = np.asarray([row["reflow_score"] for row in rows])
     effect = np.asarray([row["intervention_effect"] for row in rows])
+    metrics = payload["metrics"]
+    top_key = next(
+        key for key in metrics
+        if key.startswith("attention_top_") and key.endswith("_overlap")
+    )
+    reflow_top_key = top_key.replace("attention", "reflow")
+    k = int(top_key.split("_")[2])
+    true_top = top_indices(effect, k)
 
     shown = sorted(
         top_indices(attention, args.display_top)
         | top_indices(reflow, args.display_top)
         | top_indices(effect, args.display_top),
         key=lambda index: (
-            int(rows[index]["chunk_rank"]),
-            int(rows[index]["chunk_char_start"]),
+            index not in true_top,
+            -float(effect[index]),
+            -float(reflow[index]),
         ),
     )
     values = np.vstack((
@@ -85,7 +94,7 @@ def main() -> None:
         "ps.fonttype": 42,
     })
 
-    figure, axis = plt.subplots(figsize=(7.15, 2.55))
+    figure, axis = plt.subplots(figsize=(7.15, 2.70))
     image = axis.imshow(
         values,
         aspect="auto",
@@ -96,15 +105,49 @@ def main() -> None:
     )
     axis.set_yticks(
         [0, 1, 2],
-        ["Raw attention", "ReFlow contribution", "Executed replacement effect"],
+        [
+            (
+                f"Raw attention\n"
+                f"{100 * metrics[top_key]:.0f}% hits; "
+                f"$\\Sigma D$={metrics[f'attention_top_{k}_effect']:.2f}"
+            ),
+            (
+                f"ReFlow contribution\n"
+                f"{100 * metrics[reflow_top_key]:.0f}% hits; "
+                f"$\\Sigma D$={metrics[f'reflow_top_{k}_effect']:.2f}"
+            ),
+            "Executed effect $D_i$",
+        ],
     )
-    axis.set_xticks(range(len(labels)), labels, rotation=48, ha="right")
+    axis.set_xticks(range(len(labels)), labels, rotation=43, ha="right")
     axis.tick_params(length=0, pad=2)
+    axis.axvspan(-0.5, k - 0.5, color="#148F77", alpha=0.055)
+    axis.axvline(k - 0.5, color="#148F77", linewidth=1.1, linestyle="--")
+    axis.text(
+        (k - 1) / 2,
+        1.035,
+        "Empirical Top-5 by executed effect",
+        transform=axis.get_xaxis_transform(),
+        ha="center",
+        va="bottom",
+        color="#087A67",
+        fontsize=7.2,
+        fontweight="bold",
+    )
+    axis.text(
+        len(labels) - 0.5,
+        1.035,
+        r"$\circ$ = method's Top-5",
+        transform=axis.get_xaxis_transform(),
+        ha="right",
+        va="bottom",
+        color="#475467",
+        fontsize=7.0,
+    )
 
     selected_sets = [
         top_indices(attention, args.display_top),
         top_indices(reflow, args.display_top),
-        top_indices(effect, args.display_top),
     ]
     for row_index, selected in enumerate(selected_sets):
         for column_index, token_index in enumerate(shown):
@@ -119,30 +162,41 @@ def main() -> None:
                     linewidths=0.7,
                 )
 
-    metrics = payload["metrics"]
-    top_key = next(
-        key for key in metrics
-        if key.startswith("attention_top_") and key.endswith("_overlap")
-    )
-    reflow_top_key = top_key.replace("attention", "reflow")
-    k = top_key.split("_")[2]
+    normalized_effect = max_normalize(effect)
+    for column_index, token_index in enumerate(shown):
+        axis.text(
+            column_index,
+            2,
+            f"{effect[token_index]:.2f}",
+            ha="center",
+            va="center",
+            color="white" if normalized_effect[token_index] >= 0.52 else "#263238",
+            fontsize=6.7,
+            fontweight="bold",
+        )
+
     attention_ndcg = metrics.get(
-        f"attention_ndcg_at_{k}", ndcg(attention, effect, int(k))
+        f"attention_ndcg_at_{k}", ndcg(attention, effect, k)
     )
     reflow_ndcg = metrics.get(
-        f"reflow_ndcg_at_{k}", ndcg(reflow, effect, int(k))
+        f"reflow_ndcg_at_{k}", ndcg(reflow, effect, k)
+    )
+    effect_ratio = (
+        metrics[f"reflow_top_{k}_effect"]
+        / metrics[f"attention_top_{k}_effect"]
     )
     axis.set_title(
         (
             rf"Clean answer: {payload['target_answer']}  |  {payload['candidate_tokens']} legal replacements"
             "\n"
-            rf"Top-{k} alignment with executed effect: "
-            rf"Attention Top-{k}={100*metrics[top_key]:.0f}\%, NDCG@{k}={attention_ndcg:.2f}; "
-            rf"ReFlow Top-{k}={100*metrics[reflow_top_key]:.0f}\%, NDCG@{k}={reflow_ndcg:.2f}"
+            rf"ReFlow doubles Top-{k} recovery "
+            rf"({100*metrics[reflow_top_key]:.0f}\% vs. {100*metrics[top_key]:.0f}\%) "
+            rf"and yields {effect_ratio:.1f}$\times$ cumulative executed effect "
+            rf"(NDCG@{k}: {reflow_ndcg:.2f} vs. {attention_ndcg:.2f})"
         ),
         loc="left",
         fontweight="bold",
-        pad=10,
+        pad=24,
     )
     colorbar = figure.colorbar(image, ax=axis, fraction=0.018, pad=0.015)
     colorbar.set_label("Relative score", labelpad=3)
@@ -151,7 +205,7 @@ def main() -> None:
     for spine in axis.spines.values():
         spine.set_linewidth(0.6)
 
-    figure.subplots_adjust(left=0.185, right=0.965, top=0.70, bottom=0.32)
+    figure.subplots_adjust(left=0.215, right=0.965, top=0.62, bottom=0.32)
     Path(args.out_pdf).parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(args.out_pdf, bbox_inches="tight", pad_inches=0.025)
     figure.savefig(args.out_png, dpi=300, bbox_inches="tight", pad_inches=0.025)
