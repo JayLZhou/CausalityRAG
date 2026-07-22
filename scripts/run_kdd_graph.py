@@ -38,14 +38,6 @@ def main() -> None:
     parser.add_argument("--closed-flow", action="store_true")
     parser.add_argument("--absorbing-flow", action="store_true")
     parser.add_argument(
-        "--export-dense-context-graph",
-        action="store_true",
-        help=(
-            "export every unpruned context-to-context and context-to-answer "
-            "contribution pair"
-        ),
-    )
-    parser.add_argument(
         "--graph-method",
         choices=["direct-activation", "native-mlp", "attention-rollout"],
         default="direct-activation",
@@ -57,8 +49,6 @@ def main() -> None:
         parser.error("--absorbing-flow requires --graph-method direct-activation")
     if args.closed_flow and args.absorbing_flow:
         parser.error("--closed-flow and --absorbing-flow are mutually exclusive")
-    if args.export_dense_context_graph and args.graph_method != "direct-activation":
-        parser.error("--export-dense-context-graph requires --graph-method direct-activation")
 
     records = list(iter_records(args.input, args.n))
     reader = ReaderClient() if args.target == "reader" else None
@@ -97,7 +87,6 @@ def main() -> None:
         max_edges=args.max_edges,
         closed_flow=args.closed_flow,
         absorbing_flow=args.absorbing_flow,
-        export_dense_context_graph=args.export_dense_context_graph,
     )
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     rows = []

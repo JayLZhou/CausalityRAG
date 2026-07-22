@@ -45,7 +45,6 @@ class AttentionAttributionGraphBuilder:
         residual_mix: float = 0.5,
         closed_flow: bool = False,
         absorbing_flow: bool = False,
-        export_dense_context_graph: bool = False,
     ) -> None:
         import torch
         from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
@@ -60,7 +59,6 @@ class AttentionAttributionGraphBuilder:
         self.residual_mix = residual_mix
         self.closed_flow = closed_flow
         self.absorbing_flow = absorbing_flow
-        self.export_dense_context_graph = export_dense_context_graph
         if self.closed_flow and self.absorbing_flow:
             raise ValueError("closed_flow and absorbing_flow are mutually exclusive")
 
@@ -617,7 +615,6 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
         if not target_positions:
             return self._empty(record, target_answer, "answer_tokens_truncated", len(token_meta))
 
-        dense_context_graph = None
         trace = self._install_trace_hooks()
         try:
             with torch.enable_grad():
@@ -631,14 +628,6 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 ]
                 target_logit_tensor = torch.stack(target_logits).mean()
                 target_logit_tensor.backward()
-
-            if self.export_dense_context_graph:
-                dense_context_graph = self._dense_context_graph(
-                    output.attentions,
-                    trace,
-                    token_meta,
-                    target_positions,
-                )
 
             if self.closed_flow or self.absorbing_flow:
                 edges, flow_diagnostics = self._closed_flow_edges(
@@ -766,144 +755,7 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 ),
                 "flow_diagnostics": flow_diagnostics,
                 "uses_transcoder": False,
-                **(
-                    {"dense_context_graph": dense_context_graph}
-                    if dense_context_graph is not None
-                    else {}
-                ),
             },
-        }
-
-    def _dense_context_graph(
-        self,
-        attentions: tuple[Any, ...],
-        trace: _NativeTrace,
-        token_meta: list[dict],
-        target_positions: list[int],
-    ) -> dict:
-        """Export every context-to-context/answer pair before graph pruning."""
-
-        torch = self.torch
-        context_positions = [
-            int(item["position"])
-            for item in token_meta
-            if item["region"] == "context"
-        ]
-        receiver_specs = [
-            (position, "context", None) for position in context_positions
-        ] + [
-            (position - 1, "answer", position) for position in target_positions
-        ]
-        receiver_positions = [position for position, _, _ in receiver_specs]
-        shape = (len(receiver_positions), len(context_positions))
-        positive_total = torch.zeros(shape, dtype=torch.float32, device=self.device)
-        negative_total = torch.zeros_like(positive_total)
-        signed_total = torch.zeros_like(positive_total)
-        positive_layers = torch.zeros(shape, dtype=torch.int16, device=self.device)
-        negative_layers = torch.zeros_like(positive_layers)
-
-        with torch.no_grad():
-            for layer_index, attention in enumerate(attentions):
-                layer = self.model.model.layers[layer_index]
-                module = layer.self_attn
-                attention_weights = attention[0].detach().float()
-                n_heads = attention_weights.shape[0]
-                head_dim = module.head_dim
-                n_kv_heads = n_heads // module.num_key_value_groups
-
-                values = module.v_proj(
-                    trace.attn_inputs[layer_index][0].detach()
-                ).view(-1, n_kv_heads, head_dim).float()
-                if n_kv_heads != n_heads:
-                    values = values.repeat_interleave(
-                        n_heads // n_kv_heads,
-                        dim=1,
-                    )
-                context_values = values[context_positions]
-
-                output_gradients = torch.matmul(
-                    trace.attn_outputs[layer_index].grad[0]
-                    .detach()
-                    .float()[receiver_positions],
-                    module.o_proj.weight.detach().float(),
-                ).view(-1, n_heads, head_dim)
-                dot_products = torch.einsum(
-                    "rhd,shd->hrs",
-                    output_gradients,
-                    context_values,
-                )
-                selected_attention = attention_weights[:, receiver_positions, :][
-                    :, :, context_positions
-                ]
-                contribution = (dot_products * selected_attention).sum(dim=0)
-                positive_total += contribution.clamp_min(0)
-                negative_total += (-contribution).clamp_min(0)
-                signed_total += contribution
-                positive_layers += contribution.gt(0).to(positive_layers.dtype)
-                negative_layers += contribution.lt(0).to(negative_layers.dtype)
-
-        positive_cpu = positive_total.cpu()
-        negative_cpu = negative_total.cpu()
-        signed_cpu = signed_total.cpu()
-        positive_layers_cpu = positive_layers.cpu()
-        negative_layers_cpu = negative_layers.cpu()
-        edges = []
-        valid_pairs = 0
-        positive_edges = 0
-        negative_edges = 0
-        for receiver_index, (receiver, dst_region, answer_position) in enumerate(
-            receiver_specs
-        ):
-            for source_index, source in enumerate(context_positions):
-                if source > receiver:
-                    continue
-                valid_pairs += 1
-                positive = float(positive_cpu[receiver_index, source_index])
-                negative = float(negative_cpu[receiver_index, source_index])
-                signed = float(signed_cpu[receiver_index, source_index])
-                if positive > 0:
-                    positive_edges += 1
-                if negative > 0:
-                    negative_edges += 1
-                edges.append({
-                    "src_position": source,
-                    "dst_position": receiver,
-                    "src_region": "context",
-                    "dst_region": dst_region,
-                    "answer_position": answer_position,
-                    "positive_contribution": round(positive, 12),
-                    "negative_contribution": round(negative, 12),
-                    "signed_contribution": round(signed, 12),
-                    "positive_layers": int(
-                        positive_layers_cpu[receiver_index, source_index]
-                    ),
-                    "negative_layers": int(
-                        negative_layers_cpu[receiver_index, source_index]
-                    ),
-                })
-
-        return {
-            "pruned": False,
-            "source_scope": "all context model-token positions",
-            "destination_scope": (
-                "all context model-token positions and all answer predictor positions"
-            ),
-            "weight_semantics": (
-                "sum across all layers of target-logit-gradient dot attention OV write"
-            ),
-            "layers": len(attentions),
-            "context_positions": context_positions,
-            "answer_predictors": [
-                {
-                    "predictor_position": position - 1,
-                    "answer_position": position,
-                }
-                for position in target_positions
-            ],
-            "valid_causal_pairs": valid_pairs,
-            "positive_edges": positive_edges,
-            "negative_edges": negative_edges,
-            "edges": edges,
         }
 
     def _closed_flow_edges(
