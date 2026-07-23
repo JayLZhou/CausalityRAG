@@ -12,11 +12,7 @@ from itertools import islice
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.attribution_graph import (
-    AttentionAttributionGraphBuilder,
-    DirectActivationAttributionGraphBuilder,
-    NativeMLPAttributionGraphBuilder,
-)
+from causalityrag.attribution_graph import DirectActivationAttributionGraphBuilder
 from causalityrag.io import iter_records, record_id
 from causalityrag.reader import (
     answers_exact_match,
@@ -51,18 +47,9 @@ def main() -> None:
     parser.add_argument("--top-tokens", type=int, default=50)
     parser.add_argument("--closed-flow", action="store_true")
     parser.add_argument("--absorbing-flow", action="store_true")
-    parser.add_argument(
-        "--graph-method",
-        choices=["direct-activation", "native-mlp", "attention-rollout"],
-        default="direct-activation",
-    )
     args = parser.parse_args()
     if args.start < 0 or args.n <= 0 or args.k <= 0:
         parser.error("--start must be non-negative; --n and --k must be positive")
-    if args.closed_flow and args.graph_method != "direct-activation":
-        parser.error("--closed-flow requires --graph-method direct-activation")
-    if args.absorbing_flow and args.graph_method != "direct-activation":
-        parser.error("--absorbing-flow requires --graph-method direct-activation")
     if args.closed_flow and args.absorbing_flow:
         parser.error("--closed-flow and --absorbing-flow are mutually exclusive")
 
@@ -91,12 +78,7 @@ def main() -> None:
             for record in records
         ]
 
-    builder_cls = {
-        "direct-activation": DirectActivationAttributionGraphBuilder,
-        "native-mlp": NativeMLPAttributionGraphBuilder,
-        "attention-rollout": AttentionAttributionGraphBuilder,
-    }[args.graph_method]
-    builder = builder_cls(
+    builder = DirectActivationAttributionGraphBuilder(
         args.model_path,
         device=args.device,
         dtype=args.dtype,

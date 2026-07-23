@@ -375,7 +375,6 @@ python scripts/build_contribution_graph.py \
   --edge-topk 6 \
   --max-receivers-per-layer 48 \
   --max-edges 5000 \
-  --graph-method direct-activation \
   --absorbing-flow \
   --n "$N" \
   --k "$K"
