@@ -20,6 +20,8 @@ READ_USER = """Passages:
 {passages}
 
 Question: {question}
+The answer string MUST NOT be empty. If the passages do not support an answer,
+use the literal answer "unknown".
 Return STRICT JSON: {{"answer": "..."}}"""
 
 

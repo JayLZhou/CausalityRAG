@@ -355,8 +355,9 @@ python scripts/generate_reader_targets.py \
 
 This JSONL is the only clean-answer source used downstream. It is generated
 once, saved in input order, and reused as the graph target and flip baseline.
-The shared reader prompt requires a non-empty passage-supported span, and this
-stage fails instead of freezing any empty graph target.
+The shared reader prompt requires a non-empty passage-supported span and uses
+the literal `unknown` when evidence is insufficient. This stage still fails
+instead of freezing any empty graph target.
 
 ### 3. Build the direct-activation absorbing contribution graph
 
