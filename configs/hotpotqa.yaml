@@ -37,7 +37,7 @@ optimization:
   projection: layer-copy-token
   capacity_mode: raw
   solver: geometric-k-guessing
-  beta: 0.25
+  beta: 0.1
   eta: 1.0
   gamma: 1.0
   max_k_guess: 0  # zero means all editable tokens
@@ -52,7 +52,7 @@ replacement:
   entity_policy: same_type_same_length_same_slot
 
 evaluation:
-  native_remaining_flow_threshold: 0.5
+  native_remaining_flow_threshold: 0.2
   clean_correct_policy: exact
   final_backend: local_hf_eager
 

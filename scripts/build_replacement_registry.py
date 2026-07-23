@@ -293,11 +293,13 @@ def build_registry_row(
 
 
 def registry_candidate_ids(gate: dict) -> set[str]:
-    """Collect IDs needed by the native relaxed-threshold candidate."""
+    """Collect IDs needed by the strict witness and native candidate."""
 
     candidate_ids: set[str] = set()
-    candidate = gate.get("bicriteria_candidate")
-    if candidate:
+    for key in ("strict_candidate", "bicriteria_candidate"):
+        candidate = gate.get(key)
+        if not candidate:
+            continue
         candidate_ids.update(
             str(unit_id) for unit_id in candidate.get("selected_ids", [])
         )

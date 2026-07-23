@@ -3,6 +3,11 @@ from scripts.build_replacement_registry import registry_candidate_ids
 
 def test_registry_includes_native_size_matched_unary_tokens() -> None:
     gate = {
+        "strict_candidate": {
+            "n_selected": 2,
+            "selected_ids": ["flow-strict"],
+            "unary_matched_ids": ["unary-strict"],
+        },
         "bicriteria_candidate": {
             "n_selected": 7,
             "selected_ids": ["flow-native"],
@@ -12,6 +17,8 @@ def test_registry_includes_native_size_matched_unary_tokens() -> None:
 
     candidate_ids = registry_candidate_ids(gate)
 
+    assert "flow-strict" in candidate_ids
+    assert "unary-strict" in candidate_ids
     assert "flow-native" in candidate_ids
     assert "unary-native-6" in candidate_ids
     assert "unary-native-7" in candidate_ids

@@ -60,7 +60,7 @@ def main() -> None:
         default="geometric-k-guessing",
     )
     parser.add_argument("--lambda-value", type=float, default=1.0)
-    parser.add_argument("--beta", type=float, default=0.25)
+    parser.add_argument("--beta", type=float, default=0.1)
     parser.add_argument("--binary-iterations", type=int, default=32)
     parser.add_argument("--eta", type=float, default=1.0)
     parser.add_argument("--gamma", type=float, default=1.0)
@@ -309,11 +309,15 @@ def main() -> None:
                         for unit_id in candidate["unary_matched_ids"]
                     ],
                 })
-            native_candidate = sweep.get("bicriteria_candidate") or {}
             evaluated_registry_ids = {
                 str(unit_id)
+                for candidate in (
+                    sweep.get("strict_candidate"),
+                    sweep.get("bicriteria_candidate"),
+                )
+                if candidate
                 for key in ("selected_ids", "unary_matched_ids")
-                for unit_id in native_candidate.get(key, [])
+                for unit_id in candidate.get(key, [])
             }
             registry_candidate_misses = sorted(
                 evaluated_registry_ids - known_registry_ids

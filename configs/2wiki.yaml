@@ -1,20 +1,18 @@
-# Copy this file once per evaluation dataset. The command-line scripts use
-# explicit flags; this file is a reproducibility checklist for the frozen run.
+# Reference configuration for the 2WikiMultiHopQA contribution-flow pipeline.
 
-experiment: dataset_name_contribution_flow_final
+experiment: 2wiki_contribution_flow_final
 seed: 20260711
 
 data:
-  name: dataset_name
-  input: /path/to/retrieval_records.jsonl
+  input: /data1/yujia/RAGData/2wiki-exp/results/retrieval_2wiki_top5_smoke10.jsonl
   start: 0
-  count: 1000
+  count: 10
   retrieved_chunks: 5
 
 reader:
   model_path: /data1/yujia/models/Qwen2.5-7B-Instruct
   served_model: qwen2.5-7b
-  base_url: http://127.0.0.1:8000/v1
+  base_url: http://127.0.0.1:8002/v1
   attention_implementation: eager
   dtype: bfloat16
   decoding: greedy
@@ -43,8 +41,8 @@ optimization:
   max_k_guess: 0
 
 replacement:
-  counterfactual_pools: /path/to/counterfactual_pools.json
-  type_rules: /path/to/type_rules.yaml
+  counterfactual_pools: /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/cf_pools.json
+  type_rules: /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/type_rules_llm.yaml
   mode: fixed_point_shared_registry
   deletion_allowed: false
   require_single_token: true
@@ -60,13 +58,13 @@ evaluation:
 
 artifacts:
   root: /data1/yujia/CausalityRAG/runs
-  run_id: final-v1
-  directory: /data1/yujia/CausalityRAG/runs/dataset_name/final-v1
+  run_id: smoke10-rf020
+  directory: /data1/yujia/CausalityRAG/runs/2wiki/smoke10-rf020
   context_units: 01_context/context_units.jsonl
   contribution_graph: 02_graph/contribution_graph.jsonl
   contribution_flow_initial: 03_flow/initial.jsonl
   contribution_flow_final: 03_flow/final.jsonl
   replacement_registry: 04_registry/final.jsonl
-  evaluation_directory: 05_evaluation
+  evaluation: 05_evaluation/native.jsonl
   hf_verification: 06_verification/local_hf.jsonl
   manifest: manifest.json

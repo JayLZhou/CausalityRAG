@@ -253,11 +253,11 @@ export CF_POOLS=/path/to/counterfactual_pools.json
 export TYPE_RULES=/path/to/type_rules.yaml  # optional
 export N=1000  # replace with the number of records selected for this dataset
 export K=5
-export BETA=0.25
+export BETA=0.1
 export ETA=1.0
 export GAMMA=1.0
 export MAX_K_GUESS=0
-export RELAXED_FLOW_THRESHOLD=0.5
+export RELAXED_FLOW_THRESHOLD=0.2
 
 export RUN_DIR="${RUN_ROOT}/${DATASET}/${RUN_ID}"
 export CONTEXT_DIR="${RUN_DIR}/01_context"
@@ -371,8 +371,8 @@ replacement per candidate and marks invalid tokens uncuttable.
 
 For each query, `build_replacement_registry.py` performs the following steps:
 
-1. Collect every token ID in the native relaxed-threshold candidate and its
-   size-matched graph diagnostic.
+1. Collect every token ID in the strict-threshold witness, the native
+   relaxed-threshold candidate, and their size-matched graph diagnostics.
 2. Reuse entries from the previous registry iteration; an existing valid or
    invalid decision is never regenerated.
 3. Try a deterministic typed replacement first: same-slot entity pool,
@@ -499,9 +499,9 @@ path while preserving all numbered closure iterations.
 
 ### 5. Evaluate saved selections with the served reader
 
-Run only the native graph-threshold evaluation. With `BETA=0.25` and `ETA=1`,
+Run only the native graph-threshold evaluation. With `BETA=0.1` and `ETA=1`,
 the solver accepts candidates up to the relaxed residual-flow fraction
-`(1 + ETA) * BETA = 0.50`:
+`(1 + ETA) * BETA = 0.20`:
 
 ```bash
 python scripts/evaluate_reader.py \

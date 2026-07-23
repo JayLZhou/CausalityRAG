@@ -47,7 +47,7 @@ def main() -> None:
         dest="context_units",
         default="",
     )
-    parser.add_argument("--remaining-flow-threshold", type=float, default=0.9)
+    parser.add_argument("--remaining-flow-threshold", type=float, default=0.2)
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--include-clean-incorrect", action="store_true")
     parser.add_argument(
