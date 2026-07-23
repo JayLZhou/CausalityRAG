@@ -71,6 +71,17 @@ def main() -> None:
                 flush=True,
             )
 
+    empty_answers = [
+        identifiers[index]
+        for index, answer in enumerate(answers)
+        if not answer.strip()
+    ]
+    if empty_answers:
+        raise RuntimeError(
+            "vLLM returned empty clean answers; refusing to freeze unusable "
+            f"targets: {empty_answers[:10]}"
+        )
+
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     rows = []
     with open(args.out, "w", encoding="utf-8") as output:
