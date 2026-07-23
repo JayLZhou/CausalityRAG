@@ -27,7 +27,7 @@ from causalityrag.mixed_cut import (
 )
 from causalityrag.token_units import (
     context_sentence_units,
-    units_from_cache_row,
+    units_from_context_row,
 )
 
 
@@ -71,7 +71,12 @@ def main() -> None:
         help="largest cardinality scale; zero uses every editable token",
     )
     parser.add_argument("--max-copies-per-unit", type=int, default=0)
-    parser.add_argument("--units-cache", default="")
+    parser.add_argument(
+        "--context-units",
+        "--units-cache",
+        dest="context_units",
+        default="",
+    )
     parser.add_argument("--replacement-registry", default="")
     parser.add_argument(
         "--replacement-registry-policy",
@@ -155,9 +160,9 @@ def main() -> None:
     units_by_id = (
         {
             str(row.get("id")): row
-            for row in load_records(args.units_cache)
+            for row in load_records(args.context_units)
         }
-        if args.units_cache
+        if args.context_units
         else {}
     )
     nlp = None if units_by_id else SpacyAnnotationClient(args.spacy_base_url)
@@ -180,10 +185,12 @@ def main() -> None:
                     f"input={identifier} graph={graph_row.get('id')}"
                 )
             if units_by_id:
-                cached_units = units_by_id.get(identifier)
-                if cached_units is None:
-                    raise ValueError(f"missing token-units cache row for {identifier}")
-                units = units_from_cache_row(record, cached_units, k=args.k)
+                context_row = units_by_id.get(identifier)
+                if context_row is None:
+                    raise ValueError(
+                        f"missing context-units row for {identifier}"
+                    )
+                units = units_from_context_row(record, context_row, k=args.k)
             else:
                 units, _ = context_sentence_units(record, k=args.k, nlp=nlp)
             by_id = {str(unit["unit_id"]): unit for unit in units}
@@ -339,7 +346,7 @@ def main() -> None:
                     if args.solver == "fixed-lambda"
                     else None
                 ),
-                "units_cache": args.units_cache,
+                "context_units": args.context_units,
                 "replacement_registry": args.replacement_registry,
                 "replacement_registry_policy": args.replacement_registry_policy,
                 "registry_candidate_misses": registry_candidate_misses,

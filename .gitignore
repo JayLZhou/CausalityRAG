@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .venv*/
 out/
+runs/
 logs/
 tmp/
 .DS_Store

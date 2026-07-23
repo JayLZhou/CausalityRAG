@@ -32,7 +32,7 @@ def _annotate_local(item: tuple[int, int, dict, int, str]) -> dict:
     offset, start, record, k, model = item
     if _LOCAL_NLP is None:
         raise RuntimeError("local spaCy worker was not initialized")
-    return build_cache_row(
+    return build_context_row(
         offset=offset,
         start=start,
         record=record,
@@ -42,7 +42,7 @@ def _annotate_local(item: tuple[int, int, dict, int, str]) -> dict:
     )
 
 
-def build_cache_row(
+def build_context_row(
     *,
     offset: int,
     start: int,
@@ -109,7 +109,7 @@ def main() -> None:
 
         def annotate(item: tuple[int, dict]) -> dict:
             offset, record = item
-            return build_cache_row(
+            return build_context_row(
                 offset=offset,
                 start=args.start,
                 record=record,
@@ -146,7 +146,7 @@ def main() -> None:
                 output.flush()
                 if completed <= 10 or completed % 50 == 0:
                     print(
-                        f"[token-units-cache] {completed}/{len(records)} "
+                        f"[context-units] {completed}/{len(records)} "
                         f"units={len(row['units'])} seconds={row['elapsed_seconds']}",
                         flush=True,
                     )
@@ -167,7 +167,7 @@ def main() -> None:
         "workers": args.workers,
     }
     rendered = json.dumps(summary, ensure_ascii=False, indent=2)
-    print("[token-units-cache summary]", rendered)
+    print("[context-units summary]", rendered)
     if args.summary_out:
         with open(args.summary_out, "w", encoding="utf-8") as output:
             output.write(rendered + "\n")

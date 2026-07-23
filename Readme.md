@@ -9,7 +9,7 @@ verifies the selected intervention on the reader:
 
 ```text
 retrieval records
-  -> cached token/linguistic units
+  -> frozen context/linguistic units
   -> direct-activation absorbing contribution DAG
   -> projected token contribution network
   -> geometric weighted min-cuts
@@ -82,7 +82,7 @@ coexist under `configs/`.
 | Stage | Command | Output |
 |---|---|---|
 | Annotation service | `scripts/spacy_annotation_server.py` | localhost API |
-| Token cache | `scripts/build_token_units_cache.py` | token/sentence JSONL |
+| Context units | `scripts/build_context_units.py` | frozen context-unit JSONL |
 | Contribution graph | `scripts/build_contribution_graph.py` | graph JSONL |
 | Flow optimization | `scripts/solve_contribution_flow.py` | candidate JSONL |
 | Replacement registry | `scripts/build_replacement_registry.py` | registry JSONL |
@@ -99,9 +99,9 @@ the optimization network.
 
 | Stage | Required input | Produced artifact | Acceptance check |
 |---|---|---|---|
-| 1. Token cache | retrieval records, spaCy | `token_units.jsonl` | `queries=N`, nonzero units, context hashes stored |
+| 1. Context units | retrieval records, spaCy | `context_units.jsonl` | `queries=N`, nonzero units, context hashes stored |
 | 2. Contribution graph | records, frozen clean reader answer, local model | `contribution_graph.jsonl` | every row is `ok`, method is direct activation, clean answer stored |
-| 3. Graph optimization | graph, token cache | `contribution_flow.initial.jsonl` | projected-token network and geometric solver recorded |
+| 3. Graph optimization | graph, context units | initial flow JSONL | projected-token network and geometric solver recorded |
 | 4. Registry closure | flow candidates, replacement pools | registry plus re-solved flow | zero evaluated registry misses |
 | 5. Reader evaluation | final flow, fixed registry, clean answer | budget and native evaluation JSONL | zero registry misses and replacement failures |
 | 6. Local-HF verification | saved edits, same local model | `hf_verification.jsonl` | clean and edited variants regenerated with eager attention |
@@ -222,19 +222,21 @@ as fallbacks.
 
 Every dataset runs through the same seven stages independently. Normalize each
 source dataset to the input contract above, then assign a unique `DATASET`,
-`DATA`, `N`, `K`, and `RUN_DIR`. Token caches, graphs, registries, evaluations,
-and manifests must never be shared across datasets.
+`DATA`, `N`, `K`, and `RUN_ID`. Context units, graphs, registries, evaluations,
+and manifests must never be shared across datasets or runs.
 
-Recommended directory layout:
+The canonical storage layout is:
 
 ```text
-out/
-  <dataset-a>/
-    smoke10/
-    final/
-  <dataset-b>/
-    smoke10/
-    final/
+runs/<dataset>/<run-id>/
+  run.yaml
+  01_context/
+  02_graph/
+  03_flow/
+  04_registry/
+  05_evaluation/
+  06_verification/
+  manifest.json
 ```
 
 The commands below run the complete pipeline for one dataset. Repeat them for
@@ -242,11 +244,13 @@ each dataset in the evaluation suite:
 
 ```bash
 export DATASET=my_dataset
+export RUN_ID=final-v1
+export RUN_ROOT=/data1/yujia/CausalityRAG/runs
+export CONFIG=configs/my_dataset.yaml
 export DATA=/path/to/retrieval_records.jsonl
 export MODEL=/data1/yujia/models/Qwen2.5-7B-Instruct
 export CF_POOLS=/path/to/counterfactual_pools.json
 export TYPE_RULES=/path/to/type_rules.yaml  # optional
-export RUN_DIR="out/${DATASET}/final"
 export N=1000  # replace with the number of records selected for this dataset
 export K=5
 export BETA=0.25
@@ -256,27 +260,49 @@ export MAX_K_GUESS=0
 export MAX_BUDGET=5
 export MAX_NATIVE_TOKENS=10
 export RELAXED_FLOW_THRESHOLD=0.5
-mkdir -p "$RUN_DIR"
+
+export RUN_DIR="${RUN_ROOT}/${DATASET}/${RUN_ID}"
+export CONTEXT_DIR="${RUN_DIR}/01_context"
+export GRAPH_DIR="${RUN_DIR}/02_graph"
+export FLOW_DIR="${RUN_DIR}/03_flow"
+export REGISTRY_DIR="${RUN_DIR}/04_registry"
+export EVALUATION_DIR="${RUN_DIR}/05_evaluation"
+export VERIFICATION_DIR="${RUN_DIR}/06_verification"
+
+export CONTEXT_UNITS="${CONTEXT_DIR}/context_units.jsonl"
+export GRAPH="${GRAPH_DIR}/contribution_graph.jsonl"
+export FLOW_INITIAL="${FLOW_DIR}/initial.jsonl"
+
+mkdir -p \
+  "$CONTEXT_DIR" \
+  "$GRAPH_DIR" \
+  "$FLOW_DIR" \
+  "$REGISTRY_DIR" \
+  "$EVALUATION_DIR" \
+  "$VERIFICATION_DIR"
+
+cp "$CONFIG" "$RUN_DIR/run.yaml"
 ```
 
 `CF_POOLS` is a JSON object with `type_pool` and optional tab-delimited
 `role_pool` keys. `TYPE_RULES` is optional. If no compatible rule metadata YAML
 is available, leave it empty and remove the `--type-rules "$TYPE_RULES"` line
-from stages 4 and 5.
+from stages 4 and 5. Create `CONFIG` by copying
+`configs/dataset_template.yaml`, then fill in the same frozen values exported
+above.
 
-For each dataset, first use `N=10` and
-`RUN_DIR="out/${DATASET}/smoke10"` on the GPU server. After it passes, restore
-the intended dataset-specific `N`, switch to
-`RUN_DIR="out/${DATASET}/final"`, and start from an empty directory. Never mix
-smoke and final artifacts.
+For each dataset, first use `N=10` and `RUN_ID=smoke10` on the GPU server.
+After it passes, start a new shell, restore the intended dataset-specific `N`,
+set a fresh final run ID such as `RUN_ID=final-v1`, and recreate the derived
+path variables above. Never reuse a smoke directory for a final run.
 
 ### 1. Freeze token and linguistic units
 
 ```bash
-python scripts/build_token_units_cache.py \
+python scripts/build_context_units.py \
   --input "$DATA" \
-  --out "$RUN_DIR/token_units.jsonl" \
-  --summary-out "$RUN_DIR/token_units.summary.json" \
+  --out "$CONTEXT_UNITS" \
+  --summary-out "$CONTEXT_DIR/summary.json" \
   --backend service \
   --workers 16 \
   --n "$N" \
@@ -291,8 +317,8 @@ installed in the current environment.
 ```bash
 python scripts/build_contribution_graph.py \
   --input "$DATA" \
-  --out "$RUN_DIR/contribution_graph.jsonl" \
-  --summary-out "$RUN_DIR/contribution_graph.summary.json" \
+  --out "$GRAPH" \
+  --summary-out "$GRAPH_DIR/summary.json" \
   --model-path "$MODEL" \
   --target reader \
   --device cuda \
@@ -319,10 +345,10 @@ the local model at `MODEL`.
 ```bash
 python scripts/solve_contribution_flow.py \
   --input "$DATA" \
-  --graphs "$RUN_DIR/contribution_graph.jsonl" \
-  --units-cache "$RUN_DIR/token_units.jsonl" \
-  --out "$RUN_DIR/contribution_flow.initial.jsonl" \
-  --summary-out "$RUN_DIR/contribution_flow.initial.summary.json" \
+  --graphs "$GRAPH" \
+  --context-units "$CONTEXT_UNITS" \
+  --out "$FLOW_INITIAL" \
+  --summary-out "$FLOW_DIR/initial.summary.json" \
   --solver geometric-k-guessing \
   --projection layer-copy-token \
   --capacity-mode raw \
@@ -343,17 +369,45 @@ optimum is no larger than that value.
 Selection never sees replacement text. The registry fixes one answer-blind
 replacement per candidate and marks invalid tokens uncuttable.
 
+#### Registry implementation
+
+For each query, `build_replacement_registry.py` performs the following steps:
+
+1. Collect every token ID that may be evaluated under the configured graph
+   candidates, fixed budgets, and native-token limit.
+2. Reuse entries from the previous registry iteration; an existing valid or
+   invalid decision is never regenerated.
+3. Try a deterministic typed replacement first: same-slot entity pool,
+   date/number shift, or relation-cue substitution.
+4. If no typed replacement passes, ask the local editor for one replacement
+   word with temperature zero. The editor receives the target token, its local
+   passage, and linguistic hints, but not the question, clean answer, or gold
+   answer.
+5. Validate exact offsets, non-deletion, one-word surface form, changed value,
+   contextual POS, strict tags for function/verb classes, and relevant
+   `Number`, `Tense`, `VerbForm`, and `Person` morphology.
+6. Store the accepted replacement under `replacements[unit_id]`; otherwise
+   store the failure reason under `invalid[unit_id]`.
+
+The registry is therefore an intervention-feasibility artifact, not an
+optimization score. Re-solving with `exclude-known-invalid` prevents invalid
+tokens from being purchased while keeping their contribution nodes and edges
+in the graph. The closure loop continues until all newly evaluated candidates
+already have a valid or invalid registry entry. The final `allow-only` solve
+then permits only tokens with a frozen valid replacement. Reader evaluation
+loads those exact values and never regenerates them.
+
 Build the first registry:
 
 ```bash
 python scripts/build_replacement_registry.py \
   --input "$DATA" \
-  --gates "$RUN_DIR/contribution_flow.initial.jsonl" \
-  --units-cache "$RUN_DIR/token_units.jsonl" \
+  --gates "$FLOW_INITIAL" \
+  --context-units "$CONTEXT_UNITS" \
   --cf-pools "$CF_POOLS" \
   --type-rules "$TYPE_RULES" \
-  --out "$RUN_DIR/replacement_registry.01.jsonl" \
-  --summary-out "$RUN_DIR/replacement_registry.01.summary.json" \
+  --out "$REGISTRY_DIR/iteration_01.jsonl" \
+  --summary-out "$REGISTRY_DIR/iteration_01.summary.json" \
   --max-budget "$MAX_BUDGET" \
   --max-native-tokens "$MAX_NATIVE_TOKENS" \
   --backend service \
@@ -367,12 +421,12 @@ Re-solve while excluding known-invalid tokens:
 ```bash
 python scripts/solve_contribution_flow.py \
   --input "$DATA" \
-  --graphs "$RUN_DIR/contribution_graph.jsonl" \
-  --units-cache "$RUN_DIR/token_units.jsonl" \
-  --replacement-registry "$RUN_DIR/replacement_registry.01.jsonl" \
+  --graphs "$GRAPH" \
+  --context-units "$CONTEXT_UNITS" \
+  --replacement-registry "$REGISTRY_DIR/iteration_01.jsonl" \
   --replacement-registry-policy exclude-known-invalid \
-  --out "$RUN_DIR/contribution_flow.01.jsonl" \
-  --summary-out "$RUN_DIR/contribution_flow.01.summary.json" \
+  --out "$FLOW_DIR/iteration_01.jsonl" \
+  --summary-out "$FLOW_DIR/iteration_01.summary.json" \
   --solver geometric-k-guessing \
   --projection layer-copy-token \
   --capacity-mode raw \
@@ -390,13 +444,13 @@ with the previous registry and the latest flow output:
 ```bash
 python scripts/build_replacement_registry.py \
   --input "$DATA" \
-  --gates "$RUN_DIR/contribution_flow.01.jsonl" \
-  --existing-registry "$RUN_DIR/replacement_registry.01.jsonl" \
-  --units-cache "$RUN_DIR/token_units.jsonl" \
+  --gates "$FLOW_DIR/iteration_01.jsonl" \
+  --existing-registry "$REGISTRY_DIR/iteration_01.jsonl" \
+  --context-units "$CONTEXT_UNITS" \
   --cf-pools "$CF_POOLS" \
   --type-rules "$TYPE_RULES" \
-  --out "$RUN_DIR/replacement_registry.02.jsonl" \
-  --summary-out "$RUN_DIR/replacement_registry.02.summary.json" \
+  --out "$REGISTRY_DIR/iteration_02.jsonl" \
+  --summary-out "$REGISTRY_DIR/iteration_02.summary.json" \
   --max-budget "$MAX_BUDGET" \
   --max-native-tokens "$MAX_NATIVE_TOKENS" \
   --backend service \
@@ -405,7 +459,7 @@ python scripts/build_replacement_registry.py \
   --k "$K"
 ```
 
-Use `replacement_registry.02.jsonl` in the next solve, increment the suffixes,
+Use `iteration_02.jsonl` in the next solve, increment the suffixes,
 and repeat until the flow summary reports:
 
 ```json
@@ -420,16 +474,18 @@ For the frozen final artifact, run once more with the fixed registry and
 domain explicit and immutable:
 
 ```bash
-export REGISTRY="$RUN_DIR/replacement_registry.02.jsonl"
+export REGISTRY_FIXED_POINT="$REGISTRY_DIR/iteration_02.jsonl"
+cp "$REGISTRY_FIXED_POINT" "$REGISTRY_DIR/final.jsonl"
+export REGISTRY="$REGISTRY_DIR/final.jsonl"
 
 python scripts/solve_contribution_flow.py \
   --input "$DATA" \
-  --graphs "$RUN_DIR/contribution_graph.jsonl" \
-  --units-cache "$RUN_DIR/token_units.jsonl" \
+  --graphs "$GRAPH" \
+  --context-units "$CONTEXT_UNITS" \
   --replacement-registry "$REGISTRY" \
   --replacement-registry-policy allow-only \
-  --out "$RUN_DIR/contribution_flow.FINAL.jsonl" \
-  --summary-out "$RUN_DIR/contribution_flow.FINAL.summary.json" \
+  --out "$FLOW_DIR/final.jsonl" \
+  --summary-out "$FLOW_DIR/final.summary.json" \
   --solver geometric-k-guessing \
   --projection layer-copy-token \
   --capacity-mode raw \
@@ -440,10 +496,12 @@ python scripts/solve_contribution_flow.py \
   --n "$N" \
   --k "$K"
 
-export FLOW="$RUN_DIR/contribution_flow.FINAL.jsonl"
+export FLOW="$FLOW_DIR/final.jsonl"
 ```
 
-Keep `REGISTRY` pointed at whichever numbered registry reached the fixed point.
+Keep `REGISTRY_FIXED_POINT` pointed at whichever numbered registry reached the
+fixed point. The copy to `final.jsonl` gives every dataset the same downstream
+path while preserving all numbered closure iterations.
 
 ### 5. Evaluate saved selections with the served reader
 
@@ -454,13 +512,13 @@ for BUDGET in 1 3 5; do
   python scripts/evaluate_reader.py \
     --input "$DATA" \
     --gate "$FLOW" \
-    --clean-reference "$RUN_DIR/contribution_graph.jsonl" \
+    --clean-reference "$GRAPH" \
     --replacement-registry "$REGISTRY" \
-    --units-cache "$RUN_DIR/token_units.jsonl" \
+    --context-units "$CONTEXT_UNITS" \
     --cf-pools "$CF_POOLS" \
     --type-rules "$TYPE_RULES" \
-    --out "$RUN_DIR/evaluation.b${BUDGET}.jsonl" \
-    --summary-out "$RUN_DIR/evaluation.b${BUDGET}.summary.json" \
+    --out "$EVALUATION_DIR/budget_${BUDGET}.jsonl" \
+    --summary-out "$EVALUATION_DIR/budget_${BUDGET}.summary.json" \
     --selection-mode budget \
     --token-budget "$BUDGET" \
     --max-tokens "$BUDGET" \
@@ -478,13 +536,13 @@ the solver accepts candidates up to the relaxed residual-flow fraction
 python scripts/evaluate_reader.py \
   --input "$DATA" \
   --gate "$FLOW" \
-  --clean-reference "$RUN_DIR/contribution_graph.jsonl" \
+  --clean-reference "$GRAPH" \
   --replacement-registry "$REGISTRY" \
-  --units-cache "$RUN_DIR/token_units.jsonl" \
+  --context-units "$CONTEXT_UNITS" \
   --cf-pools "$CF_POOLS" \
   --type-rules "$TYPE_RULES" \
-  --out "$RUN_DIR/evaluation.native.jsonl" \
-  --summary-out "$RUN_DIR/evaluation.native.summary.json" \
+  --out "$EVALUATION_DIR/native.jsonl" \
+  --summary-out "$EVALUATION_DIR/native.summary.json" \
   --selection-mode threshold \
   --remaining-flow-threshold "$RELAXED_FLOW_THRESHOLD" \
   --max-tokens "$MAX_NATIVE_TOKENS" \
@@ -508,12 +566,12 @@ for scoring:
 python scripts/verify_hf_results.py \
   --input "$DATA" \
   --results \
-    "$RUN_DIR/evaluation.b1.jsonl" \
-    "$RUN_DIR/evaluation.b3.jsonl" \
-    "$RUN_DIR/evaluation.b5.jsonl" \
-    "$RUN_DIR/evaluation.native.jsonl" \
-  --out "$RUN_DIR/hf_verification.jsonl" \
-  --summary-out "$RUN_DIR/hf_verification.summary.json" \
+    "$EVALUATION_DIR/budget_1.jsonl" \
+    "$EVALUATION_DIR/budget_3.jsonl" \
+    "$EVALUATION_DIR/budget_5.jsonl" \
+    "$EVALUATION_DIR/native.jsonl" \
+  --out "$VERIFICATION_DIR/local_hf.jsonl" \
+  --summary-out "$VERIFICATION_DIR/local_hf.summary.json" \
   --model-path "$MODEL" \
   --device cuda \
   --dtype bfloat16 \
@@ -530,12 +588,12 @@ Use `--clean-targets` only when a separate JSONL explicitly freezes
 python scripts/build_artifact_manifest.py \
   --repository . \
   --artifacts \
-    "$RUN_DIR/token_units.jsonl" \
-    "$RUN_DIR/contribution_graph.jsonl" \
+    "$CONTEXT_UNITS" \
+    "$GRAPH" \
     "$FLOW" \
     "$REGISTRY" \
-    "$RUN_DIR/hf_verification.jsonl" \
-  --metadata-json "{\"dataset\":\"$DATASET\",\"n\":$N,\"k\":$K}" \
+    "$VERIFICATION_DIR/local_hf.jsonl" \
+  --metadata-json "{\"dataset\":\"$DATASET\",\"run_id\":\"$RUN_ID\",\"n\":$N,\"k\":$K}" \
   --out "$RUN_DIR/manifest.json"
 ```
 
@@ -545,28 +603,39 @@ branch, and dirty-worktree state.
 ## Expected final artifacts
 
 ```text
-out/<dataset>/final/
-  token_units.jsonl
-  token_units.summary.json
-  contribution_graph.jsonl
-  contribution_graph.summary.json
-  contribution_flow.initial.jsonl
-  contribution_flow.initial.summary.json
-  replacement_registry.01.jsonl
-  replacement_registry.01.summary.json
-  ... additional registry/flow closure iterations ...
-  contribution_flow.FINAL.jsonl
-  contribution_flow.FINAL.summary.json
-  evaluation.b1.jsonl
-  evaluation.b1.summary.json
-  evaluation.b3.jsonl
-  evaluation.b3.summary.json
-  evaluation.b5.jsonl
-  evaluation.b5.summary.json
-  evaluation.native.jsonl
-  evaluation.native.summary.json
-  hf_verification.jsonl
-  hf_verification.summary.json
+runs/<dataset>/<run-id>/
+  run.yaml
+  01_context/
+    context_units.jsonl
+    summary.json
+  02_graph/
+    contribution_graph.jsonl
+    summary.json
+  03_flow/
+    initial.jsonl
+    initial.summary.json
+    iteration_01.jsonl
+    iteration_01.summary.json
+    ... additional closure iterations ...
+    final.jsonl
+    final.summary.json
+  04_registry/
+    iteration_01.jsonl
+    iteration_01.summary.json
+    ... additional closure iterations ...
+    final.jsonl
+  05_evaluation/
+    budget_1.jsonl
+    budget_1.summary.json
+    budget_3.jsonl
+    budget_3.summary.json
+    budget_5.jsonl
+    budget_5.summary.json
+    native.jsonl
+    native.summary.json
+  06_verification/
+    local_hf.jsonl
+    local_hf.summary.json
   manifest.json
 ```
 
@@ -597,7 +666,7 @@ out/<dataset>/final/
 - JSONL stage outputs are immutable inputs to later stages.
 - Keep the same `id`, record order, top-k value, model weights, tokenizer,
   prompt, dtype, and eager-attention backend throughout a final run.
-- Use the token cache to enforce context hashes and offsets.
+- Use the frozen context-unit artifact to enforce context hashes and offsets.
 - Do not regenerate replacements separately for competing selectors.
 - Do not interpret vLLM/server disagreement as an intervention effect.
 - Record the final registry fixed point and artifact manifest.

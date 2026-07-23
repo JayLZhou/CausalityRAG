@@ -60,9 +60,14 @@ evaluation:
   final_backend: local_hf_eager
 
 artifacts:
-  directory: out/dataset_name/final
-  token_units: token_units.jsonl
-  contribution_graph: contribution_graph.jsonl
-  contribution_flow: contribution_flow.FINAL.jsonl
-  replacement_registry: replacement_registry.FINAL.jsonl
-  hf_verification: hf_verification.jsonl
+  root: /data1/yujia/CausalityRAG/runs
+  run_id: final-v1
+  directory: /data1/yujia/CausalityRAG/runs/dataset_name/final-v1
+  context_units: 01_context/context_units.jsonl
+  contribution_graph: 02_graph/contribution_graph.jsonl
+  contribution_flow_initial: 03_flow/initial.jsonl
+  contribution_flow_final: 03_flow/final.jsonl
+  replacement_registry: 04_registry/final.jsonl
+  evaluation_directory: 05_evaluation
+  hf_verification: 06_verification/local_hf.jsonl
+  manifest: manifest.json

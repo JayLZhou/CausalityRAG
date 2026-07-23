@@ -477,12 +477,12 @@ def _terms(text: str) -> Counter:
     )
 
 
-def units_from_cache_row(record: dict, row: dict, *, k: int) -> list[dict]:
+def units_from_context_row(record: dict, row: dict, *, k: int) -> list[dict]:
     identifier = record_id(record)
     if str(row.get("id", "")) != identifier:
-        raise ValueError(f"token-units ID mismatch for {identifier}")
+        raise ValueError(f"context-units ID mismatch for {identifier}")
     if int(row.get("top_k", k)) != k:
-        raise ValueError(f"token-units top-k mismatch for {identifier}")
+        raise ValueError(f"context-units top-k mismatch for {identifier}")
     stored_hashes = row.get("context_sha256", {})
     if stored_hashes:
         current_hashes = {
@@ -492,5 +492,13 @@ def units_from_cache_row(record: dict, row: dict, *, k: int) -> list[dict]:
             for context in retrieved_contexts(record)[:k]
         }
         if stored_hashes != current_hashes:
-            raise ValueError(f"token-units context hash mismatch for {identifier}")
+            raise ValueError(
+                f"context-units context hash mismatch for {identifier}"
+            )
     return list(row.get("units", []))
+
+
+def units_from_cache_row(record: dict, row: dict, *, k: int) -> list[dict]:
+    """Compatibility alias for historical experiment scripts."""
+
+    return units_from_context_row(record, row, k=k)

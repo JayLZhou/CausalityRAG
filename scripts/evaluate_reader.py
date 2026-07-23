@@ -27,7 +27,7 @@ from causalityrag.revision import apply_token_replacements
 from causalityrag.rules import TypedRuleLibrary
 from causalityrag.token_units import (
     context_sentence_units,
-    units_from_cache_row,
+    units_from_context_row,
 )
 
 
@@ -41,7 +41,12 @@ def main() -> None:
     parser.add_argument("--cf-pools", required=True)
     parser.add_argument("--type-rules", default="")
     parser.add_argument("--replacement-registry", default="")
-    parser.add_argument("--units-cache", default="")
+    parser.add_argument(
+        "--context-units",
+        "--units-cache",
+        dest="context_units",
+        default="",
+    )
     parser.add_argument("--remaining-flow-threshold", type=float, default=0.9)
     parser.add_argument("--max-tokens", type=int, default=10)
     parser.add_argument(
@@ -91,9 +96,9 @@ def main() -> None:
     units_by_id = (
         {
             str(row.get("id")): row
-            for row in load_records(args.units_cache)
+            for row in load_records(args.context_units)
         }
-        if args.units_cache
+        if args.context_units
         else {}
     )
     nlp = SpacyAnnotationClient(args.spacy_base_url)
@@ -182,9 +187,9 @@ def main() -> None:
                 output.write(json.dumps(row, ensure_ascii=False) + "\n")
                 output.flush()
                 continue
-            cached_units = units_by_id.get(identifier)
-            if cached_units is not None:
-                units = units_from_cache_row(record, cached_units, k=args.k)
+            context_row = units_by_id.get(identifier)
+            if context_row is not None:
+                units = units_from_context_row(record, context_row, k=args.k)
             else:
                 units, _ = context_sentence_units(record, k=args.k, nlp=nlp)
             by_id = {str(unit["unit_id"]): unit for unit in units}

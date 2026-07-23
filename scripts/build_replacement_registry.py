@@ -19,7 +19,7 @@ from causalityrag.replacement import (
 from causalityrag.rules import TypedRuleLibrary
 from causalityrag.token_units import (
     context_sentence_units,
-    units_from_cache_row,
+    units_from_context_row,
 )
 
 
@@ -55,8 +55,8 @@ def _process_local_registry(task: dict) -> dict:
             {identifier: task["existing"]} if task["existing"] else {}
         ),
         units_by_id=(
-            {identifier: task["cached_units"]}
-            if task["cached_units"]
+            {identifier: task["context_row"]}
+            if task["context_row"]
             else {}
         ),
         k=task["k"],
@@ -77,7 +77,12 @@ def main() -> None:
     parser.add_argument("--out", required=True)
     parser.add_argument("--summary-out", default="")
     parser.add_argument("--existing-registry", default="")
-    parser.add_argument("--units-cache", default="")
+    parser.add_argument(
+        "--context-units",
+        "--units-cache",
+        dest="context_units",
+        default="",
+    )
     parser.add_argument("--cf-pools", required=True)
     parser.add_argument("--type-rules", default="")
     parser.add_argument("--start", type=int, default=0)
@@ -126,9 +131,9 @@ def main() -> None:
     units_by_id = (
         {
             str(row.get("id")): row
-            for row in load_records(args.units_cache)
+            for row in load_records(args.context_units)
         }
-        if args.units_cache
+        if args.context_units
         else {}
     )
     if args.backend == "service":
@@ -177,7 +182,7 @@ def main() -> None:
                 "record": record,
                 "gate_rows": gate_rows,
                 "existing": existing_by_id.get(identifier),
-                "cached_units": units_by_id.get(identifier),
+                "context_row": units_by_id.get(identifier),
                 "k": args.k,
                 "max_budget": args.max_budget,
                 "max_native_tokens": args.max_native_tokens,
@@ -244,9 +249,9 @@ def build_registry_row(
     editor,
 ) -> dict:
     identifier = record_id(record)
-    cached_units = units_by_id.get(identifier)
-    if cached_units is not None:
-        units = units_from_cache_row(record, cached_units, k=k)
+    context_row = units_by_id.get(identifier)
+    if context_row is not None:
+        units = units_from_context_row(record, context_row, k=k)
     else:
         units, _ = context_sentence_units(record, k=k, nlp=nlp)
     by_id = {str(unit["unit_id"]): unit for unit in units}
