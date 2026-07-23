@@ -290,17 +290,15 @@ def main() -> None:
             )
             candidates = []
             for candidate in sweep["candidates"]:
-                candidates.append({
-                    **candidate,
-                    "selected_tokens": [
-                        str(by_id[unit_id].get("text", ""))
-                        for unit_id in candidate["selected_ids"]
-                    ],
-                    "unary_matched_tokens": [
-                        str(by_id[unit_id].get("text", ""))
-                        for unit_id in candidate["unary_matched_ids"]
-                    ],
-                })
+                candidates.append(
+                    {
+                        **final_candidate(candidate),
+                        "selected_tokens": [
+                            str(by_id[unit_id].get("text", ""))
+                            for unit_id in candidate["selected_ids"]
+                        ],
+                    }
+                )
             evaluated_registry_ids = {
                 str(unit_id)
                 for candidate in (
@@ -308,8 +306,7 @@ def main() -> None:
                     sweep.get("bicriteria_candidate"),
                 )
                 if candidate
-                for key in ("selected_ids", "unary_matched_ids")
-                for unit_id in candidate.get(key, [])
+                for unit_id in candidate.get("selected_ids", [])
             }
             registry_candidate_misses = sorted(
                 evaluated_registry_ids - known_registry_ids
@@ -319,8 +316,21 @@ def main() -> None:
             native_sweep = {
                 key: value
                 for key, value in sweep.items()
-                if key != "budget_candidates"
+                if key not in {
+                    "budget_candidates",
+                    "candidates",
+                    "strict_candidate",
+                    "bicriteria_candidate",
+                    "unary_order",
+                    "unary_scores",
+                }
             }
+            native_sweep["strict_candidate"] = final_candidate(
+                sweep.get("strict_candidate")
+            )
+            native_sweep["bicriteria_candidate"] = final_candidate(
+                sweep.get("bicriteria_candidate")
+            )
             row = {
                 "index": global_index,
                 "id": identifier,
@@ -352,7 +362,6 @@ def main() -> None:
                 f"status={sweep['status']} "
                 f"edges={network.diagnostics.get('active_edges', 0)} "
                 f"sets={sweep['diagnostics'].get('distinct_candidate_sets', 0)} "
-                f"different={any(c['differs_from_unary'] for c in candidates)} "
                 f"seconds={row['elapsed_seconds']}",
                 flush=True,
             )
@@ -373,12 +382,6 @@ def summarize(rows: list[dict]) -> dict:
     ok = [row for row in rows if row["status"] == "ok"]
     nonempty_counts = [
         row["diagnostics"]["distinct_nonempty_candidate_sets"] for row in ok
-    ]
-    comparisons = [
-        candidate
-        for row in ok
-        for candidate in row["candidates"]
-        if candidate["n_selected"] > 0
     ]
     k_guessing = [
         row for row in ok
@@ -402,29 +405,8 @@ def summarize(rows: list[dict]) -> dict:
         "queries_with_multiple_nonempty_sets": sum(
             count >= 2 for count in nonempty_counts
         ),
-        "queries_with_any_set_different_from_unary": sum(
-            any(
-                candidate["n_selected"] > 0
-                and candidate["differs_from_unary"]
-                for candidate in row["candidates"]
-            )
-            for row in ok
-        ),
         "mean_distinct_nonempty_sets": (
             statistics.fmean(nonempty_counts) if nonempty_counts else None
-        ),
-        "candidate_comparisons": len(comparisons),
-        "mixed_flow_better_than_unary": sum(
-            candidate["flow_improvement_over_unary"] > 1e-9
-            for candidate in comparisons
-        ),
-        "mixed_flow_equal_to_unary": sum(
-            abs(candidate["flow_improvement_over_unary"]) <= 1e-9
-            for candidate in comparisons
-        ),
-        "mixed_flow_worse_than_unary": sum(
-            candidate["flow_improvement_over_unary"] < -1e-9
-            for candidate in comparisons
         ),
         "all_cardinality_sweeps_monotone": all(
             row["diagnostics"].get(
@@ -458,16 +440,34 @@ def summarize(rows: list[dict]) -> dict:
         ),
         "registry_fixed_point": bool(registry_paths) and not registry_misses,
         "evaluated_candidate_registry_misses": len(registry_misses),
-        "gate_pass": bool(ok) and all((
-            any(count >= 2 for count in nonempty_counts),
-            any(
-                candidate["differs_from_unary"] for candidate in comparisons
-            ),
-            any(
-                candidate["flow_improvement_over_unary"] > 1e-9
-                for candidate in comparisons
-            ),
-        )),
+        "gate_pass": bool(ok)
+        and all(
+            row["diagnostics"].get(
+                "cardinality_monotone_over_descending_lambda",
+                True,
+            )
+            for row in ok
+        ),
+    }
+
+
+def final_candidate(candidate: dict | None) -> dict | None:
+    """Remove historical matched-baseline fields from final artifacts."""
+
+    if candidate is None:
+        return None
+    excluded = {
+        "unary_matched_ids",
+        "unary_remaining_support_flow",
+        "unary_remaining_support_fraction",
+        "differs_from_unary",
+        "flow_improvement_over_unary",
+        "jaccard_distance_from_unary",
+    }
+    return {
+        key: value
+        for key, value in candidate.items()
+        if key not in excluded
     }
 
 

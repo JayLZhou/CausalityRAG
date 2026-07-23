@@ -355,8 +355,10 @@ def test_integer_k_guessing_returns_theorem_aligned_candidate():
     assert result["diagnostics"]["mincut_calls"] == 3
     assert result["diagnostics"]["cardinality_factor"] == 3.0
     assert result["diagnostics"]["residual_flow_factor"] == 1.5
+    assert "unary_order" not in result
     assert result["strict_candidate"] is not None
     assert result["bicriteria_candidate"] is not None
+    assert "unary_matched_ids" not in result["bicriteria_candidate"]
     assert result["strict_candidate"]["remaining_support_flow"] <= 3.0 + 1e-9
     assert result["bicriteria_candidate"]["remaining_support_flow"] <= 4.5 + 1e-9
 

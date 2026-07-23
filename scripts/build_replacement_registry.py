@@ -240,9 +240,7 @@ def build_registry_row(
         units, _ = context_sentence_units(record, k=k, nlp=nlp)
     by_id = {str(unit["unit_id"]): unit for unit in units}
     existing = existing_by_id.get(identifier, {})
-    candidate_ids: set[str] = {
-        str(unit_id) for unit_id in existing.get("candidate_ids", [])
-    }
+    candidate_ids: set[str] = set()
     for gate_by_id in gates:
         gate = gate_by_id.get(identifier)
         if gate is None:
@@ -250,8 +248,18 @@ def build_registry_row(
         candidate_ids.update(registry_candidate_ids(gate))
 
     contexts = retrieved_contexts(record)[:k]
-    cache: dict[str, dict] = dict(existing.get("replacements", {}))
-    invalid = dict(existing.get("invalid", {}))
+    existing_replacements = dict(existing.get("replacements", {}))
+    existing_invalid = dict(existing.get("invalid", {}))
+    cache: dict[str, dict] = {
+        unit_id: existing_replacements[unit_id]
+        for unit_id in candidate_ids
+        if unit_id in existing_replacements
+    }
+    invalid = {
+        unit_id: existing_invalid[unit_id]
+        for unit_id in candidate_ids
+        if unit_id in existing_invalid
+    }
     for unit_id in sorted(candidate_ids):
         if unit_id in cache or unit_id in invalid:
             continue
@@ -276,7 +284,7 @@ def build_registry_row(
     valid = {
         unit_id: replacement
         for unit_id, replacement in cache.items()
-        if replacement.get("ok")
+        if unit_id in candidate_ids and replacement.get("ok")
     }
     return {
         "index": start + offset - 1,
@@ -302,10 +310,6 @@ def registry_candidate_ids(gate: dict) -> set[str]:
             continue
         candidate_ids.update(
             str(unit_id) for unit_id in candidate.get("selected_ids", [])
-        )
-        candidate_ids.update(
-            str(unit_id)
-            for unit_id in candidate.get("unary_matched_ids", [])
         )
     return candidate_ids
 

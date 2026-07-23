@@ -1451,7 +1451,6 @@ def solve_bicriteria_flow_interdiction(
         return {
             "status": network.status,
             "initial_flow": 0.0,
-            "unary_order": [],
             "candidates": [],
             "strict_candidate": None,
             "bicriteria_candidate": None,
@@ -1463,7 +1462,6 @@ def solve_bicriteria_flow_interdiction(
         return {
             "status": "zero_initial_flow",
             "initial_flow": initial_flow,
-            "unary_order": [],
             "candidates": [],
             "strict_candidate": None,
             "bicriteria_candidate": None,
@@ -1479,10 +1477,6 @@ def solve_bicriteria_flow_interdiction(
         guesses = _geometric_cardinality_guesses(guess_limit, gamma)
     threshold = beta * initial_flow
     relaxed_threshold = (1.0 + eta) * threshold
-    unary_order = sorted(
-        editable,
-        key=lambda unit_id: (-network.unit_scores[unit_id], unit_id),
-    )
 
     by_selection: dict[tuple[str, ...], dict] = {}
     for guessed_k in guesses:
@@ -1503,11 +1497,7 @@ def solve_bicriteria_flow_interdiction(
     candidates = []
     for selection, result in by_selection.items():
         selected = set(selection)
-        size = len(selected)
         residual_flow = remaining_support_flow(network, selected)
-        unary_ids = unary_order[:size]
-        unary_flow = remaining_support_flow(network, set(unary_ids))
-        union = selected | set(unary_ids)
         candidates.append(
             {
                 **result,
@@ -1515,16 +1505,6 @@ def solve_bicriteria_flow_interdiction(
                 "remaining_support_fraction": residual_flow / initial_flow,
                 "strict_feasible": residual_flow <= threshold + 1e-12,
                 "bicriteria_feasible": residual_flow <= relaxed_threshold + 1e-12,
-                "unary_matched_ids": unary_ids,
-                "unary_remaining_support_flow": unary_flow,
-                "unary_remaining_support_fraction": unary_flow / initial_flow,
-                "differs_from_unary": list(selection) != sorted(unary_ids),
-                "flow_improvement_over_unary": unary_flow - residual_flow,
-                "jaccard_distance_from_unary": (
-                    0.0
-                    if not union
-                    else 1.0 - len(selected & set(unary_ids)) / len(union)
-                ),
             }
         )
     candidates.sort(
@@ -1549,8 +1529,6 @@ def solve_bicriteria_flow_interdiction(
     return {
         "status": "ok",
         "initial_flow": initial_flow,
-        "unary_order": unary_order,
-        "unary_scores": network.unit_scores,
         "candidates": candidates,
         "strict_candidate": best("strict_feasible"),
         "bicriteria_candidate": best("bicriteria_feasible"),

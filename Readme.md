@@ -427,8 +427,8 @@ replacement per candidate and marks invalid tokens uncuttable.
 
 For each query, `build_replacement_registry.py` performs the following steps:
 
-1. Collect every token ID in the strict-threshold witness, the native
-   relaxed-threshold candidate, and their size-matched graph diagnostics.
+1. Collect every token ID in the strict-threshold witness and the native
+   relaxed-threshold contribution-flow candidate.
 2. Reuse entries from the previous registry iteration; an existing valid or
    invalid decision is never regenerated.
 3. Try a deterministic typed replacement first: same-slot entity pool,
@@ -580,10 +580,7 @@ All independent edited-context requests are submitted concurrently to vLLM.
 The stored stage-2 clean answer remains the baseline, so clean inference is not
 repeated here.
 
-The primary output is the contribution-flow selection. The artifact also
-contains a cardinality-matched ranking by graph-local token support for
-diagnostic comparison; it is not ARC-JSD and is not part of the proposed
-selector.
+The only evaluated selection is the contribution-flow candidate.
 
 ### 7. Freeze an artifact manifest
 

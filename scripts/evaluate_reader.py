@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
-import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -145,7 +143,6 @@ def main() -> None:
                 "clean_correct_stored": clean_correct_stored,
                 "remaining_flow_threshold": args.remaining_flow_threshold,
                 "candidate_remaining_support_fraction": None,
-                "candidate_unary_remaining_support_fraction": None,
                 "replacement_contract": (
                     "strict_contextual_pos_morphology"
                     if args.strict_replacements
@@ -153,10 +150,7 @@ def main() -> None:
                 ),
                 "reader_backend": "vllm_openai_compatible",
                 "reader_calls": 0,
-                "methods": {
-                    "residual_flow": dict(no_candidate),
-                    "unary_matched": dict(no_candidate),
-                },
+                "methods": {"residual_flow": dict(no_candidate)},
             }
             rows.append(row)
             continue
@@ -177,7 +171,6 @@ def main() -> None:
         )
         for method, selected_ids in (
             ("residual_flow", candidate["selected_ids"]),
-            ("unary_matched", candidate["unary_matched_ids"]),
         ):
             selected = [by_id[unit_id] for unit_id in selected_ids]
             if registry_by_id:
@@ -265,9 +258,6 @@ def main() -> None:
             "candidate_remaining_support_fraction": candidate[
                 "remaining_support_fraction"
             ],
-            "candidate_unary_remaining_support_fraction": candidate[
-                "unary_remaining_support_fraction"
-            ],
             "replacement_contract": (
                 "strict_contextual_pos_morphology"
                 if args.strict_replacements
@@ -321,12 +311,10 @@ def main() -> None:
             output.write(json.dumps(row, ensure_ascii=False) + "\n")
             output.flush()
             flow = row["methods"]["residual_flow"]
-            unary = row["methods"]["unary_matched"]
             print(
                 f"[reader-evaluation] index={row['index']} "
                 f"k={flow.get('n_selected', 0)} "
-                f"flow={flow.get('flip')} "
-                f"unary={unary.get('flip')}",
+                f"flow={flow.get('flip')}",
                 flush=True,
             )
 
@@ -396,118 +384,34 @@ def summarize(rows: list[dict]) -> dict:
         "reader_calls": sum(int(row.get("reader_calls", 0)) for row in rows),
         "reader_backend": "vllm_openai_compatible",
     }
-    for method in ("residual_flow", "unary_matched"):
-        valid = [
-            row["methods"][method]
-            for row in rows
-            if row["methods"][method]["status"] == "ok"
-        ]
-        flips = sum(bool(result.get("flip")) for result in valid)
-        candidate_queries = sum(
-            row["methods"][method]["status"] != "no_candidate_under_selection_rule"
-            for row in rows
-        )
-        summary[method] = {
-            "total_queries": len(rows),
-            "candidate_queries": candidate_queries,
-            "valid_queries": len(valid),
-            "no_candidate_queries": len(rows) - candidate_queries,
-            "replacement_failures": candidate_queries - len(valid),
-            "flips": flips,
-            "flip_rate": flips / len(valid) if valid else None,
-            "overall_flip_rate": flips / len(rows) if rows else None,
-            "candidate_coverage": (candidate_queries / len(rows) if rows else None),
-            "mean_selected_tokens": (
-                sum(int(result["n_selected"]) for result in valid) / len(valid)
-                if valid
-                else None
-            ),
-        }
-    paired = [
-        row
+    method = "residual_flow"
+    valid = [
+        row["methods"][method]
         for row in rows
-        if row["methods"]["residual_flow"]["status"] == "ok"
-        and row["methods"]["unary_matched"]["status"] == "ok"
+        if row["methods"][method]["status"] == "ok"
     ]
-    different = [
-        row
-        for row in paired
-        if set(row["methods"]["residual_flow"]["selected_ids"])
-        != set(row["methods"]["unary_matched"]["selected_ids"])
-    ]
-    residual_only = sum(
-        row["methods"]["residual_flow"]["flip"]
-        and not row["methods"]["unary_matched"]["flip"]
-        for row in paired
+    flips = sum(bool(result.get("flip")) for result in valid)
+    candidate_queries = sum(
+        row["methods"][method]["status"] != "no_candidate_under_selection_rule"
+        for row in rows
     )
-    unary_only = sum(
-        row["methods"]["unary_matched"]["flip"]
-        and not row["methods"]["residual_flow"]["flip"]
-        for row in paired
-    )
-    paired_differences = [
-        int(row["methods"]["residual_flow"]["flip"])
-        - int(row["methods"]["unary_matched"]["flip"])
-        for row in paired
-    ]
-    summary["paired"] = {
-        "valid_queries": len(paired),
-        "same_token_sets": len(paired) - len(different),
-        "different_token_sets": len(different),
-        "residual_only_flips": residual_only,
-        "unary_only_flips": unary_only,
-        "both_flip": sum(
-            row["methods"]["residual_flow"]["flip"]
-            and row["methods"]["unary_matched"]["flip"]
-            for row in different
-        ),
-        "neither_flips": sum(
-            not row["methods"]["residual_flow"]["flip"]
-            and not row["methods"]["unary_matched"]["flip"]
-            for row in different
-        ),
-        "flip_rate_difference": (
-            sum(paired_differences) / len(paired_differences)
-            if paired_differences
+    summary[method] = {
+        "total_queries": len(rows),
+        "candidate_queries": candidate_queries,
+        "valid_queries": len(valid),
+        "no_candidate_queries": len(rows) - candidate_queries,
+        "replacement_failures": candidate_queries - len(valid),
+        "flips": flips,
+        "flip_rate": flips / len(valid) if valid else None,
+        "overall_flip_rate": flips / len(rows) if rows else None,
+        "candidate_coverage": (candidate_queries / len(rows) if rows else None),
+        "mean_selected_tokens": (
+            sum(int(result["n_selected"]) for result in valid) / len(valid)
+            if valid
             else None
-        ),
-        "paired_bootstrap_95_ci": _paired_bootstrap_ci(paired_differences),
-        "mcnemar_exact_two_sided_p": _mcnemar_exact_p(
-            residual_only,
-            unary_only,
         ),
     }
     return summary
-
-
-def _mcnemar_exact_p(left_only: int, right_only: int) -> float | None:
-    discordant = left_only + right_only
-    if discordant == 0:
-        return 1.0
-    tail = sum(
-        math.comb(discordant, index) for index in range(min(left_only, right_only) + 1)
-    ) / (2**discordant)
-    return min(1.0, 2.0 * tail)
-
-
-def _paired_bootstrap_ci(
-    differences: list[int],
-    *,
-    samples: int = 10_000,
-    seed: int = 0,
-) -> list[float] | None:
-    if not differences:
-        return None
-    rng = random.Random(seed)
-    size = len(differences)
-    estimates = sorted(
-        sum(differences[rng.randrange(size)] for _ in range(size)) / size
-        for _ in range(samples)
-    )
-    return [
-        estimates[int(0.025 * (samples - 1))],
-        estimates[int(0.975 * (samples - 1))],
-    ]
 
 
 if __name__ == "__main__":

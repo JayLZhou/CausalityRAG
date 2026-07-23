@@ -54,24 +54,12 @@ def test_summary_counts_no_candidate_as_failure_in_overall_rate():
                     "n_selected": 1,
                     "selected_ids": ["a"],
                 },
-                "unary_matched": {
-                    "status": "ok",
-                    "flip": False,
-                    "n_selected": 1,
-                    "selected_ids": ["b"],
-                },
             },
         },
         {
             "remaining_flow_threshold": 0.25,
             "methods": {
                 "residual_flow": {
-                    "status": "no_candidate_under_selection_rule",
-                    "flip": False,
-                    "n_selected": 0,
-                    "selected_ids": [],
-                },
-                "unary_matched": {
                     "status": "no_candidate_under_selection_rule",
                     "flip": False,
                     "n_selected": 0,
@@ -85,9 +73,6 @@ def test_summary_counts_no_candidate_as_failure_in_overall_rate():
     assert result["residual_flow"]["flip_rate"] == 1.0
     assert result["residual_flow"]["overall_flip_rate"] == 0.5
     assert result["residual_flow"]["candidate_coverage"] == 0.5
-    assert result["paired"]["flip_rate_difference"] == 1.0
-    assert result["paired"]["paired_bootstrap_95_ci"] == [1.0, 1.0]
-    assert result["paired"]["mcnemar_exact_two_sided_p"] == 1.0
 
 
 def test_reader_requests_preserve_input_order_under_concurrency():
