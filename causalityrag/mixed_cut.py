@@ -631,6 +631,28 @@ def augment_with_unary_support(
         effective_unary_weight / unary_total if unary_available else 0.0
     )
 
+    identity_token_gates = (
+        graph_available
+        and network.gate_scope == "contracted_token_nodes"
+        and all(
+            network.selection_unit_by_gate.get(gate_id) == gate_id
+            for gate_id in network.token_nodes_by_unit
+        )
+    )
+    if identity_token_gates or not graph_available:
+        return _augment_identity_token_support(
+            network,
+            scores,
+            graph_available=graph_available,
+            graph_scale=graph_scale,
+            unary_scale=unary_scale,
+            graph_weight=graph_weight,
+            effective_graph_weight=effective_graph_weight,
+            effective_unary_weight=effective_unary_weight,
+            graph_flow=graph_flow,
+            unary_total=unary_total,
+        )
+
     nodes = set(network.nodes) if graph_available else {"answer_target"}
     edges = [
         (src, dst, capacity * graph_scale)
@@ -695,6 +717,83 @@ def augment_with_unary_support(
                 sum(copies_per_unit.values()) / len(copies_per_unit)
             ),
             "copies_per_unit": dict(copies_per_unit),
+            "minimum_active_capacity": min(capacities),
+            "maximum_active_capacity": max(capacities),
+            "total_active_capacity": sum(capacities),
+        },
+    )
+
+
+def _augment_identity_token_support(
+    network: RawContributionNetwork,
+    scores: dict[str, float],
+    *,
+    graph_available: bool,
+    graph_scale: float,
+    unary_scale: float,
+    graph_weight: float,
+    effective_graph_weight: float,
+    effective_unary_weight: float,
+    graph_flow: float,
+    unary_total: float,
+) -> RawContributionNetwork:
+    """Attach unary support to the same gate used by a projected token."""
+
+    sink = network.sink if graph_available else "answer_target"
+    nodes = set(network.nodes) if graph_available else {sink}
+    edges = [
+        (src, dst, capacity * graph_scale)
+        for src, dst, capacity in network.edges
+        if graph_scale > 0 and capacity > 0
+    ]
+    roots = dict(network.roots_by_unit) if graph_available else {}
+    token_nodes = dict(network.token_nodes_by_unit) if graph_available else {}
+    selection = (
+        dict(network.selection_unit_by_gate) if graph_available else {}
+    )
+    gate_scores = {gate_id: 0.0 for gate_id in token_nodes}
+    for index, (unit_id, score) in enumerate(sorted(scores.items())):
+        capacity = score * unary_scale
+        if capacity <= 0:
+            continue
+        node = token_nodes.get(unit_id, f"unary-token::{index}")
+        nodes.add(node)
+        token_nodes[unit_id] = node
+        selection[unit_id] = unit_id
+        roots[unit_id] = (node,)
+        edges.append((node, sink, capacity))
+        gate_scores[unit_id] = capacity
+
+    capacities = [capacity for _, _, capacity in edges]
+    parent_diagnostics = network.diagnostics if graph_available else {}
+    return RawContributionNetwork(
+        status="ok",
+        nodes=frozenset(nodes),
+        edges=tuple(edges),
+        roots_by_unit=roots,
+        token_nodes_by_unit=token_nodes,
+        selection_unit_by_gate=selection,
+        gate_scope="contracted_token_nodes",
+        unit_scores=gate_scores,
+        sink=sink,
+        diagnostics={
+            **parent_diagnostics,
+            "projection": "projected_token_graph_with_shared_unary_gate",
+            "parent_network_status": network.status,
+            "graph_weight_requested": graph_weight,
+            "effective_graph_weight": effective_graph_weight,
+            "effective_unary_weight": effective_unary_weight,
+            "graph_flow_before_normalization": graph_flow,
+            "unary_score_before_normalization": unary_total,
+            "unary_support_tokens": len(scores),
+            "active_edges": len(edges),
+            "active_nodes": len(nodes),
+            "editable_token_groups": len(token_nodes),
+            "maximum_active_group_rank": 1,
+            "mean_active_group_rank": 1.0 if token_nodes else 0.0,
+            "copies_per_unit": {
+                unit_id: 1 for unit_id in token_nodes
+            },
             "minimum_active_capacity": min(capacities),
             "maximum_active_capacity": max(capacities),
             "total_active_capacity": sum(capacities),
@@ -847,7 +946,7 @@ def solve_mixed_cut(
     state = _run_flow(
         network,
         {
-            unit_id: token_cost for unit_id in _editable_unit_ids(network)
+            gate_id: token_cost for gate_id in _purchasable_gate_ids(network)
         },
     )
     selected = sorted(
@@ -1001,8 +1100,9 @@ def sweep_mixed_cuts(
         else:
             by_selection[selection]["lambda_min"] = token_cost
 
+    editable = _purchasable_gate_ids(network)
     unary_order = sorted(
-        network.unit_scores,
+        editable,
         key=lambda unit_id: (-network.unit_scores[unit_id], unit_id),
     )
     candidates = []
@@ -1059,12 +1159,278 @@ def sweep_mixed_cuts(
     }
 
 
+def solve_fixed_mixed_cut(
+    network: RawContributionNetwork,
+    *,
+    token_cost: float,
+) -> dict:
+    """Return the single supported cut for a fixed token price."""
+
+    if network.status != "ok":
+        return {
+            "status": network.status,
+            "initial_flow": 0.0,
+            "unary_order": [],
+            "unary_scores": {},
+            "candidates": [],
+            "diagnostics": {"solver": "fixed_lambda_mincut"},
+        }
+    initial_flow = remaining_support_flow(network, frozenset())
+    if initial_flow <= 0:
+        return {
+            "status": "zero_initial_flow",
+            "initial_flow": initial_flow,
+            "unary_order": [],
+            "unary_scores": network.unit_scores,
+            "candidates": [],
+            "diagnostics": {"solver": "fixed_lambda_mincut"},
+        }
+
+    result = solve_mixed_cut(network, token_cost)
+    selected = set(result["selected_ids"])
+    editable = _purchasable_gate_ids(network)
+    unary_order = sorted(
+        editable,
+        key=lambda unit_id: (-network.unit_scores[unit_id], unit_id),
+    )
+    unary_ids = unary_order[:len(selected)]
+    residual_flow = remaining_support_flow(network, selected)
+    unary_flow = remaining_support_flow(network, set(unary_ids))
+    union = selected | set(unary_ids)
+    candidate = {
+        **result,
+        "lambda_min": token_cost,
+        "lambda_max": token_cost,
+        "remaining_support_flow": residual_flow,
+        "remaining_support_fraction": residual_flow / initial_flow,
+        "unary_matched_ids": unary_ids,
+        "unary_remaining_support_flow": unary_flow,
+        "unary_remaining_support_fraction": unary_flow / initial_flow,
+        "differs_from_unary": result["selected_ids"] != sorted(unary_ids),
+        "flow_improvement_over_unary": unary_flow - residual_flow,
+        "jaccard_distance_from_unary": (
+            0.0
+            if not union
+            else 1.0 - len(selected & set(unary_ids)) / len(union)
+        ),
+    }
+    return {
+        "status": "ok",
+        "initial_flow": initial_flow,
+        "unary_order": unary_order,
+        "unary_scores": network.unit_scores,
+        "candidates": [candidate],
+        "diagnostics": {
+            "solver": "fixed_lambda_mincut",
+            "lambda": token_cost,
+            "mincut_calls": 1,
+            "distinct_candidate_sets": 1,
+            "distinct_nonempty_candidate_sets": int(bool(selected)),
+            "candidate_cardinalities": [len(selected)],
+            "cardinality_monotone_over_descending_lambda": True,
+        },
+    }
+
+
+def search_mixed_cut_threshold(
+    network: RawContributionNetwork,
+    *,
+    beta: float,
+    iterations: int = 32,
+) -> dict:
+    """Search the largest token price whose supported cut meets a flow bound.
+
+    Every fixed-price problem is solved exactly by ``solve_mixed_cut``. The
+    search is only over supported Lagrangian cuts; it is not an exact solver
+    for cardinality-constrained flow interdiction.
+    """
+
+    if not 0 < beta < 1:
+        raise ValueError("beta must be strictly between zero and one")
+    if iterations <= 0:
+        raise ValueError("iterations must be positive")
+    if network.status != "ok":
+        return {
+            "status": network.status,
+            "initial_flow": 0.0,
+            "unary_order": [],
+            "candidates": [],
+            "strict_candidate": None,
+            "diagnostics": {},
+        }
+
+    initial_flow = remaining_support_flow(network, frozenset())
+    if initial_flow <= 0:
+        return {
+            "status": "zero_initial_flow",
+            "initial_flow": initial_flow,
+            "unary_order": [],
+            "candidates": [],
+            "strict_candidate": None,
+            "diagnostics": {},
+        }
+
+    threshold = beta * initial_flow
+    evaluated: list[dict] = []
+
+    def evaluate(token_cost: float) -> dict:
+        result = solve_mixed_cut(network, token_cost)
+        evaluated.append(result)
+        return result
+
+    def feasible(result: dict) -> bool:
+        return float(result["residual_cut_capacity"]) <= threshold + 1e-12
+
+    low = 0.0
+    low_result = evaluate(low)
+    if not feasible(low_result):
+        return {
+            "status": "no_supported_cut_meets_threshold",
+            "initial_flow": initial_flow,
+            "unary_order": [],
+            "candidates": [],
+            "strict_candidate": None,
+            "diagnostics": {
+                "solver": "binary_lambda_supported_mincut",
+                "beta": beta,
+                "strict_flow_threshold": threshold,
+                "mincut_calls": len(evaluated),
+                "reason": "minimum-residual supported cut exceeds threshold",
+            },
+        }
+
+    high = initial_flow * 2.0
+    high_result = evaluate(high)
+    bracket_expansions = 0
+    while feasible(high_result) and bracket_expansions < 64:
+        high *= 2.0
+        high_result = evaluate(high)
+        bracket_expansions += 1
+    if feasible(high_result):
+        raise RuntimeError("failed to bracket an infeasible token price")
+
+    for _ in range(iterations):
+        middle = (low + high) / 2.0
+        middle_result = evaluate(middle)
+        if feasible(middle_result):
+            low = middle
+            low_result = middle_result
+        else:
+            high = middle
+            high_result = middle_result
+
+    by_selection: dict[tuple[str, ...], dict] = {}
+    for result in evaluated:
+        selection = tuple(result["selected_ids"])
+        token_cost = float(result["lambda"])
+        previous = by_selection.get(selection)
+        if previous is None:
+            by_selection[selection] = {
+                **result,
+                "lambda_min": token_cost,
+                "lambda_max": token_cost,
+            }
+        else:
+            previous["lambda_min"] = min(previous["lambda_min"], token_cost)
+            previous["lambda_max"] = max(previous["lambda_max"], token_cost)
+
+    editable = _purchasable_gate_ids(network)
+    unary_order = sorted(
+        editable,
+        key=lambda unit_id: (-network.unit_scores[unit_id], unit_id),
+    )
+    candidates = []
+    for selection, result in by_selection.items():
+        selected = set(selection)
+        size = len(selected)
+        residual_flow = remaining_support_flow(network, selected)
+        unary_ids = unary_order[:size]
+        unary_flow = remaining_support_flow(network, set(unary_ids))
+        union = selected | set(unary_ids)
+        candidates.append({
+            **result,
+            "remaining_support_flow": residual_flow,
+            "remaining_support_fraction": residual_flow / initial_flow,
+            "strict_feasible": residual_flow <= threshold + 1e-12,
+            "unary_matched_ids": unary_ids,
+            "unary_remaining_support_flow": unary_flow,
+            "unary_remaining_support_fraction": unary_flow / initial_flow,
+            "differs_from_unary": list(selection) != sorted(unary_ids),
+            "flow_improvement_over_unary": unary_flow - residual_flow,
+            "jaccard_distance_from_unary": (
+                0.0
+                if not union
+                else 1.0 - len(selected & set(unary_ids)) / len(union)
+            ),
+        })
+    candidates.sort(
+        key=lambda row: (
+            row["n_selected"],
+            row["remaining_support_flow"],
+            row["selected_ids"],
+        )
+    )
+    final_selection = tuple(low_result["selected_ids"])
+    strict_candidate = next(
+        candidate
+        for candidate in candidates
+        if tuple(candidate["selected_ids"]) == final_selection
+    )
+    observed_by_lambda = sorted(
+        evaluated,
+        key=lambda row: float(row["lambda"]),
+    )
+    return {
+        "status": "ok",
+        "initial_flow": initial_flow,
+        "unary_order": unary_order,
+        "unary_scores": network.unit_scores,
+        "candidates": candidates,
+        "strict_candidate": strict_candidate,
+        "diagnostics": {
+            "solver": "binary_lambda_supported_mincut",
+            "beta": beta,
+            "strict_flow_threshold": threshold,
+            "binary_iterations": iterations,
+            "bracket_expansions": bracket_expansions,
+            "lambda_feasible_lower": low,
+            "lambda_infeasible_upper": high,
+            "lambda_bracket_width": high - low,
+            "mincut_calls": len(evaluated),
+            "distinct_candidate_sets": len(candidates),
+            "distinct_nonempty_candidate_sets": sum(
+                candidate["n_selected"] > 0 for candidate in candidates
+            ),
+            "cardinality_monotone_over_ascending_lambda": all(
+                int(left["n_selected"]) >= int(right["n_selected"])
+                for left, right in zip(
+                    observed_by_lambda,
+                    observed_by_lambda[1:],
+                )
+            ),
+            "residual_cut_monotone_over_ascending_lambda": all(
+                float(left["residual_cut_capacity"])
+                <= float(right["residual_cut_capacity"]) + 1e-10
+                for left, right in zip(
+                    observed_by_lambda,
+                    observed_by_lambda[1:],
+                )
+            ),
+            "guarantee_scope": (
+                "exact for every fixed-lambda min-cut; binary search returns "
+                "the largest threshold-feasible supported cut"
+            ),
+        },
+    }
+
+
 def solve_bicriteria_flow_interdiction(
     network: RawContributionNetwork,
     *,
     beta: float,
     eta: float = 1.0,
     max_k_guess: int | None = None,
+    gamma: float | None = None,
 ) -> dict:
     """Run the theorem-aligned cardinality guesses for residual-flow interdiction.
 
@@ -1073,7 +1439,11 @@ def solve_bicriteria_flow_interdiction(
     this objective by ``1 / mu``, so its token gate cost is ``eta * B / g``.
     If the strict-threshold optimum has size ``k`` and ``k`` is among the
     guesses, the smallest returned set with residual flow at most
-    ``(1 + eta) * B`` satisfies the standard bicriteria bounds.
+    ``(1 + eta) * B`` satisfies the residual-flow side of the bicriteria
+    bound. When ``gamma`` is provided, guesses follow a geometric grid with
+    ratio ``1 + gamma``. The tightened cardinality factor is
+    ``1 + (1 + gamma) / eta``: fixed-price optimality preserves the optimum's
+    ``k`` token cost and then pays at most ``B / lambda``.
     """
 
     if not 0 < beta < 1:
@@ -1082,6 +1452,8 @@ def solve_bicriteria_flow_interdiction(
         raise ValueError("eta must be finite and positive")
     if max_k_guess is not None and max_k_guess <= 0:
         raise ValueError("max_k_guess must be positive when provided")
+    if gamma is not None and (gamma <= 0 or not isfinite(gamma)):
+        raise ValueError("gamma must be finite and positive when provided")
     if network.status != "ok":
         return {
             "status": network.status,
@@ -1105,17 +1477,22 @@ def solve_bicriteria_flow_interdiction(
             "diagnostics": {},
         }
 
-    editable = _editable_unit_ids(network)
+    editable = _purchasable_gate_ids(network)
     guess_limit = min(max_k_guess or len(editable), len(editable))
+    guesses: list[float | int]
+    if gamma is None:
+        guesses = list(range(1, guess_limit + 1))
+    else:
+        guesses = _geometric_cardinality_guesses(guess_limit, gamma)
     threshold = beta * initial_flow
     relaxed_threshold = (1.0 + eta) * threshold
     unary_order = sorted(
-        network.unit_scores,
+        editable,
         key=lambda unit_id: (-network.unit_scores[unit_id], unit_id),
     )
 
     by_selection: dict[tuple[str, ...], dict] = {}
-    for guessed_k in range(1, guess_limit + 1):
+    for guessed_k in guesses:
         flow_penalty = guessed_k / (eta * threshold)
         token_cost = 1.0 / flow_penalty
         result = solve_mixed_cut(network, token_cost)
@@ -1189,13 +1566,19 @@ def solve_bicriteria_flow_interdiction(
         "strict_candidate": best("strict_feasible"),
         "bicriteria_candidate": best("bicriteria_feasible"),
         "diagnostics": {
-            "solver": "integer_k_guessing_mincut",
+            "solver": (
+                "integer_k_guessing_mincut"
+                if gamma is None
+                else "geometric_k_guessing_mincut"
+            ),
             "beta": beta,
             "eta": eta,
             "strict_flow_threshold": threshold,
             "bicriteria_flow_threshold": relaxed_threshold,
             "max_k_guess": guess_limit,
-            "mincut_calls": guess_limit,
+            "gamma": gamma,
+            "guess_scales": guesses,
+            "mincut_calls": len(guesses),
             "distinct_candidate_sets": len(candidates),
             "distinct_nonempty_candidate_sets": sum(
                 candidate["n_selected"] > 0 for candidate in candidates
@@ -1204,7 +1587,10 @@ def solve_bicriteria_flow_interdiction(
             "bicriteria_candidate_found": (
                 best("bicriteria_feasible") is not None
             ),
-            "cardinality_factor": 1.0 + 1.0 / eta,
+            "cardinality_factor": (
+                1.0
+                + (1.0 if gamma is None else 1.0 + gamma) / eta
+            ),
             "residual_flow_factor": 1.0 + eta,
             "guarantee_scope": (
                 "strict-threshold optimum when its cardinality is no larger "
@@ -1212,6 +1598,25 @@ def solve_bicriteria_flow_interdiction(
             ),
         },
     }
+
+
+def _geometric_cardinality_guesses(
+    guess_limit: int,
+    gamma: float,
+) -> list[float]:
+    """Return 1, (1 + gamma), ... with the final scale capped at the limit."""
+
+    if guess_limit <= 0:
+        return []
+    guesses = [1.0]
+    ratio = 1.0 + gamma
+    while guesses[-1] < guess_limit:
+        next_guess = guesses[-1] * ratio
+        if next_guess >= guess_limit:
+            guesses.append(float(guess_limit))
+            break
+        guesses.append(next_guess)
+    return guesses
 
 
 def remaining_group_support_flow(
@@ -1959,7 +2364,11 @@ def _run_flow(
             gate_in = dinic.node()
             gate_out = dinic.node()
             gates[unit_id] = (gate_in, gate_out)
-            dinic.add_edge(gate_in, gate_out, gate_capacities[unit_id])
+            dinic.add_edge(
+                gate_in,
+                gate_out,
+                gate_capacities.get(unit_id, infinite_capacity),
+            )
 
         def src_id(node: str) -> int:
             unit_id = token_node_to_unit.get(node)
@@ -1997,7 +2406,11 @@ def _run_flow(
             gate_out = dinic.node()
             gates[unit_id] = (gate_in, gate_out)
             dinic.add_edge(source, gate_in, infinite_capacity)
-            dinic.add_edge(gate_in, gate_out, gate_capacities[unit_id])
+            dinic.add_edge(
+                gate_in,
+                gate_out,
+                gate_capacities.get(unit_id, infinite_capacity),
+            )
             for root in roots:
                 dinic.add_edge(gate_out, node_ids[root], infinite_capacity)
         expanded_node_ids = node_ids
@@ -2119,3 +2532,7 @@ def _editable_unit_ids(network: RawContributionNetwork) -> set[str]:
     if network.gate_scope == "contracted_token_nodes":
         return set(network.token_nodes_by_unit)
     return set(network.roots_by_unit)
+
+
+def _purchasable_gate_ids(network: RawContributionNetwork) -> set[str]:
+    return set(network.selection_unit_by_gate)

@@ -8,6 +8,7 @@ import re
 import string
 import urllib.request
 from collections import Counter
+from typing import Sequence
 
 
 READ_SYSTEM = "Answer the question using ONLY the passages. Give the shortest answer span. Output JSON only."
@@ -51,6 +52,135 @@ class ReaderClient:
         return str(content).strip()
 
 
+class LocalHFReader:
+    """Greedy local Hugging Face reader used for final verification."""
+
+    def __init__(
+        self,
+        model_path: str,
+        *,
+        device: str = "cuda",
+        dtype: str = "bfloat16",
+        attn_implementation: str = "eager",
+    ) -> None:
+        try:
+            import torch
+            from transformers import (
+                AutoConfig,
+                AutoModelForCausalLM,
+                AutoTokenizer,
+            )
+        except ImportError as exc:  # pragma: no cover - GPU integration
+            raise RuntimeError(
+                "LocalHFReader requires torch and transformers"
+            ) from exc
+
+        self.torch = torch
+        self.device = device
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+        )
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+        config = AutoConfig.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+        )
+        if hasattr(config, "base_model_tp_plan"):
+            config.base_model_tp_plan = None
+        if hasattr(config, "base_model_pp_plan"):
+            config.base_model_pp_plan = None
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            config=config,
+            torch_dtype=getattr(torch, dtype),
+            trust_remote_code=True,
+            attn_implementation=attn_implementation,
+        ).to(device)
+        self.model.eval()
+
+    def generate_responses_batch(
+        self,
+        question: str,
+        context_variants: Sequence[Sequence[dict]],
+        *,
+        max_new_tokens: int = 96,
+    ) -> list[str]:
+        """Greedily generate answers for context variants with left padding."""
+
+        if not context_variants:
+            return []
+        torch = self.torch
+        prompts = [
+            self._prompt_ids(question, contexts)
+            for contexts in context_variants
+        ]
+        max_prompt_length = max(len(prompt) for prompt in prompts)
+        input_ids = torch.full(
+            (len(prompts), max_prompt_length),
+            self.tokenizer.pad_token_id,
+            dtype=torch.long,
+            device=self.device,
+        )
+        attention_mask = torch.zeros_like(input_ids)
+        for row, prompt in enumerate(prompts):
+            start = max_prompt_length - len(prompt)
+            input_ids[row, start:] = torch.tensor(
+                prompt,
+                dtype=torch.long,
+                device=self.device,
+            )
+            attention_mask[row, start:] = 1
+        with torch.inference_mode():
+            generated = self.model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                do_sample=False,
+                max_new_tokens=max_new_tokens,
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+            )
+        responses = []
+        for sequence in generated[:, max_prompt_length:].tolist():
+            if self.tokenizer.eos_token_id in sequence:
+                sequence = sequence[
+                    :sequence.index(self.tokenizer.eos_token_id)
+                ]
+            responses.append(
+                self.tokenizer.decode(
+                    sequence,
+                    skip_special_tokens=True,
+                ).strip()
+            )
+        return responses
+
+    def _prompt_ids(
+        self,
+        question: str,
+        contexts: Sequence[dict],
+    ) -> list[int]:
+        messages = [
+            {"role": "system", "content": READ_SYSTEM},
+            {
+                "role": "user",
+                "content": READ_USER.format(
+                    question=question,
+                    passages=format_passages(list(contexts)),
+                ),
+            },
+        ]
+        prompt = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        return self.tokenizer(
+            prompt,
+            add_special_tokens=False,
+        )["input_ids"]
+
+
 def format_passages(contexts: list[dict]) -> str:
     return "\n\n".join(f"[{ctx.get('chunk_id', i)}] {ctx.get('text', '')}" for i, ctx in enumerate(contexts))
 
@@ -86,6 +216,10 @@ def answers_match(a: str, b: str) -> bool:
 def answers_exact_match(a: str, b: str) -> bool:
     """Hotpot-style normalized exact match without substring containment."""
 
+    left = (a or "").strip()
+    right = (b or "").strip()
+    if left == right:
+        return bool(left)
     na, nb = normalize_answer(a), normalize_answer(b)
     return bool(na and nb and na == nb)
 

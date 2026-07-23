@@ -1,1091 +1,629 @@
-# CausalityRAG: Token-Level RAG Answer Resilience
+# CausalityRAG
 
-CausalityRAG asks for the smallest set of retrieved-context tokens whose fixed,
-type-valid replacement changes a frozen RAG reader's clean answer. Query tokens
-and generated answer tokens are never edited, and chunk tokens are never
-matched against the clean answer string.
+CausalityRAG measures the resilience of a retrieval-augmented answer: it finds
+a small set of retrieved-context tokens whose fixed, type-valid replacement
+changes a frozen reader's answer.
 
-The current pipeline is:
-
-```text
-clean reader trajectory
--> path-preserving absorbing contribution DAG
--> ARC-JSD unary support augmentation
--> grouped layer-copy flow interdiction
--> K exact weighted min-cuts plus token-label rounding
--> feasibility-preserving token-label pruning
--> shared strict replacement registry
--> frozen-reader rerun and answer-change verification
-```
-
-The true reader objective is a black-box, potentially non-monotone set problem.
-The optimized surrogate is instead explicit:
+The final method optimizes an explicit contribution-flow surrogate and then
+verifies the selected intervention on the reader:
 
 ```text
-r_G(B) = min |S|  subject to residual contribution flow Phi(S) <= B.
+retrieval records
+  -> cached token/linguistic units
+  -> direct-activation absorbing contribution DAG
+  -> projected token contribution network
+  -> geometric weighted min-cuts
+  -> fixed-point strict replacement registry
+  -> reader intervention and local-HF verification
 ```
 
-Every layer-copy gate is labelled by its input chunk token. Editing one token
-removes all of its editable layer copies without contracting the layered DAG.
-The ungrouped threshold objective is known as Maximum Flow Blocker; shared token
-labels additionally induce a minimum-label-cut structure, so this is not one
-ordinary min-cut. For maximum active group rank `r`, threshold slack `eta`, and
-an optimum of size `k <= K`, the implemented `K`-guess algorithm returns a
-graph candidate satisfying
+Query tokens, generated answer tokens, retrieval results, and model weights are
+never edited. Context edits are non-deleting single-token replacements. A
+successful reader rerun is a verified upper bound on the true black-box
+resilience; the approximation guarantee applies only to the graph surrogate.
+
+## The graph is not the KDD graph
+
+The old entry point was named `run_kdd_graph.py`. That name was misleading and
+has been replaced by `scripts/build_contribution_graph.py`.
+
+The final `direct-activation` graph uses the original Qwen model's realized
+attention OV writes, residual writes, and MLP output writes, contracted with
+the clean-answer target-logit gradient. Sparse path mass is absorbed when
+`--absorbing-flow` is enabled. It does **not** use the learned transcoders or
+the feature-attribution construction of the referenced KDD method.
+
+The repository still contains attention and native-MLP graph builders for
+controlled comparisons, but the final configuration is:
 
 ```text
-|S| <= r (1 + 1/eta) k
-Phi(S) <= (1 + eta) B
+--graph-method direct-activation --absorbing-flow
 ```
 
-using `K` weighted `s-t` min-cuts. Threshold pruning can only reduce the set
-while retaining its residual-flow feasibility, so it preserves this bound. The
-guarantee is only for the graph surrogate. A successful reader rerun is a
-verified upper bound on true replacement resilience; no unconditional
-reader-level approximation is claimed. See
-[METHOD_GROUP_FLOW.md](METHOD_GROUP_FLOW.md) for definitions, the proof sketch,
-and the exact grouped-flow MILP used as an evaluation oracle.
+## Final method
 
-## Main Entry Points
+Let `Phi(S)` be the residual source-to-answer flow after closing the shared
+token gates in set `S`. For an internal threshold `B`, the graph problem is
 
-- `scripts/run_kdd_graph.py`: direct-activation absorbing contribution graph.
-- `scripts/build_replacement_registry.py`: shared answer-blind strict edits.
-- `scripts/run_raw_mixed_cut_gate.py`: grouped K-guess min-cut and rounding.
-- `scripts/run_residual_flow_attack.py`: fixed-budget or native-threshold reader
-  verification.
-- `scripts/analyze_group_flow_oracle.py`: exact graph-optimum audit with HiGHS.
+```text
+min |S|  subject to  Phi(S) <= B.
+```
 
-Sentence-lift pair ratios, contracted token graphs, closed-background flow,
-dense subgraphs, and the original ILP are retained as baselines or ablations.
+For each internal geometric scale `K_r`, the implementation solves the supported
+objective
 
-## Server Setup
+```text
+lambda_r |S| + Phi(S),  where lambda_r = eta B / K_r,
+```
 
-The GPU scorer requires PyTorch and Transformers.  spaCy is isolated behind a
-localhost service so that it can use a separate environment without introducing
-binary conflicts into the GPU environment.
+with one exact weighted min-cut. With scale ratio `1 + gamma`, the number of
+min-cuts is logarithmic in the editable token count. If the strict graph
+optimum has size `k`, the returned graph candidate satisfies
 
-Start the annotation service:
+```text
+|S| < (1 + (1 + gamma) / eta) k
+Phi(S) <= (1 + eta) B.
+```
+
+For `gamma = eta = 1`, this is a `(3, 2)` bicriteria guarantee for the graph
+surrogate, not a reader-level 2-approximation. The complete statement,
+assumptions, calibration argument, and limitations are in
+[METHOD_CONTRIBUTION_FLOW.md](METHOD_CONTRIBUTION_FLOW.md).
+
+`K_r` is internal solver notation. It is unrelated to the command-line
+variable `K` used below for the number of retrieved contexts.
+
+## Repository layout
+
+```text
+causalityrag/       reusable graph, optimization, reader, and editing code
+scripts/            stable entry points for the final pipeline
+configs/            frozen/reference configurations
+tests/              tests for the final and shared implementation
+exp/                baselines, ablations, plots, and historical runners
+results/            tracked compact result summaries
+```
+
+The `exp/` directory is intentionally outside the final pipeline. See
+[exp/README.md](exp/README.md) before running historical scripts.
+
+## Stable entry points
+
+| Stage | Command | Output |
+|---|---|---|
+| Annotation service | `scripts/spacy_annotation_server.py` | localhost API |
+| Token cache | `scripts/build_token_units_cache.py` | token/sentence JSONL |
+| Contribution graph | `scripts/build_contribution_graph.py` | graph JSONL |
+| Flow optimization | `scripts/solve_contribution_flow.py` | candidate JSONL |
+| Replacement registry | `scripts/build_replacement_registry.py` | registry JSONL |
+| Reader evaluation | `scripts/evaluate_reader.py` | intervention JSONL |
+| Local-HF verification | `scripts/verify_hf_results.py` | verified JSONL |
+| Artifact manifest | `scripts/build_artifact_manifest.py` | manifest JSON |
+| Tests | `scripts/run_tests.py` | lightweight test report |
+
+## Final pipeline contract
+
+The final proposal is pure contribution graph. No ARC-JSD unary score,
+standalone attention-baseline score, or replacement-derived score is added to
+the optimization network.
+
+| Stage | Required input | Produced artifact | Acceptance check |
+|---|---|---|---|
+| 1. Token cache | retrieval records, spaCy | `token_units.jsonl` | `queries=N`, nonzero units, context hashes stored |
+| 2. Contribution graph | records, frozen clean reader answer, local model | `contribution_graph.jsonl` | every row is `ok`, method is direct activation, clean answer stored |
+| 3. Graph optimization | graph, token cache | `contribution_flow.initial.jsonl` | projected-token network and geometric solver recorded |
+| 4. Registry closure | flow candidates, replacement pools | registry plus re-solved flow | zero evaluated registry misses |
+| 5. Reader evaluation | final flow, fixed registry, clean answer | budget and native evaluation JSONL | zero registry misses and replacement failures |
+| 6. Local-HF verification | saved edits, same local model | `hf_verification.jsonl` | clean and edited variants regenerated with eager attention |
+| 7. Manifest | all frozen artifacts | `manifest.json` | hashes, sizes, line counts, commit, and dirty state recorded |
+
+The immutable dependency chain is:
+
+```text
+DATA + K
+  -> TOKEN_UNITS
+  -> CLEAN_TARGET + CONTRIBUTION_GRAPH
+  -> PURE_GRAPH_FLOW_CANDIDATES
+  -> FIXED_REPLACEMENT_REGISTRY
+  -> FINAL_GRAPH_FLOW_CANDIDATES
+  -> READER_EVALUATIONS
+  -> LOCAL_HF_VERIFICATION
+  -> MANIFEST
+```
+
+Changing `DATA`, `K`, reader weights, prompt, decoding, graph parameters,
+registry contents, or solver parameters starts a new run and requires a new
+run directory.
+
+## Requirements
+
+Python 3.10 or 3.11 is recommended for the GPU environment.
+
+### GPU/scoring environment
 
 ```bash
-YVETTE_SPACY_MODEL=en_core_web_lg \
-/data1/yujia/envs/spacyner/bin/python \
-  scripts/spacy_annotation_server.py --port 8021
+python -m venv .venv-gpu
+source .venv-gpu/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-gpu.txt
 ```
 
-Required services and environment variables:
+This environment runs graph construction and local Hugging Face verification.
+
+### spaCy environment
+
+Keep spaCy in a separate environment when its binary dependencies conflict
+with the GPU stack:
 
 ```bash
-export YVETTE_LLM_BASE_URL=http://127.0.0.1:8000/v1
-export YVETTE_LLM_MODEL=qwen2.5-7b
+python -m venv .venv-spacy
+source .venv-spacy/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-spacy.txt
+python -m spacy download en_core_web_lg
+```
+
+### Server-side development tests
+
+Do not create these environments or run these tests on the local workstation.
+Use a configured server environment:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+On a server without pytest, use:
+
+```bash
+python scripts/run_tests.py
+```
+
+## Input contract
+
+The input may be JSONL, a JSON list, or a JSON object containing one of
+`records`, `questions`, `data`, `examples`, or `items`.
+
+A minimal record is:
+
+```json
+{
+  "id": "query-1",
+  "question": "Which film was released first?",
+  "answer": "Film A",
+  "retrieved": [
+    {
+      "chunk_id": "doc-1",
+      "title": "Film A",
+      "text": "Film A was released in 1975.",
+      "rank": 1
+    }
+  ]
+}
+```
+
+Accepted aliases include `_id`/`qid`/`question_id` for IDs,
+`retrieved`/`contexts`/`ctxs`/`docs`/`passages`/`results` for retrieved
+contexts, and `text`/`content`/`passage`/`body` for context text. Every stage
+preserves the record ID; misaligned or missing IDs fail fast.
+
+## Services and environment variables
+
+Start the spaCy service in the spaCy environment:
+
+```bash
+export YVETTE_SPACY_MODEL=en_core_web_lg
+python scripts/spacy_annotation_server.py --host 127.0.0.1 --port 8021
+```
+
+Graph targeting and reader evaluation use an OpenAI-compatible
+chat-completions server:
+
+```bash
 export CAUSALITYRAG_SPACY_BASE_URL=http://127.0.0.1:8021
+export CAUSALITYRAG_LLM_BASE_URL=http://127.0.0.1:8000/v1
+export CAUSALITYRAG_LLM_MODEL=qwen2.5-7b
 ```
 
-Build the contribution graph on HotpotQA:
+The older `YVETTE_LLM_BASE_URL` and `YVETTE_LLM_MODEL` names remain supported
+as fallbacks.
+
+## End-to-end HotpotQA example
+
+The commands below implement the final pipeline. Adjust the paths once:
 
 ```bash
-CUDA_VISIBLE_DEVICES=2 \
-/data1/yujia/envs/graphrag/bin/python \
-  scripts/run_kdd_graph.py \
-  --input /data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl \
-  --out out/absorbing_graph_hotpotqa.jsonl \
-  --model-path /data1/yujia/models/Qwen2.5-7B-Instruct \
-  --graph-method direct-activation --absorbing-flow --n 100 --k 5
+export DATA=/data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl
+export MODEL=/data1/yujia/models/Qwen2.5-7B-Instruct
+export CF_POOLS=/path/to/counterfactual_pools.json
+export TYPE_RULES=/path/to/type_rules.yaml  # optional
+export RUN_DIR=out/hotpotqa_final
+export N=1000
+export K=5
+export BETA=0.25
+export ETA=1.0
+export GAMMA=1.0
+export MAX_K_GUESS=0
+export MAX_BUDGET=5
+export MAX_NATIVE_TOKENS=10
+export RELAXED_FLOW_THRESHOLD=0.5
+mkdir -p "$RUN_DIR"
 ```
 
-The graph, unary cache, replacement registry, structural gate, and reader
-results are separate immutable JSONL stages. Final experiments must use a
-frozen manifest and local-HF eager re-verification; round-robin vLLM results are
-diagnostic only.
+`CF_POOLS` is a JSON object with `type_pool` and optional tab-delimited
+`role_pool` keys. `TYPE_RULES` is optional. If no compatible rule metadata YAML
+is available, leave it empty and remove the `--type-rules "$TYPE_RULES"` line
+from stages 4 and 5.
 
-## Frozen HotpotQA-1000 Result
+For a first smoke test, use `N=10` and a separate directory such as
+`RUN_DIR=out/hotpotqa_smoke10`. After it passes, start the 1,000-query run in a
+new empty run directory; do not mix smoke-test and final artifacts.
 
-The first closed-domain run is complete. On 397 local-HF exact-clean queries,
-grouped flow improves over size-matched ARC-JSD unary by 3.53 points at budget
-3 and 3.27 points at budget 5. The native threshold improves by 4.33 points on
-393 covered exact-clean queries while selecting 2.64 tokens on average. All
-three multi-token comparisons are significant under exact paired McNemar tests;
-the one-token methods tie.
-
-The final strict replacement registry is at a fixed point with zero evaluated
-candidate misses. A first-100 exact MILP audit finds a mean same-threshold size
-ratio of 1.05 and zero theorem-bound violations on all 96 theorem-applicable
-instances. Exact counts, confidence intervals, artifacts, and limitations are
-in [RESULTS_HOTPOTQA_1000.md](RESULTS_HOTPOTQA_1000.md). This is a strong
-single-dataset result, not yet a VLDB-ready empirical package.
-
-## Contextual Type and Replacement Rules
-
-Types are assigned from contextual spaCy NER, numeric/date patterns, or
-explicit relation cues.  A word is never treated as an entity merely because
-it appeared as a component of a value in an old replacement pool.
-
-For multi-token entities, replacements use the same slot of a same-type,
-same-length entity candidate.  For example, a surname slot is replaced with a
-surname slot.  Every candidate is re-annotated in its modified sentence and
-must preserve coarse POS, strict function/verb tags, and relevant morphology.
-Invalid candidates stay in the contribution DAG but receive uncuttable gates;
-the grouped flow problem is solved again over the valid shared token domain.
-
-The current validator covers contextual NER, POS, and morphology.  Long-range
-agreement and discourse consistency, such as gendered coreference outside the
-edited token's sentence, remain an explicit limitation and require a stronger
-semantic validator before final benchmark claims.
-
-## Validation
-
-The repository includes focused tests for:
-
-- sentence JSD and conservation-preserving token lifting;
-- signed Fisher interactions and positive supermodular envelopes;
-- absorbing contribution-flow construction;
-- weighted mixed min-cut, K guessing, grouped rounding, threshold pruning,
-  exact grouped-flow MILP, and registry filtering;
-- contextual NER/POS annotation and entity-slot replacement;
-- rejection of POS- and morphology-changing revisions;
-- exact-offset non-deleting context edits.
-
-On Server A, run all tests without installing pytest:
+### 1. Freeze token and linguistic units
 
 ```bash
-/data1/yujia/envs/spacyner/bin/python scripts/run_tests.py
+python scripts/build_token_units_cache.py \
+  --input "$DATA" \
+  --out "$RUN_DIR/token_units.jsonl" \
+  --summary-out "$RUN_DIR/token_units.summary.json" \
+  --backend service \
+  --workers 16 \
+  --n "$N" \
+  --k "$K"
 ```
 
-Standard `python -m pytest -q` also works in a development environment.
+Use `--backend local-process --spacy-model en_core_web_lg` when spaCy is
+installed in the current environment.
 
-## Historical Design Notes
+### 2. Build the direct-activation absorbing contribution graph
 
-The remainder of this document records the earlier reboot plan, ILP reference,
-and graph/cut baselines. It is retained for experiment provenance; the grouped
-contribution-flow pipeline above is the current method.
-
-# Repository Reboot Guide: RAG Answer Resilience
-
-This document defines the new repository direction. The old pipeline was mainly
-an evidence-attack benchmark: select an answer/fact, edit it, and report flip
-rates. The new repository should instead be organized around a stronger object:
-
-> A RAG answer's resilience is the minimum cost of type-valid counterfactual
-> revisions to retrieved-context units required to make the reader stop
-> preserving its original answer.
-
-The core method is:
-
-```text
-clean RAG run
--> attribution/support graph over context tokens and answer tokens
--> editable token-unit proposal
--> projection from token flow to editable units
--> minimum evidence cut
--> type-valid counterfactual revision
--> rerun reader and validate answer change
+```bash
+python scripts/build_contribution_graph.py \
+  --input "$DATA" \
+  --out "$RUN_DIR/contribution_graph.jsonl" \
+  --summary-out "$RUN_DIR/contribution_graph.summary.json" \
+  --model-path "$MODEL" \
+  --target reader \
+  --device cuda \
+  --dtype bfloat16 \
+  --max-context-tokens 800 \
+  --max-length 1024 \
+  --edge-topk 6 \
+  --max-receivers-per-layer 48 \
+  --max-edges 5000 \
+  --graph-method direct-activation \
+  --absorbing-flow \
+  --n "$N" \
+  --k "$K"
 ```
 
-The repository should be built around this spine, not around rule mining, not
-around simple answer-string replacement, and not around architecture comparison
-as the main claim.
+Do not rename this artifact as a KDD graph: the construction is the
+direct-activation graph described above. Each row also stores the frozen
+`clean_answer` used as its graph target.
 
-## 1. Positioning
+The OpenAI-compatible reader selected by `CAUSALITYRAG_LLM_MODEL` must use the
+same model weights, prompt, top-k contexts, and greedy decoding contract as
+the local model at `MODEL`.
 
-### One-sentence claim
+### 3. Produce an initial contribution-flow solution
 
-We measure the resilience of a RAG answer by finding the minimum-cost set of
-retrieved-context units whose type-valid counterfactual revision changes the
-reader's answer.
-
-### What this paper is
-
-- A method for measuring RAG answer resilience.
-- A graph/optimization formulation over retrieved context.
-- A counterfactual evidence revision framework.
-- A characterization of which answers, fact types, and question types have low
-  or high resilience.
-
-### What this paper is not
-
-- Not a generic RAG attack paper.
-- Not a rule-mining paper.
-- Not a claim that we invented attribution graphs.
-- Not a pure E&A paper that only reports flip ratios.
-- Not a proof that the model's internal knowledge state is known.
-
-### Recommended title direction
-
-```text
-Minimum Evidence Cuts for Measuring RAG Answer Resilience
+```bash
+python scripts/solve_contribution_flow.py \
+  --input "$DATA" \
+  --graphs "$RUN_DIR/contribution_graph.jsonl" \
+  --units-cache "$RUN_DIR/token_units.jsonl" \
+  --out "$RUN_DIR/contribution_flow.initial.jsonl" \
+  --summary-out "$RUN_DIR/contribution_flow.initial.summary.json" \
+  --solver geometric-k-guessing \
+  --projection layer-copy-token \
+  --capacity-mode raw \
+  --beta "$BETA" \
+  --eta "$ETA" \
+  --gamma "$GAMMA" \
+  --max-k-guess "$MAX_K_GUESS" \
+  --n "$N" \
+  --k "$K"
 ```
 
-Alternative:
+`--max-k-guess 0` means the geometric grid runs through the complete editable
+token count. A positive value truncates the guarantee to instances whose graph
+optimum is no larger than that value.
 
-```text
-How Resilient Are RAG Answers?
-Counterfactual Evidence Cuts in Retrieval-Augmented Generation
+### 4. Close the strict replacement registry
+
+Selection never sees replacement text. The registry fixes one answer-blind
+replacement per candidate and marks invalid tokens uncuttable.
+
+Build the first registry:
+
+```bash
+python scripts/build_replacement_registry.py \
+  --input "$DATA" \
+  --gates "$RUN_DIR/contribution_flow.initial.jsonl" \
+  --units-cache "$RUN_DIR/token_units.jsonl" \
+  --cf-pools "$CF_POOLS" \
+  --type-rules "$TYPE_RULES" \
+  --out "$RUN_DIR/replacement_registry.01.jsonl" \
+  --summary-out "$RUN_DIR/replacement_registry.01.summary.json" \
+  --max-budget "$MAX_BUDGET" \
+  --max-native-tokens "$MAX_NATIVE_TOKENS" \
+  --backend service \
+  --workers 16 \
+  --n "$N" \
+  --k "$K"
 ```
 
-## 2. Problem Setup
+Re-solve while excluding known-invalid tokens:
 
-For each example, we have:
-
-```text
-q       question
-C       retrieved context
-R       reader model / RAG pipeline
-a       clean answer, a = R(q, C)
+```bash
+python scripts/solve_contribution_flow.py \
+  --input "$DATA" \
+  --graphs "$RUN_DIR/contribution_graph.jsonl" \
+  --units-cache "$RUN_DIR/token_units.jsonl" \
+  --replacement-registry "$RUN_DIR/replacement_registry.01.jsonl" \
+  --replacement-registry-policy exclude-known-invalid \
+  --out "$RUN_DIR/contribution_flow.01.jsonl" \
+  --summary-out "$RUN_DIR/contribution_flow.01.summary.json" \
+  --solver geometric-k-guessing \
+  --projection layer-copy-token \
+  --capacity-mode raw \
+  --beta "$BETA" \
+  --eta "$ETA" \
+  --gamma "$GAMMA" \
+  --max-k-guess "$MAX_K_GUESS" \
+  --n "$N" \
+  --k "$K"
 ```
 
-The object of study is the instance:
+If `evaluated_candidate_registry_misses` is nonzero, build the next registry
+with the previous registry and the latest flow output:
 
-```text
-(q, C, a)
+```bash
+python scripts/build_replacement_registry.py \
+  --input "$DATA" \
+  --gates "$RUN_DIR/contribution_flow.01.jsonl" \
+  --existing-registry "$RUN_DIR/replacement_registry.01.jsonl" \
+  --units-cache "$RUN_DIR/token_units.jsonl" \
+  --cf-pools "$CF_POOLS" \
+  --type-rules "$TYPE_RULES" \
+  --out "$RUN_DIR/replacement_registry.02.jsonl" \
+  --summary-out "$RUN_DIR/replacement_registry.02.summary.json" \
+  --max-budget "$MAX_BUDGET" \
+  --max-native-tokens "$MAX_NATIVE_TOKENS" \
+  --backend service \
+  --workers 16 \
+  --n "$N" \
+  --k "$K"
 ```
 
-We ask:
-
-> What is the minimum evidence revision needed to make `R` stop preserving
-> answer `a` under the same question `q`?
-
-Gold answers can be used for evaluation and filtering, but the core method
-should be able to operate from `q`, `C`, and `a`.
-
-## 3. Core Definitions
-
-### 3.1 Retrieved Context Tokens
-
-Let the retrieved context be tokenized by the reader tokenizer:
-
-```text
-C = (t_1, t_2, ..., t_n)
-```
-
-The attribution/support graph is initially token-level because transformer
-decoding and attribution are token-level.
-
-### 3.2 Editable Token Unit
-
-Do not force the intervention unit to be a full entity span. Also do not use
-arbitrary raw subword tokens as final edit units.
-
-Define an editable token unit `u` as:
-
-> The smallest contiguous segment of retrieved-context tokens for which at
-> least one valid counterfactual replacement exists in local context.
-
-So `u` may be:
-
-- a single token, e.g. `Paris -> London`;
-- a token inside a larger entity, e.g. `New York -> New Jersey` by editing
-  `York -> Jersey`;
-- a multi-token entity or value, e.g. `San Diego -> Boston`;
-- a numeric/date expression, e.g. `1947 -> 1952`;
-- a relation cue, e.g. `was born in -> died in`;
-- a short factual phrase when token/value replacement is insufficient.
-
-Each unit has:
-
-```text
-text(u)       original text
-tokens(u)     token interval
-type(u)       PERSON / GPE / DATE / NUMBER / RELATION_CUE / PHRASE / ...
-Omega(u)      type-valid replacement domain
-cost(u)       edit cost
-```
-
-Important principle:
-
-```text
-token = attribution unit
-editable unit = intervention unit
-```
-
-Most editable units will be one token. Multi-token units are used only when a
-valid edit requires merging adjacent tokens.
-
-### 3.3 Replacement Domain
-
-For each editable unit `u`, define a replacement domain:
-
-```text
-Omega(u) = { valid counterfactual replacements for u }
-```
-
-Examples:
-
-```text
-DATE          same-granularity dates
-PERSON        plausible person names
-GPE/LOC       plausible locations
-MONEY         same-currency / same-scale amounts
-PERCENT       alternative percentages
-CARDINAL      same-role numbers
-RELATION_CUE  compatible relation cues
-PHRASE        locally fluent factual phrase rewrites
-```
-
-The domain does not need to be enumerated fully. In implementation, it can be a
-sampler:
-
-```text
-sample_replacements(u, m)
-```
-
-### 3.4 Answer Preservation Score
-
-Define:
-
-```text
-K(q, C', a) in [0, 1]
-```
-
-as the degree to which the reader preserves the original answer `a` when run on
-modified context `C'`.
-
-Possible implementations:
-
-```text
-binary:
-  K = 1 if R(q, C') is semantically equivalent to a
-  K = 0 otherwise
-
-continuous judge:
-  K = semantic-equivalence score between R(q, C') and a
-
-logprob-based:
-  K = probability/log-likelihood assigned to answer a
-```
-
-For the first implementation, use a binary semantic judge. Later, add a
-continuous score if stable.
-
-### 3.5 Expected Answer Preservation
-
-For a set of editable units `S`, a revision assignment is:
-
-```text
-rho: S -> Omega(S)
-```
-
-The revised context is:
-
-```text
-C_rho = C[S := rho(S)]
-```
-
-Define expected preservation:
-
-```text
-Pres(S) = E_{rho ~ P_S} [ K(q, C_rho, a) ]
-```
-
-where `P_S` is a replacement distribution over valid edits. In practice:
-
-```text
-Pres(S) ~= (1/m) * sum_j K(q, C_{rho_j}, a)
-```
-
-using `m` sampled type-valid revisions.
-
-This expectation matters because a span can have many valid replacements. Some
-may change the answer, and some may not. We should measure the average
-preservation drop under plausible type-valid replacements, not cherry-pick one
-adversarial value.
-
-### 3.6 RAG Answer Resilience
-
-Given threshold `tau`, define:
-
-```text
-Res_tau(q, C, a)
-  = min_{S subset U(C)} cost(S)
-    subject to Pres(S) <= tau
-```
-
-where:
-
-```text
-cost(S) = sum_{u in S} cost(u)
-```
-
-Interpretation:
-
-- low `Res_tau`: the answer is fragile;
-- high `Res_tau`: the answer is resilient;
-- infinite/no solution: the allowed evidence edits cannot change the answer.
-
-### 3.7 Generalized Evidence Responsibility
-
-A single unit's responsibility should not be binary. Each unit has many possible
-replacement values.
-
-For unit `u` and contingency set `Gamma`, define:
-
-```text
-Resp(u, Gamma)
-  =
-  K(q, C_Gamma, a)
-  - E_{y ~ P_u} K(q, C_{Gamma, u := y}, a)
-  ------------------------------------------------
-  1 + cost(Gamma)
-```
-
-Global responsibility:
-
-```text
-Resp(u) = max_Gamma Resp(u, Gamma)
-```
-
-Intuition:
-
-- If editing `u` alone changes the answer, responsibility is high.
-- If `u` only matters after several other units are edited, responsibility is
-  discounted.
-- If no valid replacement of `u` changes preservation, responsibility is low.
-
-This follows the spirit of generalized responsibility: variables are not binary,
-and their contribution is measured over a replacement domain.
-
-## 4. Attribution/Support Graph
-
-Start from the graph style of the RAG attribution-graph paper:
-
-```text
-question/context tokens
--> intermediate activations / attribution nodes
--> generated answer tokens
-```
-
-Let:
-
-```text
-G_attr(q, C, a) = (V, E, w)
-```
-
-with:
-
-```text
-V_C  context token nodes
-V_Q  question token nodes
-V_H  intermediate attribution/activation nodes
-V_A  answer token nodes
-```
-
-Edges carry attribution/support weights:
-
-```text
-w(e) >= 0
-```
-
-This graph is not our main contribution. It is an estimator of support flow.
-The repository should allow several graph estimators:
-
-```text
-circuit_tracing         strong, open-weight only
-gradient_x_input        cheaper open-weight baseline
-attention_rollout       cheap but weak
-span_occlusion          black-box but expensive
-leave_one_out           black-box causal baseline
-llm_support_judge       heuristic baseline
-```
-
-The contribution is:
-
-```text
-support graph -> editable unit projection -> minimum evidence cut
-```
-
-not the attribution estimator itself.
-
-## 5. Projection From Tokens to Editable Units
-
-Given token-level support flow, project it onto editable units:
-
-```text
-pi: context tokens -> editable units
-```
-
-For each unit:
-
-```text
-support(u) = total support flow from tokens(u) to answer tokens
-```
-
-Implementations:
-
-```text
-sum:
-  support(u) = sum_{t in tokens(u)} flow(t -> answer)
-
-length-normalized:
-  support(u) = sum flow / sqrt(|tokens(u)|)
-
-max:
-  support(u) = max_{t in tokens(u)} flow(t -> answer)
-```
-
-Default:
-
-```text
-support(u) = sum flow / sqrt(|tokens(u)|)
-```
-
-to avoid always favoring longer units.
-
-## 6. Editable Unit Proposal
-
-The repository needs a deterministic unit proposer.
-
-### Inputs
-
-```text
-raw context C
-reader tokenizer
-token offsets
-NER model
-regex value extractor
-relation cue patterns
-optional answer a
-```
-
-### Candidate sources
-
-Generate candidate units from:
-
-```text
-single high-flow tokens
-NER mentions
-numeric/date/money regexes
-proper noun chunks
-relation cue patterns
-answer/alias matches
-short factual phrases for yes/no or relation-heavy cases
-```
-
-### Critical design choice
-
-Do not only propose full NER spans. Include single-token candidates inside NER
-mentions when local replacement can preserve a valid entity or phrase.
-
-Example:
-
-```text
-New York -> New Jersey
-```
-
-can be represented as:
-
-```text
-u = "York"
-y = "Jersey"
-```
-
-with a local validator confirming that `New Jersey` is a valid place phrase.
-
-### Validation
-
-A candidate edit `(u -> y)` is valid only if:
-
-```text
-1. replacement is type-compatible or locally phrase-compatible;
-2. modified text remains fluent;
-3. modified text is a factual/content edit, not punctuation/noise;
-4. replacement is not an alias of the original answer;
-5. prompt/question/instruction text is not modified;
-6. local validator accepts the changed phrase/sentence.
-```
-
-### Output schema
+Use `replacement_registry.02.jsonl` in the next solve, increment the suffixes,
+and repeat until the flow summary reports:
 
 ```json
 {
-  "unit_id": "u17",
-  "text": "York",
-  "char_start": 120,
-  "char_end": 124,
-  "token_start": 31,
-  "token_end": 32,
-  "sentence_id": 2,
-  "unit_type": "PLACE_COMPONENT",
-  "sources": ["token", "inside_ner"],
-  "edit_cost": 1.0,
-  "replacement_policy": "place_component",
-  "support": 0.73
+  "registry_fixed_point": true,
+  "evaluated_candidate_registry_misses": 0
 }
 ```
 
-## 7. Minimum Evidence Cut
-
-The exact resilience objective is combinatorial:
-
-```text
-min cost(S) subject to Pres(S) <= tau
-```
-
-The graph estimator gives an approximate support-flow objective:
-
-```text
-min cost(S)
-subject to remaining_support_flow(S) <= tau_graph
-```
-
-### Unit-level graph
-
-Create a support graph over editable units:
-
-```text
-source -> editable units -> answer sink
-```
-
-or a richer graph if sentence/phrase/group structure is useful:
-
-```text
-source -> sentence groups -> editable units -> answer sink
-```
-
-For node cut, use node splitting:
-
-```text
-u_in -> u_out
-```
-
-with edge capacity:
-
-```text
-capacity(u_in, u_out) = cost(u)
-```
-
-Edges carrying support flow connect through `u_in` and `u_out`. A minimum cut
-that cuts `u_in -> u_out` selects unit `u` for revision.
-
-### Practical variants
-
-Implement both:
-
-```text
-minimum cut:
-  find smallest-cost set predicted to cut answer support
-
-budgeted maximum support removal:
-  given budget b, choose units maximizing removed support
-```
-
-The budgeted variant is often easier to debug first.
-
-## 8. Counterfactual Revision
-
-For selected set `S_hat`, generate `m` valid revision assignments:
-
-```text
-rho_1, ..., rho_m
-```
-
-Each assignment maps:
-
-```text
-u -> y, y in Omega(u)
-```
-
-Then produce revised contexts:
-
-```text
-C_rho_j = C[S_hat := rho_j(S_hat)]
-```
-
-Rerun:
-
-```text
-a'_j = R(q, C_rho_j)
-```
-
-Score:
-
-```text
-K_j = K(q, C_rho_j, a)
-```
-
-Estimate:
-
-```text
-Pres(S_hat) = mean_j K_j
-```
-
-## 9. Metrics
-
-Primary:
-
-```text
-Res_tau                 minimum revision cost
-Pres(S_hat)             answer preservation after predicted cut
-answer_preservation_drop
-cost_per_drop
-success_rate            fraction Pres <= tau
-```
-
-Secondary:
-
-```text
-flip                    answer differs from clean answer
-strict_override         answer changes and adopts fake value
-compliance              fake value appears in output
-answer_removed          original evidence value removed from served context
-edit_validity           replacement passed validation
-```
-
-For loop/agentic pipelines:
-
-```text
-rounds_to_answer
-non_termination
-retrieval_trace_overlap
-```
-
-For method comparison:
-
-```text
-edit_count_to_flip
-support_removed
-cut_size
-runtime
-reader_calls
-```
-
-## 10. Baselines
-
-Compare against:
-
-```text
-random editable unit
-answer-string unit
-highest attribution unit
-LLM evidence judge selector
-leave-one-out selector
-full NER span selector
-oracle/gold selector, evaluation only
-```
-
-Key hypothesis:
-
-```text
-minimum evidence cut finds smaller and more effective revision sets than
-answer-string, random, or top-attribution single-unit baselines.
-```
-
-## 11. Experiments
-
-### P0 gate
-
-Run before writing the full paper:
-
-```text
-1 reader
-2 datasets
-100-200 examples each
-naive RAG first
-```
-
-Compare:
-
-```text
-random
-answer-string
-top-attribution unit
-LLM evidence judge
-minimum evidence cut
-leave-one-out oracle-ish selector
-```
-
-Report:
-
-```text
-edit_count_to_flip
-Pres(S)
-answer_preservation_drop
-valid_edit_rate
-runtime
-case cards
-```
-
-P0 success condition:
-
-```text
-minimum evidence cut produces lower-cost and/or higher-drop revisions than
-answer-string and top-attribution baselines.
-```
-
-### Main characterization
-
-After P0:
-
-```text
-datasets x readers x RAG pipelines
-fact/unit type x question type
-corroboration vs cut size
-single-unit vs multi-unit revisions
-black-box vs open-weight support graph estimators
-```
-
-### Must-have table
-
-Fact/unit type by question type:
-
-```text
-rows:    edited unit type
-columns: question type
-cells:   Res_tau / preservation drop / n
-```
-
-This table should show that resilience is workload-dependent.
-
-## 12. Case Cards
-
-Each case card should show:
-
-```text
-question
-clean context snippet
-clean answer
-selected units
-attribution/support scores
-minimum cut cost
-counterfactual edits
-poisoned context snippet
-new answer
-K / flip / compliance
-failure mode
-```
-
-Important case buckets:
-
-```text
-single-token fragile answer
-multi-unit corroborated answer
-answer-string baseline fails but min-cut succeeds
-top-attribution fails because corroboration remains
-numeric/comparison derived answer
-yes/no label answer
-parametric-memory-resistant answer
-invalid edit filtered by validator
-```
-
-## 13. Suggested Repository Layout
-
-```text
-rag_resilience/
-  data/
-    loaders/
-    schemas.py
-
-  rag/
-    retriever.py
-    readers.py
-    pipelines.py
-
-  attribution/
-    base.py
-    attention_rollout.py
-    gradients.py
-    occlusion.py
-    leave_one_out.py
-    circuit_tracing.py
-
-  units/
-    propose.py
-    validate.py
-    replacements.py
-    costs.py
-    schema.py
-
-  graph/
-    project.py
-    min_cut.py
-    budgeted.py
-    support_graph.py
-
-  revision/
-    apply.py
-    score.py
-    audit.py
-
-  experiments/
-    run_cell.py
-    run_p0.py
-    run_main_grid.py
-    aggregate.py
-
-  analysis/
-    tables.py
-    figures.py
-    case_cards.py
-
-  configs/
-    readers.yaml
-    datasets.yaml
-    replacement_policies.yaml
-
-  tests/
-    test_unit_alignment.py
-    test_replacement_validity.py
-    test_min_cut.py
-    test_revision_apply.py
-```
-
-## 14. Audit Log Schema
-
-Every example should emit JSONL with:
-
-```json
-{
-  "id": "...",
-  "dataset": "...",
-  "question": "...",
-  "clean_answer": "...",
-  "context_ids": ["..."],
-  "units": [
-    {
-      "unit_id": "u17",
-      "text": "York",
-      "type": "PLACE_COMPONENT",
-      "tokens": [31, 32],
-      "support": 0.73,
-      "cost": 1.0,
-      "valid_replacements": ["Jersey", "Orleans"]
-    }
-  ],
-  "selected_cut": ["u17"],
-  "cut_cost": 1.0,
-  "revisions": [
-    {
-      "assignment": {"u17": "Jersey"},
-      "poisoned_answer": "...",
-      "K": 0.0,
-      "flip": true,
-      "compliance": true,
-      "valid_edit": true
-    }
-  ],
-  "preservation": 0.0,
-  "success": true
-}
-```
-
-## 15. Claims To Avoid
-
-Do not claim:
-
-```text
-we invented attribution graphs
-min-cut guarantees LLM answer change
-token attribution is true causality
-closed-book correctness proves parametric knowledge
-rule mining is the contribution
-all RAG failures are evidence failures
-```
-
-Safe claim:
-
-```text
-We estimate a minimum evidence revision set from an attribution-derived support
-graph and validate the prediction by counterfactually revising the retrieved
-context and rerunning the RAG reader.
-```
-
-## 16. First Implementation Milestone
-
-Build P0 in this order:
-
-1. Basic RAG runner that stores clean context, answer, and token offsets.
-2. Editable unit proposer with:
-   - single-token units;
-   - NER/value units;
-   - relation cue patterns;
-   - local edit validator.
-3. One attribution estimator:
-   - start with span/token occlusion or attention rollout;
-   - add circuit tracing only after the pipeline works.
-4. Unit projection and support scoring.
-5. Budgeted support-removal selector.
-6. Minimum cut selector.
-7. Type-valid replacement sampler.
-8. Rerun + answer preservation judge.
-9. P0 comparison table and case cards.
-
-If P0 does not beat answer-string and top-attribution baselines, keep the graph
-selector as an ablation and return to the benchmark framing. If P0 works, the
-new repository should be written as a method paper around RAG answer resilience.
-
-## 17. Current Minimal Implementation
-
-The first runnable baseline is a token-level ILP selector:
+For the frozen final artifact, run once more with the fixed registry and
+`--replacement-registry-policy allow-only`. This makes the shared editable
+domain explicit and immutable:
 
 ```bash
-/data1/yujia/envs/spacyner/bin/python scripts/run_token_ilp.py \
-  --input /data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl \
-  --out /data1/yujia/CausalityRAG/out/token_ilp_smoke.jsonl \
-  --n 10 \
-  --k 5 \
-  --tau-graph 0.2
+export REGISTRY="$RUN_DIR/replacement_registry.02.jsonl"
+
+python scripts/solve_contribution_flow.py \
+  --input "$DATA" \
+  --graphs "$RUN_DIR/contribution_graph.jsonl" \
+  --units-cache "$RUN_DIR/token_units.jsonl" \
+  --replacement-registry "$REGISTRY" \
+  --replacement-registry-policy allow-only \
+  --out "$RUN_DIR/contribution_flow.FINAL.jsonl" \
+  --summary-out "$RUN_DIR/contribution_flow.FINAL.summary.json" \
+  --solver geometric-k-guessing \
+  --projection layer-copy-token \
+  --capacity-mode raw \
+  --beta "$BETA" \
+  --eta "$ETA" \
+  --gamma "$GAMMA" \
+  --max-k-guess "$MAX_K_GUESS" \
+  --n "$N" \
+  --k "$K"
+
+export FLOW="$RUN_DIR/contribution_flow.FINAL.jsonl"
 ```
 
-It produces one JSONL audit row per question with token units, support scores,
-the selected minimum evidence cut, cut cost, and top candidate tokens.
+Keep `REGISTRY` pointed at whichever numbered registry reached the fixed point.
 
-Implementation scope:
+### 5. Evaluate saved selections with the served reader
 
-- token units are single retrieved-context tokens with character offsets;
-- default support is a deterministic proxy from answer overlap, question overlap,
-  token type, and retrieval rank;
-- if a record contains `token_supports`, the same ILP can consume precomputed
-  attribution/support scores;
-- the selector implements both `min-cost` and `budgeted` objectives;
-- `scipy.optimize.milp` is used when available, with an exact integer-cost DP
-  fallback for the unit-cost token baseline.
-
-Typed revision can reuse the previous YVETTE rule artifacts:
+First run the fixed-budget evaluations:
 
 ```bash
-/data1/yujia/envs/spacyner/bin/python scripts/run_token_attack.py \
-  --input /data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl \
-  --cf-pools /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/cf_pools.json \
-  --type-rules /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/type_rules_llm.yaml \
-  --out /data1/yujia/CausalityRAG/out/token_attack_typed_smoke.jsonl \
-  --n 3 \
-  --k 5 \
-  --objective budgeted \
-  --budget 8 \
-  --verify-reader
+for BUDGET in 1 3 5; do
+  python scripts/evaluate_reader.py \
+    --input "$DATA" \
+    --gate "$FLOW" \
+    --clean-reference "$RUN_DIR/contribution_graph.jsonl" \
+    --replacement-registry "$REGISTRY" \
+    --units-cache "$RUN_DIR/token_units.jsonl" \
+    --cf-pools "$CF_POOLS" \
+    --type-rules "$TYPE_RULES" \
+    --out "$RUN_DIR/evaluation.b${BUDGET}.jsonl" \
+    --summary-out "$RUN_DIR/evaluation.b${BUDGET}.summary.json" \
+    --selection-mode budget \
+    --token-budget "$BUDGET" \
+    --max-tokens "$BUDGET" \
+    --clean-correct-policy exact \
+    --strict-replacements \
+    --k "$K"
+done
 ```
 
-This runs ILP selection, applies typed token-level replacements from the rule
-library / value pools, reruns the reader, and records whether the answer changed.
-
-For a no-`tau_graph` reader-verified search, use:
+Then run the native graph-threshold evaluation. With `BETA=0.25` and `ETA=1`,
+the solver accepts candidates up to the relaxed residual-flow fraction
+`(1 + ETA) * BETA = 0.50`:
 
 ```bash
-/data1/yujia/envs/spacyner/bin/python scripts/run_token_attack.py \
-  --input /data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl \
-  --cf-pools /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/cf_pools.json \
-  --type-rules /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/type_rules_llm.yaml \
-  --out /data1/yujia/CausalityRAG/out/token_attack_search_flip.jsonl \
-  --n 10 \
-  --k 5 \
-  --objective search-flip \
-  --max-budget 20
+python scripts/evaluate_reader.py \
+  --input "$DATA" \
+  --gate "$FLOW" \
+  --clean-reference "$RUN_DIR/contribution_graph.jsonl" \
+  --replacement-registry "$REGISTRY" \
+  --units-cache "$RUN_DIR/token_units.jsonl" \
+  --cf-pools "$CF_POOLS" \
+  --type-rules "$TYPE_RULES" \
+  --out "$RUN_DIR/evaluation.native.jsonl" \
+  --summary-out "$RUN_DIR/evaluation.native.summary.json" \
+  --selection-mode threshold \
+  --remaining-flow-threshold "$RELAXED_FLOW_THRESHOLD" \
+  --max-tokens "$MAX_NATIVE_TOKENS" \
+  --clean-correct-policy exact \
+  --strict-replacements \
+  --k "$K"
 ```
 
-This tries edit budgets from 1 upward. For each budget, ILP selects the token
-set with maximum predicted support removed; the reader is rerun immediately, and
-the search stops at the first budget that changes the answer.
+The primary output is the contribution-flow selection. The artifact also
+contains a cardinality-matched ranking by graph-local token support for
+diagnostic comparison; it is not ARC-JSD and is not part of the proposed
+selector.
 
-For the graph/max-flow selector:
+### 6. Perform final local-HF eager verification
+
+Served-reader results are diagnostic. Final answer-change metrics should be
+recomputed with the same local model weights and eager attention backend used
+for scoring:
 
 ```bash
-/data1/yujia/envs/spacyner/bin/python scripts/run_token_flow.py \
-  --input /data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl \
-  --cf-pools /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/cf_pools.json \
-  --type-rules /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/type_rules_llm.yaml \
-  --out /data1/yujia/CausalityRAG/out/token_flow_hotpotqa_10.jsonl \
-  --n 10 \
-  --k 5 \
-  --target reader
+python scripts/verify_hf_results.py \
+  --input "$DATA" \
+  --results \
+    "$RUN_DIR/evaluation.b1.jsonl" \
+    "$RUN_DIR/evaluation.b3.jsonl" \
+    "$RUN_DIR/evaluation.b5.jsonl" \
+    "$RUN_DIR/evaluation.native.jsonl" \
+  --out "$RUN_DIR/hf_verification.jsonl" \
+  --summary-out "$RUN_DIR/hf_verification.summary.json" \
+  --model-path "$MODEL" \
+  --device cuda \
+  --dtype bfloat16 \
+  --max-new-tokens 96 \
+  --k "$K"
 ```
 
-This builds a query-token to context-token to clean-answer support graph. Context
-tokens are node-split with edit cost as capacity, and max-flow/min-cut returns
-the minimum token vertex cut.
+Use `--clean-targets` only when a separate JSONL explicitly freezes
+`{"id", "target_answer"}` pairs.
+
+### 7. Freeze an artifact manifest
+
+```bash
+python scripts/build_artifact_manifest.py \
+  --repository . \
+  --artifacts \
+    "$RUN_DIR/token_units.jsonl" \
+    "$RUN_DIR/contribution_graph.jsonl" \
+    "$FLOW" \
+    "$REGISTRY" \
+    "$RUN_DIR/hf_verification.jsonl" \
+  --metadata-json "{\"dataset\":\"hotpotqa\",\"n\":$N,\"k\":$K}" \
+  --out "$RUN_DIR/manifest.json"
+```
+
+The manifest records SHA-256 hashes, byte and line counts, the current commit,
+branch, and dirty-worktree state.
+
+## Expected final artifacts
+
+```text
+out/hotpotqa_final/
+  token_units.jsonl
+  token_units.summary.json
+  contribution_graph.jsonl
+  contribution_graph.summary.json
+  contribution_flow.initial.jsonl
+  contribution_flow.initial.summary.json
+  replacement_registry.01.jsonl
+  replacement_registry.01.summary.json
+  ... additional registry/flow closure iterations ...
+  contribution_flow.FINAL.jsonl
+  contribution_flow.FINAL.summary.json
+  evaluation.b1.jsonl
+  evaluation.b1.summary.json
+  evaluation.b3.jsonl
+  evaluation.b3.summary.json
+  evaluation.b5.jsonl
+  evaluation.b5.summary.json
+  evaluation.native.jsonl
+  evaluation.native.summary.json
+  hf_verification.jsonl
+  hf_verification.summary.json
+  manifest.json
+```
+
+## Method review checklist
+
+- The stable commands contain no `--unary-score-rows`, `--graph-weight`, or
+  ARC-JSD artifact.
+- The graph method is `direct-activation` with `--absorbing-flow`.
+- The query, answer, and retrieval ranking remain fixed; only retrieved
+  context-token gates are purchasable.
+- `layer-copy-token` is the current CLI name for projecting all transformer
+  layer copies of one context token into one token node. It is not the old
+  grouped layer-copy rounding method.
+- The final solver is `geometric-k-guessing` with explicit `BETA`, `ETA`,
+  `GAMMA`, and `MAX_K_GUESS`.
+- `MAX_K_GUESS=0` covers the full editable token domain.
+- Invalid replacements remain in the flow graph but are made uncuttable.
+- Registry closure ends only when
+  `evaluated_candidate_registry_misses == 0`.
+- Budget results use the same fixed registry and evaluate budgets 1, 3, and 5.
+- Native evaluation uses the solver's relaxed threshold
+  `(1 + ETA) * BETA`.
+- Final reported reader results come from local-HF eager verification rather
+  than the served-reader diagnostic.
+
+## Output and reproducibility rules
+
+- JSONL stage outputs are immutable inputs to later stages.
+- Keep the same `id`, record order, top-k value, model weights, tokenizer,
+  prompt, dtype, and eager-attention backend throughout a final run.
+- Use the token cache to enforce context hashes and offsets.
+- Do not regenerate replacements separately for competing selectors.
+- Do not interpret vLLM/server disagreement as an intervention effect.
+- Record the final registry fixed point and artifact manifest.
+
+## Tests
+
+Run tests only in the configured server environments, not on the local
+workstation. Unit tests that do not load the model can run in the server spaCy
+or development environment:
+
+The final test suite covers input normalization, token offsets, contextual
+replacement validity, reader metrics, direct contribution graphs, projected
+token flow, exact weighted min-cuts, geometric scales, registry filtering, and
+saved-intervention verification. ARC-JSD tests are retained under `exp/`.
+
+```bash
+python scripts/run_tests.py
+```
+
+or:
+
+```bash
+python -m pytest -q
+```
+
+GPU integration stages require the model and external data and are not part of
+the lightweight unit suite. Run the 10-query smoke pipeline on the GPU server
+before starting the frozen 1,000-query run.
+
+## Results and experiment history
+
+The earlier hybrid HotpotQA-1000 report is retained as
+[an experimental result](exp/RESULTS_HOTPOTQA_1000.md). It does not describe
+the final pure contribution-graph method.
+
+Historical baselines, ablations, plotting scripts, and the earlier HotpotQA
+protocol are retained under `exp/` for provenance. They are not stable final
+entry points and may use historical terminology or artifact schemas.
