@@ -309,30 +309,22 @@ def main() -> None:
                         for unit_id in candidate["unary_matched_ids"]
                     ],
                 })
-            budget_candidates = []
-            for candidate in sweep.get("budget_candidates", []):
-                budget_candidates.append({
-                    **candidate,
-                    "selected_tokens": [
-                        str(by_id[unit_id].get("text", ""))
-                        for unit_id in candidate["selected_ids"]
-                    ],
-                    "unary_matched_tokens": [
-                        str(by_id[unit_id].get("text", ""))
-                        for unit_id in candidate["unary_matched_ids"]
-                    ],
-                })
+            native_candidate = sweep.get("bicriteria_candidate") or {}
             evaluated_registry_ids = {
                 str(unit_id)
-                for candidate in candidates + budget_candidates
                 for key in ("selected_ids", "unary_matched_ids")
-                for unit_id in candidate.get(key, [])
+                for unit_id in native_candidate.get(key, [])
             }
             registry_candidate_misses = sorted(
                 evaluated_registry_ids - known_registry_ids
                 if known_registry_ids is not None
                 else ()
             )
+            native_sweep = {
+                key: value
+                for key, value in sweep.items()
+                if key != "budget_candidates"
+            }
             row = {
                 "index": global_index,
                 "id": identifier,
@@ -353,9 +345,8 @@ def main() -> None:
                 "elapsed_seconds": round(time.monotonic() - started, 6),
                 "network_status": network.status,
                 "network_diagnostics": network.diagnostics,
-                **sweep,
+                **native_sweep,
                 "candidates": candidates,
-                "budget_candidates": budget_candidates,
             }
             rows.append(row)
             output.write(json.dumps(row, ensure_ascii=False) + "\n")

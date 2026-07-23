@@ -215,17 +215,13 @@ def load_evaluation_methods(
             identifier = str(row.get("id", ""))
             if not identifier:
                 continue
-            mode = str(row.get("selection_mode", "selection"))
-            setting = (
-                f"b{row.get('token_budget')}"
-                if mode == "budget"
-                else f"t{row.get('remaining_flow_threshold')}"
-            )
+            threshold = row.get("remaining_flow_threshold")
+            setting = f"native_t{threshold}"
             methods = evaluations.setdefault(identifier, {})
             for method_name, result in row.get("methods", {}).items():
                 if result.get("status") != "ok":
                     continue
-                key = f"{mode}_{setting}:{method_name}"
+                key = f"{setting}:{method_name}"
                 if key in methods:
                     key = f"{source_name}:{key}"
                 methods[key] = result

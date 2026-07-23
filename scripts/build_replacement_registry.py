@@ -60,8 +60,6 @@ def _process_local_registry(task: dict) -> dict:
             else {}
         ),
         k=task["k"],
-        max_budget=task["max_budget"],
-        max_native_tokens=task["max_native_tokens"],
         nlp=_LOCAL_NLP,
         library=_LOCAL_LIBRARY,
         editor=_LOCAL_EDITOR,
@@ -88,8 +86,6 @@ def main() -> None:
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--n", type=int, default=100)
     parser.add_argument("--k", type=int, default=5)
-    parser.add_argument("--max-budget", type=int, default=5)
-    parser.add_argument("--max-native-tokens", type=int, default=0)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument(
         "--backend",
@@ -108,10 +104,6 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
-    if args.max_budget <= 0:
-        raise ValueError("max-budget must be positive")
-    if args.max_native_tokens < 0:
-        raise ValueError("max-native-tokens must be non-negative")
     if args.workers <= 0:
         raise ValueError("workers must be positive")
 
@@ -156,8 +148,6 @@ def main() -> None:
                 existing_by_id=existing_by_id,
                 units_by_id=units_by_id,
                 k=args.k,
-                max_budget=args.max_budget,
-                max_native_tokens=args.max_native_tokens,
                 nlp=nlp,
                 library=library,
                 editor=editor,
@@ -184,8 +174,6 @@ def main() -> None:
                 "existing": existing_by_id.get(identifier),
                 "context_row": units_by_id.get(identifier),
                 "k": args.k,
-                "max_budget": args.max_budget,
-                "max_native_tokens": args.max_native_tokens,
             })
         executor = ProcessPoolExecutor(
             max_workers=args.workers,
@@ -221,8 +209,6 @@ def main() -> None:
         ),
         "workers": args.workers,
         "backend": args.backend,
-        "max_budget": args.max_budget,
-        "max_native_tokens": args.max_native_tokens,
         "contract": "strict_contextual_pos_tag_morphology",
         "answer_blind": True,
     }
@@ -242,8 +228,6 @@ def build_registry_row(
     existing_by_id: dict[str, dict],
     units_by_id: dict[str, dict],
     k: int,
-    max_budget: int,
-    max_native_tokens: int,
     nlp,
     library,
     editor,
@@ -263,11 +247,7 @@ def build_registry_row(
         gate = gate_by_id.get(identifier)
         if gate is None:
             raise ValueError(f"missing gate row for {identifier}")
-        candidate_ids.update(registry_candidate_ids(
-            gate,
-            max_budget=max_budget,
-            max_native_tokens=max_native_tokens,
-        ))
+        candidate_ids.update(registry_candidate_ids(gate))
 
     contexts = retrieved_contexts(record)[:k]
     cache: dict[str, dict] = dict(existing.get("replacements", {}))
@@ -312,19 +292,12 @@ def build_registry_row(
     }
 
 
-def registry_candidate_ids(
-    gate: dict,
-    *,
-    max_budget: int,
-    max_native_tokens: int,
-) -> set[str]:
-    """Collect proposed and matched-baseline IDs under evaluation limits."""
+def registry_candidate_ids(gate: dict) -> set[str]:
+    """Collect IDs needed by the native relaxed-threshold candidate."""
 
-    candidate_ids = {
-        str(unit_id) for unit_id in gate.get("unary_order", [])[:max_budget]
-    }
-
-    def add_pair(candidate: dict) -> None:
+    candidate_ids: set[str] = set()
+    candidate = gate.get("bicriteria_candidate")
+    if candidate:
         candidate_ids.update(
             str(unit_id) for unit_id in candidate.get("selected_ids", [])
         )
@@ -332,22 +305,6 @@ def registry_candidate_ids(
             str(unit_id)
             for unit_id in candidate.get("unary_matched_ids", [])
         )
-
-    for key in ("strict_candidate", "bicriteria_candidate"):
-        candidate = gate.get(key)
-        limit = (
-            max(max_budget, max_native_tokens)
-            if key == "bicriteria_candidate"
-            else max_budget
-        )
-        if candidate and int(candidate.get("n_selected", 0)) <= limit:
-            add_pair(candidate)
-    for candidate in gate.get("candidates", []):
-        if int(candidate.get("n_selected", 0)) <= max_budget:
-            add_pair(candidate)
-    for candidate in gate.get("budget_candidates", []):
-        if int(candidate.get("budget", 0)) <= max_budget:
-            add_pair(candidate)
     return candidate_ids
 
 

@@ -14,11 +14,10 @@ def test_hf_verification_parses_json_answer():
     assert answer_from_response('{"answer":"Paris"}') == "Paris"
 
 
-def test_hf_verification_names_budget_methods_and_ignores_failures():
+def test_hf_verification_names_native_methods_and_ignores_failures():
     row = {
         "id": "q1",
-        "selection_mode": "budget",
-        "token_budget": 3,
+        "remaining_flow_threshold": 0.5,
         "methods": {
             "residual_flow": {"status": "ok", "edits": []},
             "unary_matched": {"status": "replacement_registry_missing"},
@@ -29,7 +28,7 @@ def test_hf_verification_names_budget_methods_and_ignores_failures():
         output.flush()
         methods = load_evaluation_methods([output.name])
 
-    assert set(methods["q1"]) == {"budget_b3:residual_flow"}
+    assert set(methods["q1"]) == {"native_t0.5:residual_flow"}
 
 
 def test_paired_summary_reports_size_matched_flip_rates():

@@ -103,7 +103,7 @@ the optimization network.
 | 2. Contribution graph | records, frozen clean reader answer, local model | `contribution_graph.jsonl` | every row is `ok`, method is direct activation, clean answer stored |
 | 3. Graph optimization | graph, context units | initial flow JSONL | projected-token network and geometric solver recorded |
 | 4. Registry closure | flow candidates, replacement pools | registry plus re-solved flow | zero evaluated registry misses |
-| 5. Reader evaluation | final flow, fixed registry, clean answer | budget and native evaluation JSONL | zero registry misses and replacement failures |
+| 5. Reader evaluation | final flow, fixed registry, clean answer | native evaluation JSONL | zero registry misses and replacement failures |
 | 6. Local-HF verification | saved edits, same local model | `hf_verification.jsonl` | clean and edited variants regenerated with eager attention |
 | 7. Manifest | all frozen artifacts | `manifest.json` | hashes, sizes, line counts, commit, and dirty state recorded |
 
@@ -257,8 +257,6 @@ export BETA=0.25
 export ETA=1.0
 export GAMMA=1.0
 export MAX_K_GUESS=0
-export MAX_BUDGET=5
-export MAX_NATIVE_TOKENS=10
 export RELAXED_FLOW_THRESHOLD=0.5
 
 export RUN_DIR="${RUN_ROOT}/${DATASET}/${RUN_ID}"
@@ -373,8 +371,8 @@ replacement per candidate and marks invalid tokens uncuttable.
 
 For each query, `build_replacement_registry.py` performs the following steps:
 
-1. Collect every token ID that may be evaluated under the configured graph
-   candidates, fixed budgets, and native-token limit.
+1. Collect every token ID in the native relaxed-threshold candidate and its
+   size-matched graph diagnostic.
 2. Reuse entries from the previous registry iteration; an existing valid or
    invalid decision is never regenerated.
 3. Try a deterministic typed replacement first: same-slot entity pool,
@@ -408,8 +406,6 @@ python scripts/build_replacement_registry.py \
   --type-rules "$TYPE_RULES" \
   --out "$REGISTRY_DIR/iteration_01.jsonl" \
   --summary-out "$REGISTRY_DIR/iteration_01.summary.json" \
-  --max-budget "$MAX_BUDGET" \
-  --max-native-tokens "$MAX_NATIVE_TOKENS" \
   --backend service \
   --workers 16 \
   --n "$N" \
@@ -451,8 +447,6 @@ python scripts/build_replacement_registry.py \
   --type-rules "$TYPE_RULES" \
   --out "$REGISTRY_DIR/iteration_02.jsonl" \
   --summary-out "$REGISTRY_DIR/iteration_02.summary.json" \
-  --max-budget "$MAX_BUDGET" \
-  --max-native-tokens "$MAX_NATIVE_TOKENS" \
   --backend service \
   --workers 16 \
   --n "$N" \
@@ -505,30 +499,7 @@ path while preserving all numbered closure iterations.
 
 ### 5. Evaluate saved selections with the served reader
 
-First run the fixed-budget evaluations:
-
-```bash
-for BUDGET in 1 3 5; do
-  python scripts/evaluate_reader.py \
-    --input "$DATA" \
-    --gate "$FLOW" \
-    --clean-reference "$GRAPH" \
-    --replacement-registry "$REGISTRY" \
-    --context-units "$CONTEXT_UNITS" \
-    --cf-pools "$CF_POOLS" \
-    --type-rules "$TYPE_RULES" \
-    --out "$EVALUATION_DIR/budget_${BUDGET}.jsonl" \
-    --summary-out "$EVALUATION_DIR/budget_${BUDGET}.summary.json" \
-    --selection-mode budget \
-    --token-budget "$BUDGET" \
-    --max-tokens "$BUDGET" \
-    --clean-correct-policy exact \
-    --strict-replacements \
-    --k "$K"
-done
-```
-
-Then run the native graph-threshold evaluation. With `BETA=0.25` and `ETA=1`,
+Run only the native graph-threshold evaluation. With `BETA=0.25` and `ETA=1`,
 the solver accepts candidates up to the relaxed residual-flow fraction
 `(1 + ETA) * BETA = 0.50`:
 
@@ -543,9 +514,7 @@ python scripts/evaluate_reader.py \
   --type-rules "$TYPE_RULES" \
   --out "$EVALUATION_DIR/native.jsonl" \
   --summary-out "$EVALUATION_DIR/native.summary.json" \
-  --selection-mode threshold \
   --remaining-flow-threshold "$RELAXED_FLOW_THRESHOLD" \
-  --max-tokens "$MAX_NATIVE_TOKENS" \
   --clean-correct-policy exact \
   --strict-replacements \
   --k "$K"
@@ -565,11 +534,7 @@ for scoring:
 ```bash
 python scripts/verify_hf_results.py \
   --input "$DATA" \
-  --results \
-    "$EVALUATION_DIR/budget_1.jsonl" \
-    "$EVALUATION_DIR/budget_3.jsonl" \
-    "$EVALUATION_DIR/budget_5.jsonl" \
-    "$EVALUATION_DIR/native.jsonl" \
+  --results "$EVALUATION_DIR/native.jsonl" \
   --out "$VERIFICATION_DIR/local_hf.jsonl" \
   --summary-out "$VERIFICATION_DIR/local_hf.summary.json" \
   --model-path "$MODEL" \
@@ -625,12 +590,6 @@ runs/<dataset>/<run-id>/
     ... additional closure iterations ...
     final.jsonl
   05_evaluation/
-    budget_1.jsonl
-    budget_1.summary.json
-    budget_3.jsonl
-    budget_3.summary.json
-    budget_5.jsonl
-    budget_5.summary.json
     native.jsonl
     native.summary.json
   06_verification/
@@ -655,7 +614,6 @@ runs/<dataset>/<run-id>/
 - Invalid replacements remain in the flow graph but are made uncuttable.
 - Registry closure ends only when
   `evaluated_candidate_registry_misses == 0`.
-- Budget results use the same fixed registry and evaluate budgets 1, 3, and 5.
 - Native evaluation uses the solver's relaxed threshold
   `(1 + ETA) * BETA`.
 - Final reported reader results come from local-HF eager verification rather
@@ -700,9 +658,9 @@ on the GPU server before starting its frozen full run.
 
 Report every dataset separately before producing macro or micro aggregates.
 Each dataset result must reference its own manifest, sample count, retrieval
-depth, clean-correct coverage, budget metrics, native-threshold metrics, and
-local-HF verification summary. Cross-dataset aggregation is valid only after
-the per-dataset artifacts pass the same acceptance checks.
+depth, clean-correct coverage, native-threshold metrics, and local-HF
+verification summary. Cross-dataset aggregation is valid only after the
+per-dataset artifacts pass the same acceptance checks.
 
 Historical dataset-specific baselines, ablations, plotting scripts, and
 protocols are retained under `exp/` for provenance. They are not stable final

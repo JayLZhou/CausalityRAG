@@ -1,7 +1,6 @@
 """Tests for reader evaluation of contribution-flow selections."""
 
 from scripts.evaluate_reader import (
-    budget_candidate,
     summarize,
     threshold_candidate,
 )
@@ -26,75 +25,26 @@ def test_threshold_candidate_uses_smallest_feasible_residual_cut():
         },
     ]
 
-    selected = threshold_candidate(candidates, 0.8, 10)
+    selected = threshold_candidate(candidates, 0.8)
 
     assert selected is candidates[1]
 
 
-def test_threshold_candidate_rejects_oversized_or_insufficient_cuts():
+def test_threshold_candidate_rejects_insufficient_cuts():
     candidates = [
         {
             "n_selected": 2,
             "remaining_support_fraction": 0.95,
             "selected_ids": ["a", "b"],
         },
-        {
-            "n_selected": 11,
-            "remaining_support_fraction": 0.0,
-            "selected_ids": [str(index) for index in range(11)],
-        },
     ]
 
-    assert threshold_candidate(candidates, 0.9, 10) is None
-
-
-def test_threshold_candidate_allows_unlimited_token_count():
-    candidate = {
-        "n_selected": 11,
-        "remaining_support_fraction": 0.2,
-        "selected_ids": [str(index) for index in range(11)],
-    }
-
-    assert threshold_candidate([candidate], 0.25, 0) is candidate
-
-
-def test_budget_candidate_minimizes_flow_then_size_under_budget():
-    candidates = [
-        {
-            "n_selected": 1,
-            "remaining_support_fraction": 0.6,
-            "selected_ids": ["a"],
-        },
-        {
-            "n_selected": 2,
-            "remaining_support_fraction": 0.2,
-            "selected_ids": ["b", "c"],
-        },
-        {
-            "n_selected": 3,
-            "remaining_support_fraction": 0.0,
-            "selected_ids": ["d", "e", "f"],
-        },
-    ]
-
-    assert budget_candidate(candidates, 2) is candidates[1]
-
-
-def test_budget_candidate_requires_a_nonempty_supported_set():
-    candidates = [{
-        "n_selected": 0,
-        "remaining_support_fraction": 1.0,
-        "selected_ids": [],
-    }]
-
-    assert budget_candidate(candidates, 2) is None
+    assert threshold_candidate(candidates, 0.9) is None
 
 
 def test_summary_counts_no_candidate_as_failure_in_overall_rate():
     rows = [
         {
-            "selection_mode": "budget",
-            "token_budget": 1,
             "remaining_flow_threshold": 0.25,
             "methods": {
                 "residual_flow": {
@@ -112,8 +62,6 @@ def test_summary_counts_no_candidate_as_failure_in_overall_rate():
             },
         },
         {
-            "selection_mode": "budget",
-            "token_budget": 1,
             "remaining_flow_threshold": 0.25,
             "methods": {
                 "residual_flow": {

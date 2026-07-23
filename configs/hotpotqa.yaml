@@ -52,7 +52,6 @@ replacement:
   entity_policy: same_type_same_length_same_slot
 
 evaluation:
-  budgets: [1, 3, 5]
   native_remaining_flow_threshold: 0.5
   clean_correct_policy: exact
   final_backend: local_hf_eager

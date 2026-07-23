@@ -48,13 +48,6 @@ def main() -> None:
         default="",
     )
     parser.add_argument("--remaining-flow-threshold", type=float, default=0.9)
-    parser.add_argument("--max-tokens", type=int, default=10)
-    parser.add_argument(
-        "--selection-mode",
-        choices=("threshold", "budget"),
-        default="threshold",
-    )
-    parser.add_argument("--token-budget", type=int, default=5)
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--include-clean-incorrect", action="store_true")
     parser.add_argument(
@@ -73,10 +66,6 @@ def main() -> None:
     args = parser.parse_args()
     if not 0 <= args.remaining_flow_threshold < 1:
         raise ValueError("remaining flow threshold must be in [0, 1)")
-    if args.max_tokens < 0:
-        raise ValueError("max tokens must be non-negative; zero means unlimited")
-    if args.token_budget <= 0:
-        raise ValueError("token budget must be positive")
 
     records_by_id = {
         record_id(record): record for record in load_records(args.input)
@@ -131,18 +120,9 @@ def main() -> None:
             }[args.clean_correct_policy]
             if not args.include_clean_incorrect and not clean_correct:
                 continue
-            candidate = (
-                budget_candidate(
-                    gate_row.get("budget_candidates")
-                    or gate_row.get("candidates", []),
-                    min(args.token_budget, args.max_tokens),
-                )
-                if args.selection_mode == "budget"
-                else threshold_candidate(
-                    gate_row.get("candidates", []),
-                    args.remaining_flow_threshold,
-                    args.max_tokens,
-                )
+            candidate = threshold_candidate(
+                gate_row.get("candidates", []),
+                args.remaining_flow_threshold,
             )
             if candidate is None:
                 no_candidate = {
@@ -164,12 +144,6 @@ def main() -> None:
                     "clean_correct_lenient": clean_correct_lenient,
                     "clean_correct_stored": clean_correct_stored,
                     "remaining_flow_threshold": args.remaining_flow_threshold,
-                    "selection_mode": args.selection_mode,
-                    "token_budget": (
-                        args.token_budget
-                        if args.selection_mode == "budget"
-                        else None
-                    ),
                     "candidate_remaining_support_fraction": None,
                     "candidate_unary_remaining_support_fraction": None,
                     "replacement_contract": (
@@ -300,10 +274,6 @@ def main() -> None:
                 "clean_correct_lenient": clean_correct_lenient,
                 "clean_correct_stored": clean_correct_stored,
                 "remaining_flow_threshold": args.remaining_flow_threshold,
-                "selection_mode": args.selection_mode,
-                "token_budget": (
-                    args.token_budget if args.selection_mode == "budget" else None
-                ),
                 "candidate_remaining_support_fraction": candidate[
                     "remaining_support_fraction"
                 ],
@@ -340,16 +310,11 @@ def main() -> None:
 def threshold_candidate(
     candidates: list[dict],
     remaining_flow_threshold: float,
-    max_tokens: int,
 ) -> dict | None:
     eligible = [
         candidate
         for candidate in candidates
         if 0 < int(candidate.get("n_selected", 0))
-        and (
-            max_tokens == 0
-            or int(candidate.get("n_selected", 0)) <= max_tokens
-        )
         and float(candidate.get("remaining_support_fraction", 1.0))
         <= remaining_flow_threshold + 1e-12
     ]
@@ -362,37 +327,9 @@ def threshold_candidate(
         ),
         default=None,
     )
-
-
-def budget_candidate(
-    candidates: list[dict],
-    token_budget: int,
-) -> dict | None:
-    """Return the supported candidate with least residual flow under budget."""
-
-    if token_budget <= 0:
-        raise ValueError("token_budget must be positive")
-    eligible = [
-        candidate
-        for candidate in candidates
-        if 0 < int(candidate.get("n_selected", 0)) <= token_budget
-    ]
-    return min(
-        eligible,
-        key=lambda candidate: (
-            float(candidate.get("remaining_support_fraction", 1.0)),
-            int(candidate["n_selected"]),
-            candidate["selected_ids"],
-        ),
-        default=None,
-    )
-
-
 def summarize(rows: list[dict]) -> dict:
     summary = {
         "queries": len(rows),
-        "selection_mode": rows[0]["selection_mode"] if rows else None,
-        "token_budget": rows[0]["token_budget"] if rows else None,
         "remaining_flow_threshold": (
             rows[0]["remaining_flow_threshold"] if rows else None
         ),
