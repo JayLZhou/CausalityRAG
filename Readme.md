@@ -22,25 +22,12 @@ never edited. Context edits are non-deleting single-token replacements. A
 successful reader rerun is a verified upper bound on the true black-box
 resilience; the approximation guarantee applies only to the graph surrogate.
 
-## The graph is not the KDD graph
-
-The old entry point was named `run_kdd_graph.py`. That name was misleading and
-has been replaced by `scripts/build_contribution_graph.py`.
-
-The final `direct-activation` graph uses the original Qwen model's realized
-attention OV writes, residual writes, and MLP output writes, contracted with
-the clean-answer target-logit gradient. Sparse path mass is absorbed when
-`--absorbing-flow` is enabled. It does **not** use the learned transcoders or
-the feature-attribution construction of the referenced KDD method.
-
-The repository still contains attention and native-MLP graph builders for
-controlled comparisons, but the final configuration is:
-
-```text
---graph-method direct-activation --absorbing-flow
-```
-
 ## Final method
+
+The final `direct-activation` graph uses the reader's realized attention OV
+writes, residual writes, and MLP output writes, contracted with the
+clean-answer target-logit gradient. Sparse path mass is absorbed with
+`--absorbing-flow`.
 
 Let `Phi(S)` be the residual source-to-answer flow after closing the shared
 token gates in set `S`. For an internal threshold `B`, the graph problem is
@@ -86,6 +73,9 @@ results/            tracked compact result summaries
 
 The `exp/` directory is intentionally outside the final pipeline. See
 [exp/README.md](exp/README.md) before running historical scripts.
+Use [configs/dataset_template.yaml](configs/dataset_template.yaml) as the
+per-dataset configuration checklist. Dataset-specific configuration files may
+coexist under `configs/`.
 
 ## Stable entry points
 
@@ -228,17 +218,36 @@ export CAUSALITYRAG_LLM_MODEL=qwen2.5-7b
 The older `YVETTE_LLM_BASE_URL` and `YVETTE_LLM_MODEL` names remain supported
 as fallbacks.
 
-## End-to-end HotpotQA example
+## Multi-dataset execution
 
-The commands below implement the final pipeline. Adjust the paths once:
+Every dataset runs through the same seven stages independently. Normalize each
+source dataset to the input contract above, then assign a unique `DATASET`,
+`DATA`, `N`, `K`, and `RUN_DIR`. Token caches, graphs, registries, evaluations,
+and manifests must never be shared across datasets.
+
+Recommended directory layout:
+
+```text
+out/
+  <dataset-a>/
+    smoke10/
+    final/
+  <dataset-b>/
+    smoke10/
+    final/
+```
+
+The commands below run the complete pipeline for one dataset. Repeat them for
+each dataset in the evaluation suite:
 
 ```bash
-export DATA=/data1/yujia/RAGData/hotpotqa-exp/results/retrieval_hotpotqa_vdb.jsonl
+export DATASET=my_dataset
+export DATA=/path/to/retrieval_records.jsonl
 export MODEL=/data1/yujia/models/Qwen2.5-7B-Instruct
 export CF_POOLS=/path/to/counterfactual_pools.json
 export TYPE_RULES=/path/to/type_rules.yaml  # optional
-export RUN_DIR=out/hotpotqa_final
-export N=1000
+export RUN_DIR="out/${DATASET}/final"
+export N=1000  # replace with the number of records selected for this dataset
 export K=5
 export BETA=0.25
 export ETA=1.0
@@ -255,9 +264,11 @@ mkdir -p "$RUN_DIR"
 is available, leave it empty and remove the `--type-rules "$TYPE_RULES"` line
 from stages 4 and 5.
 
-For a first smoke test, use `N=10` and a separate directory such as
-`RUN_DIR=out/hotpotqa_smoke10`. After it passes, start the 1,000-query run in a
-new empty run directory; do not mix smoke-test and final artifacts.
+For each dataset, first use `N=10` and
+`RUN_DIR="out/${DATASET}/smoke10"` on the GPU server. After it passes, restore
+the intended dataset-specific `N`, switch to
+`RUN_DIR="out/${DATASET}/final"`, and start from an empty directory. Never mix
+smoke and final artifacts.
 
 ### 1. Freeze token and linguistic units
 
@@ -297,9 +308,7 @@ python scripts/build_contribution_graph.py \
   --k "$K"
 ```
 
-Do not rename this artifact as a KDD graph: the construction is the
-direct-activation graph described above. Each row also stores the frozen
-`clean_answer` used as its graph target.
+Each row stores the frozen `clean_answer` used as its graph target.
 
 The OpenAI-compatible reader selected by `CAUSALITYRAG_LLM_MODEL` must use the
 same model weights, prompt, top-k contexts, and greedy decoding contract as
@@ -526,7 +535,7 @@ python scripts/build_artifact_manifest.py \
     "$FLOW" \
     "$REGISTRY" \
     "$RUN_DIR/hf_verification.jsonl" \
-  --metadata-json "{\"dataset\":\"hotpotqa\",\"n\":$N,\"k\":$K}" \
+  --metadata-json "{\"dataset\":\"$DATASET\",\"n\":$N,\"k\":$K}" \
   --out "$RUN_DIR/manifest.json"
 ```
 
@@ -536,7 +545,7 @@ branch, and dirty-worktree state.
 ## Expected final artifacts
 
 ```text
-out/hotpotqa_final/
+out/<dataset>/final/
   token_units.jsonl
   token_units.summary.json
   contribution_graph.jsonl
@@ -615,15 +624,17 @@ python -m pytest -q
 ```
 
 GPU integration stages require the model and external data and are not part of
-the lightweight unit suite. Run the 10-query smoke pipeline on the GPU server
-before starting the frozen 1,000-query run.
+the lightweight unit suite. Run the 10-query smoke pipeline for every dataset
+on the GPU server before starting its frozen full run.
 
-## Results and experiment history
+## Multi-dataset reporting
 
-The earlier hybrid HotpotQA-1000 report is retained as
-[an experimental result](exp/RESULTS_HOTPOTQA_1000.md). It does not describe
-the final pure contribution-graph method.
+Report every dataset separately before producing macro or micro aggregates.
+Each dataset result must reference its own manifest, sample count, retrieval
+depth, clean-correct coverage, budget metrics, native-threshold metrics, and
+local-HF verification summary. Cross-dataset aggregation is valid only after
+the per-dataset artifacts pass the same acceptance checks.
 
-Historical baselines, ablations, plotting scripts, and the earlier HotpotQA
-protocol are retained under `exp/` for provenance. They are not stable final
+Historical dataset-specific baselines, ablations, plotting scripts, and
+protocols are retained under `exp/` for provenance. They are not stable final
 entry points and may use historical terminology or artifact schemas.
