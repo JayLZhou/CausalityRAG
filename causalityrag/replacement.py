@@ -13,9 +13,21 @@ from causalityrag.reader import parse_json_object
 class GenericReplacementClient:
     """Ask the local editor model for one non-deleting word replacement."""
 
-    def __init__(self, base_url: str | None = None, model: str | None = None, timeout: int = 60) -> None:
-        self.base_url = (base_url or os.environ.get("YVETTE_LLM_BASE_URL") or "http://127.0.0.1:8000/v1").rstrip("/")
-        self.model = model or os.environ.get("YVETTE_LLM_MODEL") or "qwen2.5-7b"
+    def __init__(
+        self, base_url: str | None = None, model: str | None = None, timeout: int = 60
+    ) -> None:
+        self.base_url = (
+            base_url
+            or os.environ.get("CAUSALITYRAG_LLM_BASE_URL")
+            or os.environ.get("YVETTE_LLM_BASE_URL")
+            or "http://127.0.0.1:8000/v1"
+        ).rstrip("/")
+        self.model = (
+            model
+            or os.environ.get("CAUSALITYRAG_LLM_MODEL")
+            or os.environ.get("YVETTE_LLM_MODEL")
+            or "qwen2.5-7b"
+        )
         self.timeout = timeout
         self._calls = 0
         self._calls_lock = Lock()
@@ -52,7 +64,10 @@ class GenericReplacementClient:
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": "You are a constrained counterfactual word editor."},
+                {
+                    "role": "system",
+                    "content": "You are a constrained counterfactual word editor.",
+                },
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0,
@@ -69,7 +84,11 @@ class GenericReplacementClient:
                 data = json.loads(response.read().decode("utf-8"))
             content = data["choices"][0]["message"]["content"]
             parsed = parse_json_object(content)
-            replacement = str(parsed.get("replacement", "")).strip() if isinstance(parsed, dict) else ""
+            replacement = (
+                str(parsed.get("replacement", "")).strip()
+                if isinstance(parsed, dict)
+                else ""
+            )
         except Exception as exc:
             return deterministic_fallback(token, unit_type, error=str(exc))
         if (
@@ -78,8 +97,15 @@ class GenericReplacementClient:
             or replacement.lower() in {item.lower() for item in forbidden}
             or any(char.isspace() for char in replacement)
         ):
-            return deterministic_fallback(token, unit_type, error="invalid_llm_response")
-        return {"ok": True, "old": token, "new": replacement, "policy": "generic_llm_contextual"}
+            return deterministic_fallback(
+                token, unit_type, error="invalid_llm_response"
+            )
+        return {
+            "ok": True,
+            "old": token,
+            "new": replacement,
+            "policy": "generic_llm_contextual",
+        }
 
 
 def generate_valid_replacement(
@@ -124,12 +150,17 @@ def generate_valid_replacement(
             str(unit.get("type", "")),
             error="strict_contextual_validation_failed",
         )
-        relaxed_candidates.append((fallback, validate_contextual_replacement(
-            unit,
-            context,
-            fallback,
-            nlp,
-        )))
+        relaxed_candidates.append(
+            (
+                fallback,
+                validate_contextual_replacement(
+                    unit,
+                    context,
+                    fallback,
+                    nlp,
+                ),
+            )
+        )
         for candidate, strict_validation in relaxed_candidates:
             surface_validation = validate_surface_replacement(unit, context, candidate)
             if surface_validation["valid"]:
@@ -172,9 +203,7 @@ def build_selected_replacements(
         unit_id = str(unit["unit_id"])
         context = context_by_id[str(unit["chunk_id"])]
         replacement = (
-            replacement_cache.get(unit_id)
-            if replacement_cache is not None
-            else None
+            replacement_cache.get(unit_id) if replacement_cache is not None else None
         )
         if replacement is None:
             replacement = generate_valid_replacement(
@@ -190,10 +219,12 @@ def build_selected_replacements(
         if replacement.get("ok"):
             replacements[unit_id] = replacement
         else:
-            rejected.append({
-                **unit,
-                "replacement_failure": replacement,
-            })
+            rejected.append(
+                {
+                    **unit,
+                    "replacement_failure": replacement,
+                }
+            )
     return replacements, rejected
 
 
@@ -216,7 +247,9 @@ def validate_surface_replacement(unit: dict, context: str, replacement: dict) ->
     }
 
 
-def validate_contextual_replacement(unit: dict, context: str, replacement: dict, nlp) -> dict:
+def validate_contextual_replacement(
+    unit: dict, context: str, replacement: dict, nlp
+) -> dict:
     """Require a candidate to preserve contextual POS and basic morphology."""
 
     if hasattr(nlp, "validate"):
@@ -230,24 +263,43 @@ def validate_contextual_replacement(unit: dict, context: str, replacement: dict,
         return {"valid": False, "reason": "offset_mismatch"}
     if not new or new.lower() == old.lower() or any(char.isspace() for char in new):
         return {"valid": False, "reason": "invalid_surface_form"}
-    left = max(context.rfind(".", 0, start), context.rfind("!", 0, start), context.rfind("?", 0, start)) + 1
+    left = (
+        max(
+            context.rfind(".", 0, start),
+            context.rfind("!", 0, start),
+            context.rfind("?", 0, start),
+        )
+        + 1
+    )
     right_candidates = [
-        position for position in (
-            context.find(".", end), context.find("!", end), context.find("?", end)
-        ) if position >= 0
+        position
+        for position in (
+            context.find(".", end),
+            context.find("!", end),
+            context.find("?", end),
+        )
+        if position >= 0
     ]
     right = min(right_candidates) + 1 if right_candidates else len(context)
     sentence = context[left:right]
     local_start = start - left
-    revised = sentence[:local_start] + new + sentence[end - left:]
+    revised = sentence[:local_start] + new + sentence[end - left :]
     original_doc = nlp(sentence)
     revised_doc = nlp(revised)
     original_token = next(
-        (token for token in original_doc if token.idx <= local_start < token.idx + len(token)),
+        (
+            token
+            for token in original_doc
+            if token.idx <= local_start < token.idx + len(token)
+        ),
         None,
     )
     revised_token = next(
-        (token for token in revised_doc if token.idx <= local_start < token.idx + len(token)),
+        (
+            token
+            for token in revised_doc
+            if token.idx <= local_start < token.idx + len(token)
+        ),
         None,
     )
     if original_token is None or revised_token is None:
@@ -263,7 +315,10 @@ def validate_contextual_replacement(unit: dict, context: str, replacement: dict,
     if original_token.pos_ != revised_token.pos_:
         return {**details, "reason": "pos_mismatch"}
     strict_tag_pos = {"VERB", "AUX", "DET", "ADP", "CCONJ", "SCONJ", "PRON", "PART"}
-    if original_token.pos_ in strict_tag_pos and original_token.tag_ != revised_token.tag_:
+    if (
+        original_token.pos_ in strict_tag_pos
+        and original_token.tag_ != revised_token.tag_
+    ):
         return {**details, "reason": "tag_mismatch"}
     for feature in ("Number", "Tense", "VerbForm", "Person"):
         original_value = original_token.morph.get(feature)
@@ -277,9 +332,19 @@ def deterministic_fallback(token: str, unit_type: str = "", *, error: str = "") 
     """Guarantee a non-deleting replacement when the editor response is malformed."""
 
     swaps = {
-        "a": "the", "an": "the", "the": "a", "and": "or", "or": "and",
-        "is": "was", "was": "is", "are": "were", "were": "are",
-        "this": "that", "that": "this", "these": "those", "those": "these",
+        "a": "the",
+        "an": "the",
+        "the": "a",
+        "and": "or",
+        "or": "and",
+        "is": "was",
+        "was": "is",
+        "are": "were",
+        "were": "are",
+        "this": "that",
+        "that": "this",
+        "these": "those",
+        "those": "these",
     }
     lowered = token.lower()
     replacement = swaps.get(lowered)

@@ -71,7 +71,10 @@ def test_direct_nodes_preserve_layer_token_stages_and_answer_sink() -> None:
     node_ids = {node["node_id"] for node in nodes}
 
     assert {"s0:t0", "s1:t1", "s4:t0", "answer_target"} <= node_ids
-    assert next(node for node in nodes if node["node_id"] == "answer_target")["region"] == "answer"
+    assert (
+        next(node for node in nodes if node["node_id"] == "answer_target")["region"]
+        == "answer"
+    )
 
 
 def test_direct_pruning_always_keeps_answer_logit_edges() -> None:
@@ -102,10 +105,8 @@ def test_closed_flow_diagnostics_preserve_mass_and_expose_background() -> None:
     context_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
         0, 0, 1, 1, "attention_ov_write", 3.0, 0.6, 0
     )
-    background_edge = (
-        DirectActivationAttributionGraphBuilder._closed_background_edge(
-            1, 1, 0.4, 0, "attention_beam"
-        )
+    background_edge = DirectActivationAttributionGraphBuilder._closed_background_edge(
+        1, 1, 0.4, 0, "attention_beam"
     )
     answer_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
         1, 1, 2, 1, "answer_logit", 2.0, 1.0, 0
@@ -139,10 +140,8 @@ def test_absorbing_flow_removes_background_edges_and_records_mass() -> None:
     context_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
         0, 0, 1, 1, "attention_ov_write", 3.0, 0.6, 0
     )
-    background_edge = (
-        DirectActivationAttributionGraphBuilder._closed_background_edge(
-            1, 1, 0.4, 0, "attention_beam"
-        )
+    background_edge = DirectActivationAttributionGraphBuilder._closed_background_edge(
+        1, 1, 0.4, 0, "attention_beam"
     )
 
     retained, diagnostics = (
@@ -156,3 +155,80 @@ def test_absorbing_flow_removes_background_edges_and_records_mass() -> None:
     assert diagnostics["absorbed_background_mass"] == 0.4
     assert diagnostics["removed_background_edges"] == 1
     assert diagnostics["retained_background_flow"] == 0.0
+
+
+def test_default_context_handling_does_not_truncate_retrieved_text() -> None:
+    builder = DirectActivationAttributionGraphBuilder.__new__(
+        DirectActivationAttributionGraphBuilder
+    )
+    builder.max_context_tokens = 0
+    contexts = [
+        {"chunk_id": "a", "text": "one two three"},
+        {"chunk_id": "b", "text": "four five six"},
+    ]
+
+    prepared = builder._truncate_contexts(contexts)
+
+    assert prepared == contexts
+    assert prepared is not contexts
+    assert all(left is not right for left, right in zip(prepared, contexts))
+
+
+def test_answer_objective_seed_is_uniform_and_has_unit_mass() -> None:
+    edges = DirectActivationAttributionGraphBuilder._answer_objective_edges(
+        [4, 7, 9],
+        final_stage=56,
+        final_layer=27,
+        sink_position=10,
+        target_positions=[5, 8, 10],
+    )
+
+    assert len(edges) == 3
+    assert {edge["kind"] for edge in edges} == {"answer_objective"}
+    assert {edge["dst"] for edge in edges} == {"answer_target"}
+    assert abs(sum(edge["contribution"] for edge in edges) - 1.0) < 1e-12
+    assert all(abs(edge["contribution"] - 1 / 3) < 1e-12 for edge in edges)
+
+
+def test_contribution_graph_requires_a_context_to_answer_path() -> None:
+    token_meta = [
+        {"position": 0, "region": "context", "text": "Paris"},
+        {"position": 1, "region": "query", "text": "?"},
+        {"position": 2, "region": "answer", "text": "Paris"},
+    ]
+    answer_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
+        2, 1, 3, 2, "answer_objective", 1.0, 1.0, 0
+    )
+    answer_edge["dst"] = "answer_target"
+
+    assert (
+        DirectActivationAttributionGraphBuilder._contribution_graph_status(
+            [answer_edge],
+            token_meta,
+            require_context_path=True,
+        )
+        == "no_context_input_flow"
+    )
+
+    context_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
+        0, 0, 2, 1, "attention_ov_write", 0.5, 1.0, 0
+    )
+    assert (
+        DirectActivationAttributionGraphBuilder._contribution_graph_status(
+            [context_edge, answer_edge],
+            token_meta,
+            require_context_path=True,
+        )
+        == "ok"
+    )
+
+
+def test_empty_contribution_graph_never_reports_ok() -> None:
+    assert (
+        DirectActivationAttributionGraphBuilder._contribution_graph_status(
+            [],
+            [],
+            require_context_path=True,
+        )
+        == "empty_contribution_graph"
+    )

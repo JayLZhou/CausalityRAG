@@ -35,9 +35,15 @@ true resilience.
 
 ## 2. Contribution Graph
 
-Run the clean reader once and trace positive, answer-specific information flow
-through the original transformer. For a source token state `u` and a receiver
-state `v`, the local signed contribution is
+Generate the clean answer once with the frozen vLLM reader, then trace
+positive, answer-specific information flow through the same checkpoint with
+Hugging Face SDPA execution. The second load is used only to expose gradients
+and intermediate activations; it does not generate another reader answer.
+Full attention weights are reconstructed exactly from each layer's Q/K states
+one layer at a time after backward, rather than retained for every layer during
+the forward pass. For
+a source token state `u` and a receiver state `v`, the local signed
+contribution is
 
 ```text
 r(u, v) = <dJ_q / do_v, m(u, v)>,
@@ -47,6 +53,23 @@ where `J_q` is the mean clean-answer target logit and `m(u, v)` is the actual
 attention/residual/MLP write from `u` to `v`. Positive contributions are routed
 backward from the answer target and then projected to chunk-token occurrences.
 No clean-answer string matching is used.
+
+If the clean answer has `m` scored tokens, `J_q` is their mean logit and the
+answer sink injects mass `1/m` at each corresponding predictor position. This
+objective seed is defined directly by `J_q`; it is not estimated with
+`gradient x final residual`, which is not a valid mass decomposition after the
+model's final normalization.
+
+Sparse backward tracing always preserves the strongest positive word-bearing
+context source at the input layer in addition to the ordinary top-k beam. A
+row is valid only when positive flow connects at least one such context source
+to the answer sink. Empty graphs, missing answer terminals, and graphs without
+a context-to-answer path are explicit failures, never zero-flow successes.
+
+The retrieved chunks are rendered in full. No per-chunk or prompt-length
+truncation is part of the method. If the exact rendered sequence exceeds the
+checkpoint's real context window, construction fails explicitly rather than
+clipping the evidence.
 
 The projected network has:
 

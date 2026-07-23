@@ -64,12 +64,6 @@ def main() -> None:
     parser.add_argument("--binary-iterations", type=int, default=32)
     parser.add_argument("--eta", type=float, default=1.0)
     parser.add_argument("--gamma", type=float, default=1.0)
-    parser.add_argument(
-        "--max-k-guess",
-        type=int,
-        default=0,
-        help="largest cardinality scale; zero uses every editable token",
-    )
     parser.add_argument("--max-copies-per-unit", type=int, default=0)
     parser.add_argument(
         "--context-units",
@@ -103,8 +97,6 @@ def main() -> None:
     args = parser.parse_args()
     if args.start < 0 or args.n <= 0 or args.k <= 0:
         parser.error("--start must be non-negative; --n and --k must be positive")
-    if args.max_k_guess < 0:
-        parser.error("--max-k-guess must be non-negative")
 
     requested_indices = sorted({
         int(value.strip())
@@ -269,7 +261,7 @@ def main() -> None:
                     network,
                     beta=args.beta,
                     eta=args.eta,
-                    max_k_guess=args.max_k_guess or None,
+                    max_k_guess=None,
                 )
                 if args.solver == "group-k-guessing"
                 else search_mixed_cut_threshold(
@@ -282,7 +274,7 @@ def main() -> None:
                     network,
                     beta=args.beta,
                     eta=args.eta,
-                    max_k_guess=args.max_k_guess or None,
+                    max_k_guess=None,
                     gamma=(
                         args.gamma
                         if args.solver == "geometric-k-guessing"

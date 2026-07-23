@@ -1,6 +1,7 @@
 """Tests for reader evaluation of contribution-flow selections."""
 
 from scripts.evaluate_reader import (
+    run_reader_requests,
     summarize,
     threshold_candidate,
 )
@@ -87,3 +88,21 @@ def test_summary_counts_no_candidate_as_failure_in_overall_rate():
     assert result["paired"]["flip_rate_difference"] == 1.0
     assert result["paired"]["paired_bootstrap_95_ci"] == [1.0, 1.0]
     assert result["paired"]["mcnemar_exact_two_sided_p"] == 1.0
+
+
+def test_reader_requests_preserve_input_order_under_concurrency():
+    class FakeReader:
+        @staticmethod
+        def answer(question, contexts):
+            return f"{question}:{contexts[0]['text']}"
+
+    answers = run_reader_requests(
+        FakeReader(),
+        [
+            ("q2", [{"text": "b"}]),
+            ("q1", [{"text": "a"}]),
+        ],
+        workers=2,
+    )
+
+    assert answers == ["q2:b", "q1:a"]

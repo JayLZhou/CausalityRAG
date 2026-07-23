@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Sequence
 
-from causalityrag.arc_jsd import ArcJsdModel, CleanTrajectory
+from exp.arc_jsd import ArcJsdModel, CleanTrajectory
 
 
 @dataclass(frozen=True)

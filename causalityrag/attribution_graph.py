@@ -2,8 +2,8 @@
 
 The builders in this module are deliberately labelled by their attribution
 mechanism. ``DirectActivationAttributionGraphBuilder`` uses the original
-model's attention OV writes and MLP output writes; it does not claim to be the
-transcoder graph from the KDD paper.
+model's attention OV writes and MLP output writes; no learned transcoder is
+required.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ class TextSpan:
 class AttentionAttributionGraphBuilder:
     """Build a sparse layer-token DAG targeted at a fixed answer."""
 
-    method = "kdd_style_gradient_attention_approximation"
+    method = "gradient_attention_rollout_approximation"
 
     def __init__(
         self,
@@ -37,8 +37,8 @@ class AttentionAttributionGraphBuilder:
         *,
         device: str = "cuda",
         dtype: str = "bfloat16",
-        max_context_tokens: int = 800,
-        max_length: int = 1024,
+        max_context_tokens: int = 0,
+        max_length: int = 0,
         edge_topk: int = 6,
         max_receivers_per_layer: int = 48,
         max_edges: int = 5000,
@@ -59,53 +59,90 @@ class AttentionAttributionGraphBuilder:
         self.residual_mix = residual_mix
         self.closed_flow = closed_flow
         self.absorbing_flow = absorbing_flow
+        if self.max_context_tokens < 0 or self.max_length < 0:
+            raise ValueError("max_context_tokens and max_length must be non-negative")
         if self.closed_flow and self.absorbing_flow:
             raise ValueError("closed_flow and absorbing_flow are mutually exclusive")
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_path, trust_remote_code=True
+        )
         config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
         # transformers 4.52 reads the Qwen tensor-parallel plan even for a
         # single-device load, while the installed torch build cannot use it.
         if hasattr(config, "base_model_tp_plan"):
             config.base_model_tp_plan = None
-        config._attn_implementation = "eager"
+        self.model_context_length = int(
+            getattr(config, "max_position_embeddings", 0) or 0
+        )
+        config._attn_implementation = "sdpa"
         torch_dtype = getattr(torch, dtype)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            config=config,
-            torch_dtype=torch_dtype,
-            trust_remote_code=True,
-            low_cpu_mem_usage=True,
-        ).to(device).eval()
+        self.model = (
+            AutoModelForCausalLM.from_pretrained(
+                model_path,
+                config=config,
+                torch_dtype=torch_dtype,
+                trust_remote_code=True,
+                low_cpu_mem_usage=True,
+            )
+            .to(device)
+            .eval()
+        )
         self.model.requires_grad_(False)
 
-    def build(self, record: dict, target_answer: str, *, k: int = 5, top_tokens: int = 50) -> dict:
+    def build(
+        self, record: dict, target_answer: str, *, k: int = 5, top_tokens: int = 50
+    ) -> dict:
         torch = self.torch
         contexts = self._truncate_contexts(retrieved_contexts(record)[:k])
         text, spans = self._render(record, contexts, target_answer)
-        encoded = self.tokenizer(
-            text,
-            add_special_tokens=False,
-            return_offsets_mapping=True,
-            return_tensors="pt",
-            truncation=True,
-            max_length=self.max_length,
-        )
+        encoded = self._encode_without_truncation(text)
+        sequence_tokens = int(encoded["input_ids"].shape[-1])
+        sequence_limit = self._sequence_limit()
+        if sequence_limit and sequence_tokens > sequence_limit:
+            return self._empty(
+                record,
+                target_answer,
+                "sequence_exceeds_model_context",
+                sequence_tokens,
+                {"sequence_limit": sequence_limit},
+            )
         input_ids = encoded["input_ids"].to(self.device)
-        offsets = [tuple(map(int, pair)) for pair in encoded["offset_mapping"][0].tolist()]
+        offsets = [
+            tuple(map(int, pair)) for pair in encoded["offset_mapping"][0].tolist()
+        ]
         token_meta = self._token_metadata(input_ids[0].tolist(), offsets, spans)
-        answer_positions = [item["position"] for item in token_meta if item["region"] == "answer"]
+        answer_positions = [
+            item["position"] for item in token_meta if item["region"] == "answer"
+        ]
         if not answer_positions:
-            return self._empty(record, target_answer, "answer_tokens_truncated", len(token_meta))
+            return self._empty(
+                record,
+                target_answer,
+                "answer_tokens_missing",
+                len(token_meta),
+            )
 
         with torch.enable_grad():
-            embeddings = self.model.get_input_embeddings()(input_ids).detach().requires_grad_(True)
-            output = self.model(inputs_embeds=embeddings, output_attentions=True, use_cache=False)
+            embeddings = (
+                self.model.get_input_embeddings()(input_ids)
+                .detach()
+                .requires_grad_(True)
+            )
+            output = self.model(
+                inputs_embeds=embeddings, output_attentions=True, use_cache=False
+            )
         if not output.attentions or any(attn is None for attn in output.attentions):
-            return self._empty(record, target_answer, "model_returned_no_attentions", len(token_meta))
+            return self._empty(
+                record, target_answer, "model_returned_no_attentions", len(token_meta)
+            )
 
-        target_logprob_tensor = self._target_logprob(output.logits, input_ids, answer_positions)
-        gradients = torch.autograd.grad(target_logprob_tensor, output.attentions, allow_unused=True)
+        target_logprob_tensor = self._target_logprob(
+            output.logits, input_ids, answer_positions
+        )
+        gradients = torch.autograd.grad(
+            target_logprob_tensor, output.attentions, allow_unused=True
+        )
         target_logprob = float(target_logprob_tensor.detach().item())
         support, edges = self._rollout(output.attentions, gradients, answer_positions)
         support_cpu = support.float().cpu().tolist()
@@ -114,11 +151,15 @@ class AttentionAttributionGraphBuilder:
         for item, value in zip(token_meta, support_cpu):
             if item["region"] != "context":
                 continue
-            chunk_token_counts[item["chunk_id"]] = chunk_token_counts.get(item["chunk_id"], 0) + 1
+            chunk_token_counts[item["chunk_id"]] = (
+                chunk_token_counts.get(item["chunk_id"], 0) + 1
+            )
             context_tokens.append({**item, "support": round(float(value), 10)})
         context_tokens.sort(key=lambda item: (-item["support"], item["position"]))
 
-        kept_edges = sorted(edges, key=lambda edge: -edge["contribution"])[: self.max_edges]
+        kept_edges = sorted(edges, key=lambda edge: -edge["contribution"])[
+            : self.max_edges
+        ]
         used_nodes = set()
         for edge in kept_edges:
             used_nodes.add((edge["src_layer"], edge["src_position"]))
@@ -126,11 +167,13 @@ class AttentionAttributionGraphBuilder:
         nodes = []
         for layer, position in sorted(used_nodes):
             meta = token_meta[position]
-            nodes.append({
-                "node_id": f"l{layer}:t{position}",
-                "layer": layer,
-                **meta,
-            })
+            nodes.append(
+                {
+                    "node_id": f"l{layer}:t{position}",
+                    "layer": layer,
+                    **meta,
+                }
+            )
 
         return {
             "id": record_id(record),
@@ -161,6 +204,8 @@ class AttentionAttributionGraphBuilder:
     def _truncate_contexts(self, contexts: list[dict]) -> list[dict]:
         if not contexts:
             return []
+        if self.max_context_tokens == 0:
+            return [{**context} for context in contexts]
         per_chunk = max(16, self.max_context_tokens // len(contexts))
         out = []
         for context in contexts:
@@ -176,7 +221,25 @@ class AttentionAttributionGraphBuilder:
             out.append({**context, "text": context["text"][:end]})
         return out
 
-    def _render(self, record: dict, contexts: list[dict], target_answer: str) -> tuple[str, list[TextSpan]]:
+    def _encode_without_truncation(self, text: str):
+        """Tokenize the exact rendered reader input without silently clipping it."""
+
+        return self.tokenizer(
+            text,
+            add_special_tokens=False,
+            return_offsets_mapping=True,
+            return_tensors="pt",
+            truncation=False,
+        )
+
+    def _sequence_limit(self) -> int:
+        """Return an explicit safety limit, or the model's real context limit."""
+
+        return self.max_length or self.model_context_length
+
+    def _render(
+        self, record: dict, contexts: list[dict], target_answer: str
+    ) -> tuple[str, list[TextSpan]]:
         passages = "\n\n".join(
             f"[{context['chunk_id']}] {context['text']}" for context in contexts
         )
@@ -199,48 +262,79 @@ class AttentionAttributionGraphBuilder:
             start = prompt.find(context["text"], cursor)
             if start >= 0:
                 end = start + len(context["text"])
-                spans.append(TextSpan("context", start, end, context["chunk_id"], context["rank"]))
+                spans.append(
+                    TextSpan(
+                        "context", start, end, context["chunk_id"], context["rank"]
+                    )
+                )
                 cursor = end
         query_start = prompt.rfind(question)
         if query_start >= 0:
             spans.append(TextSpan("query", query_start, query_start + len(question)))
         answer_start = len(prompt) + completion.find(target_answer)
-        spans.append(TextSpan("answer", answer_start, answer_start + len(target_answer)))
+        spans.append(
+            TextSpan("answer", answer_start, answer_start + len(target_answer))
+        )
         return text, spans
 
-    def _token_metadata(self, token_ids: list[int], offsets: list[tuple[int, int]], spans: list[TextSpan]) -> list[dict]:
+    def _token_metadata(
+        self,
+        token_ids: list[int],
+        offsets: list[tuple[int, int]],
+        spans: list[TextSpan],
+    ) -> list[dict]:
         items = []
         for position, (token_id, (start, end)) in enumerate(zip(token_ids, offsets)):
-            matched = next((span for span in spans if _overlaps(start, end, span.start, span.end)), None)
-            chunk_start = max(0, start - matched.start) if matched and matched.region == "context" else -1
-            chunk_end = min(matched.end - matched.start, end - matched.start) if matched and matched.region == "context" else -1
-            items.append({
-                "position": position,
-                "token_id": token_id,
-                "token": self.tokenizer.convert_ids_to_tokens(token_id),
-                "text": self.tokenizer.decode([token_id]),
-                "char_start": start,
-                "char_end": end,
-                "region": matched.region if matched else "prompt",
-                "chunk_id": matched.chunk_id if matched else "",
-                "chunk_rank": matched.chunk_rank if matched else 0,
-                "chunk_char_start": chunk_start,
-                "chunk_char_end": chunk_end,
-            })
+            matched = next(
+                (span for span in spans if _overlaps(start, end, span.start, span.end)),
+                None,
+            )
+            chunk_start = (
+                max(0, start - matched.start)
+                if matched and matched.region == "context"
+                else -1
+            )
+            chunk_end = (
+                min(matched.end - matched.start, end - matched.start)
+                if matched and matched.region == "context"
+                else -1
+            )
+            items.append(
+                {
+                    "position": position,
+                    "token_id": token_id,
+                    "token": self.tokenizer.convert_ids_to_tokens(token_id),
+                    "text": self.tokenizer.decode([token_id]),
+                    "char_start": start,
+                    "char_end": end,
+                    "region": matched.region if matched else "prompt",
+                    "chunk_id": matched.chunk_id if matched else "",
+                    "chunk_rank": matched.chunk_rank if matched else 0,
+                    "chunk_char_start": chunk_start,
+                    "chunk_char_end": chunk_end,
+                }
+            )
         return items
 
     @staticmethod
     def _token_partitions(token_meta: list[dict]) -> dict[str, list[int]]:
         """Keep prompt regions explicit even when pruning hides their layer nodes."""
 
-        partitions: dict[str, list[int]] = {"query": [], "context": [], "answer": [], "prompt": []}
+        partitions: dict[str, list[int]] = {
+            "query": [],
+            "context": [],
+            "answer": [],
+            "prompt": [],
+        }
         for token in token_meta:
             region = str(token["region"])
             partitions.setdefault(region, []).append(int(token["position"]))
         return partitions
 
     @staticmethod
-    def _region_edge_mass(edges: list[dict], token_meta: list[dict]) -> dict[str, float]:
+    def _region_edge_mass(
+        edges: list[dict], token_meta: list[dict]
+    ) -> dict[str, float]:
         """Aggregate retained attribution edges by their source and target regions."""
 
         mass: dict[str, float] = {}
@@ -261,7 +355,9 @@ class AttentionAttributionGraphBuilder:
             mass[key] = mass.get(key, 0.0) + float(edge.get("contribution", 0.0))
         return {key: round(value, 10) for key, value in sorted(mass.items())}
 
-    def _target_logprob(self, logits: Any, input_ids: Any, answer_positions: list[int]) -> Any:
+    def _target_logprob(
+        self, logits: Any, input_ids: Any, answer_positions: list[int]
+    ) -> Any:
         torch = self.torch
         values = []
         for position in answer_positions:
@@ -281,7 +377,9 @@ class AttentionAttributionGraphBuilder:
     ) -> tuple[Any, list[dict]]:
         torch = self.torch
         sequence_length = attentions[0].shape[-1]
-        score = torch.zeros(sequence_length, dtype=torch.float32, device=attentions[0].device)
+        score = torch.zeros(
+            sequence_length, dtype=torch.float32, device=attentions[0].device
+        )
         score[answer_positions] = 1.0 / len(answer_positions)
         edges = []
 
@@ -291,51 +389,76 @@ class AttentionAttributionGraphBuilder:
             if gradient is None:
                 attention = raw_attention.mean(dim=0)
             else:
-                attention = (raw_attention * gradient[0].detach().float()).clamp_min(0).mean(dim=0)
+                attention = (
+                    (raw_attention * gradient[0].detach().float())
+                    .clamp_min(0)
+                    .mean(dim=0)
+                )
                 row_sums = attention.sum(dim=-1, keepdim=True)
                 fallback = raw_attention.mean(dim=0)
-                attention = torch.where(row_sums > 1e-12, attention / row_sums.clamp_min(1e-12), fallback)
-            receiver_count = min(self.max_receivers_per_layer, int((score > 0).sum().item()))
+                attention = torch.where(
+                    row_sums > 1e-12, attention / row_sums.clamp_min(1e-12), fallback
+                )
+            receiver_count = min(
+                self.max_receivers_per_layer, int((score > 0).sum().item())
+            )
             if receiver_count:
                 receivers = torch.topk(score, receiver_count).indices.tolist()
                 for receiver in receivers:
                     source_count = min(self.edge_topk, receiver + 1)
-                    values, sources = torch.topk(attention[receiver, : receiver + 1], source_count)
+                    values, sources = torch.topk(
+                        attention[receiver, : receiver + 1], source_count
+                    )
                     for value, source in zip(values.tolist(), sources.tolist()):
-                        contribution = (1.0 - self.residual_mix) * float(score[receiver]) * float(value)
+                        contribution = (
+                            (1.0 - self.residual_mix)
+                            * float(score[receiver])
+                            * float(value)
+                        )
                         if contribution <= 0:
                             continue
-                        edges.append({
-                            "src": f"l{layer}:t{source}",
-                            "dst": f"l{layer + 1}:t{receiver}",
-                            "src_layer": layer,
-                            "dst_layer": layer + 1,
-                            "src_position": source,
-                            "dst_position": receiver,
-                            "weight": round(float(value), 10),
-                            "contribution": round(contribution, 10),
-                            "kind": "attention",
-                        })
+                        edges.append(
+                            {
+                                "src": f"l{layer}:t{source}",
+                                "dst": f"l{layer + 1}:t{receiver}",
+                                "src_layer": layer,
+                                "dst_layer": layer + 1,
+                                "src_position": source,
+                                "dst_position": receiver,
+                                "weight": round(float(value), 10),
+                                "contribution": round(contribution, 10),
+                                "kind": "attention",
+                            }
+                        )
                     residual_contribution = self.residual_mix * float(score[receiver])
                     if residual_contribution > 0:
-                        edges.append({
-                            "src": f"l{layer}:t{receiver}",
-                            "dst": f"l{layer + 1}:t{receiver}",
-                            "src_layer": layer,
-                            "dst_layer": layer + 1,
-                            "src_position": receiver,
-                            "dst_position": receiver,
-                            "weight": self.residual_mix,
-                            "contribution": round(residual_contribution, 10),
-                            "kind": "residual",
-                        })
+                        edges.append(
+                            {
+                                "src": f"l{layer}:t{receiver}",
+                                "dst": f"l{layer + 1}:t{receiver}",
+                                "src_layer": layer,
+                                "dst_layer": layer + 1,
+                                "src_position": receiver,
+                                "dst_position": receiver,
+                                "weight": self.residual_mix,
+                                "contribution": round(residual_contribution, 10),
+                                "kind": "residual",
+                            }
+                        )
             propagated = torch.matmul(score.unsqueeze(0), attention).squeeze(0)
             score = self.residual_mix * score + (1.0 - self.residual_mix) * propagated
             score = score / score.sum().clamp_min(1e-12)
             del attention, propagated
         return score, edges
 
-    def _empty(self, record: dict, target_answer: str, status: str, sequence_tokens: int = 0) -> dict:
+    def _empty(
+        self,
+        record: dict,
+        target_answer: str,
+        status: str,
+        sequence_tokens: int = 0,
+        graph_metadata: dict | None = None,
+    ) -> dict:
         return {
             "id": record_id(record),
             "question": str(record.get("question", "")),
@@ -346,7 +469,12 @@ class AttentionAttributionGraphBuilder:
             "top_context_tokens": [],
             "context_token_supports": [],
             "chunk_token_counts": {},
-            "graph": {"sequence_tokens": sequence_tokens, "nodes": [], "edges": []},
+            "graph": {
+                "sequence_tokens": sequence_tokens,
+                "nodes": [],
+                "edges": [],
+                **(graph_metadata or {}),
+            },
         }
 
 
@@ -373,51 +501,80 @@ class _NativeTrace:
 
 
 class NativeMLPAttributionGraphBuilder(AttentionAttributionGraphBuilder):
-    """KDD-shaped graph using Qwen's native MLP channels as feature units.
+    """Approximate graph using Qwen's native MLP channels as feature units.
 
-    The KDD paper replaces MLPs with learned transcoders and traces a locally
-    linear replacement model. Qwen's gated-MLP channels provide an exact local
-    feature decomposition: ``SiLU(gate(x)) * up(x)`` decoded by ``down_proj``.
-    We freeze attention weights and RMSNorm at their realized forward-pass
-    values, then use target-logit gradients to obtain positive token-pair
-    contributions. This is substantially closer to the KDD construction than
-    attention rollout and needs no external transcoder checkpoints.
+    Qwen's gated-MLP channels provide an exact local feature decomposition:
+    ``SiLU(gate(x)) * up(x)`` decoded by ``down_proj``. We freeze attention
+    weights and RMSNorm at their realized forward-pass values, then use
+    target-logit gradients to obtain positive token-pair contributions. This
+    needs no external transcoder checkpoints.
     """
 
     method = "qwen_native_mlp_fixed_forward_local_linear_attribution"
 
     native_feature_topk = 64
 
-    def build(self, record: dict, target_answer: str, *, k: int = 5, top_tokens: int = 50) -> dict:
+    def build(
+        self, record: dict, target_answer: str, *, k: int = 5, top_tokens: int = 50
+    ) -> dict:
         torch = self.torch
         contexts = self._truncate_contexts(retrieved_contexts(record)[:k])
         text, spans = self._render(record, contexts, target_answer)
-        encoded = self.tokenizer(
-            text,
-            add_special_tokens=False,
-            return_offsets_mapping=True,
-            return_tensors="pt",
-            truncation=True,
-            max_length=self.max_length,
-        )
+        encoded = self._encode_without_truncation(text)
+        sequence_tokens = int(encoded["input_ids"].shape[-1])
+        sequence_limit = self._sequence_limit()
+        if sequence_limit and sequence_tokens > sequence_limit:
+            return self._empty(
+                record,
+                target_answer,
+                "sequence_exceeds_model_context",
+                sequence_tokens,
+                {"sequence_limit": sequence_limit},
+            )
         input_ids = encoded["input_ids"].to(self.device)
-        offsets = [tuple(map(int, pair)) for pair in encoded["offset_mapping"][0].tolist()]
+        offsets = [
+            tuple(map(int, pair)) for pair in encoded["offset_mapping"][0].tolist()
+        ]
         token_meta = self._token_metadata(input_ids[0].tolist(), offsets, spans)
-        answer_positions = [item["position"] for item in token_meta if item["region"] == "answer"]
+        answer_positions = [
+            item["position"] for item in token_meta if item["region"] == "answer"
+        ]
         if not answer_positions:
-            return self._empty(record, target_answer, "answer_tokens_truncated", len(token_meta))
+            return self._empty(
+                record,
+                target_answer,
+                "answer_tokens_missing",
+                len(token_meta),
+            )
 
         trace = self._install_trace_hooks()
         try:
             with torch.enable_grad():
-                embeddings = self.model.get_input_embeddings()(input_ids).detach().requires_grad_(True)
-                output = self.model(inputs_embeds=embeddings, output_attentions=True, use_cache=False)
-                if not output.attentions or any(attention is None for attention in output.attentions):
-                    return self._empty(record, target_answer, "model_returned_no_attentions", len(token_meta))
-                target_logprob_tensor = self._target_logprob(output.logits, input_ids, answer_positions)
+                embeddings = (
+                    self.model.get_input_embeddings()(input_ids)
+                    .detach()
+                    .requires_grad_(True)
+                )
+                output = self.model(
+                    inputs_embeds=embeddings, output_attentions=True, use_cache=False
+                )
+                if not output.attentions or any(
+                    attention is None for attention in output.attentions
+                ):
+                    return self._empty(
+                        record,
+                        target_answer,
+                        "model_returned_no_attentions",
+                        len(token_meta),
+                    )
+                target_logprob_tensor = self._target_logprob(
+                    output.logits, input_ids, answer_positions
+                )
                 target_logprob_tensor.backward()
             target_logprob = float(target_logprob_tensor.detach().item())
-            support, edges = self._native_rollout(output.attentions, trace, answer_positions)
+            support, edges = self._native_rollout(
+                output.attentions, trace, answer_positions
+            )
         finally:
             trace.close()
 
@@ -427,18 +584,28 @@ class NativeMLPAttributionGraphBuilder(AttentionAttributionGraphBuilder):
         for item, value in zip(token_meta, support_cpu):
             if item["region"] != "context":
                 continue
-            chunk_token_counts[item["chunk_id"]] = chunk_token_counts.get(item["chunk_id"], 0) + 1
+            chunk_token_counts[item["chunk_id"]] = (
+                chunk_token_counts.get(item["chunk_id"], 0) + 1
+            )
             context_tokens.append({**item, "support": round(float(value), 10)})
         context_tokens.sort(key=lambda item: (-item["support"], item["position"]))
 
-        kept_edges = sorted(edges, key=lambda edge: -edge["contribution"])[: self.max_edges]
+        kept_edges = sorted(edges, key=lambda edge: -edge["contribution"])[
+            : self.max_edges
+        ]
         used_nodes = set()
         for edge in kept_edges:
             used_nodes.add((edge["src_layer"], edge["src_position"]))
             used_nodes.add((edge["dst_layer"], edge["dst_position"]))
         nodes = []
         for layer, position in sorted(used_nodes):
-            nodes.append({"node_id": f"l{layer}:t{position}", "layer": layer, **token_meta[position]})
+            nodes.append(
+                {
+                    "node_id": f"l{layer}:t{position}",
+                    "layer": layer,
+                    **token_meta[position],
+                }
+            )
 
         return {
             "id": record_id(record),
@@ -479,6 +646,7 @@ class NativeMLPAttributionGraphBuilder(AttentionAttributionGraphBuilder):
                 if value is None:
                     raise RuntimeError("could not capture transformer hidden states")
                 store[index] = value
+
             return hook
 
         def save_output(store: dict[int, Any], index: int):
@@ -487,21 +655,49 @@ class NativeMLPAttributionGraphBuilder(AttentionAttributionGraphBuilder):
                 if value.requires_grad:
                     value.retain_grad()
                 store[index] = value
+
             return hook
 
         for index, layer in enumerate(self.model.model.layers):
-            trace.handles.append(layer.register_forward_pre_hook(save_input(trace.layer_inputs, index), with_kwargs=True))
-            trace.handles.append(layer.register_forward_hook(save_output(trace.layer_outputs, index)))
-            trace.handles.append(layer.self_attn.register_forward_pre_hook(save_input(trace.attn_inputs, index), with_kwargs=True))
-            trace.handles.append(layer.self_attn.register_forward_hook(save_output(trace.attn_outputs, index)))
-            trace.handles.append(layer.mlp.register_forward_pre_hook(save_input(trace.mlp_inputs, index), with_kwargs=True))
-            trace.handles.append(layer.mlp.register_forward_hook(save_output(trace.mlp_outputs, index)))
+            trace.handles.append(
+                layer.register_forward_pre_hook(
+                    save_input(trace.layer_inputs, index), with_kwargs=True
+                )
+            )
+            trace.handles.append(
+                layer.register_forward_hook(save_output(trace.layer_outputs, index))
+            )
+            trace.handles.append(
+                layer.self_attn.register_forward_pre_hook(
+                    save_input(trace.attn_inputs, index), with_kwargs=True
+                )
+            )
+            trace.handles.append(
+                layer.self_attn.register_forward_hook(
+                    save_output(trace.attn_outputs, index)
+                )
+            )
+            trace.handles.append(
+                layer.mlp.register_forward_pre_hook(
+                    save_input(trace.mlp_inputs, index), with_kwargs=True
+                )
+            )
+            trace.handles.append(
+                layer.mlp.register_forward_hook(save_output(trace.mlp_outputs, index))
+            )
         return trace
 
-    def _native_rollout(self, attentions: tuple[Any, ...], trace: _NativeTrace, answer_positions: list[int]) -> tuple[Any, list[dict]]:
+    def _native_rollout(
+        self,
+        attentions: tuple[Any, ...],
+        trace: _NativeTrace,
+        answer_positions: list[int],
+    ) -> tuple[Any, list[dict]]:
         torch = self.torch
         sequence_length = attentions[0].shape[-1]
-        score = torch.zeros(sequence_length, dtype=torch.float32, device=attentions[0].device)
+        score = torch.zeros(
+            sequence_length, dtype=torch.float32, device=attentions[0].device
+        )
         score[answer_positions] = 1.0 / len(answer_positions)
         edges = []
 
@@ -510,42 +706,65 @@ class NativeMLPAttributionGraphBuilder(AttentionAttributionGraphBuilder):
                 layer_index, attentions[layer_index], trace
             )
             row_sums = matrix.sum(dim=-1, keepdim=True)
-            identity = torch.eye(sequence_length, dtype=matrix.dtype, device=matrix.device)
+            identity = torch.eye(
+                sequence_length, dtype=matrix.dtype, device=matrix.device
+            )
             normalized = torch.where(
                 row_sums > 1e-12,
                 matrix / row_sums.clamp_min(1e-12),
                 identity,
             )
-            receiver_count = min(self.max_receivers_per_layer, int((score > 0).sum().item()))
+            receiver_count = min(
+                self.max_receivers_per_layer, int((score > 0).sum().item())
+            )
             if receiver_count:
                 receivers = torch.topk(score, receiver_count).indices.tolist()
                 for receiver in receivers:
                     source_count = min(self.edge_topk, receiver + 1)
-                    values, sources = torch.topk(normalized[receiver, : receiver + 1], source_count)
+                    values, sources = torch.topk(
+                        normalized[receiver, : receiver + 1], source_count
+                    )
                     for value, source in zip(values.tolist(), sources.tolist()):
                         contribution = float(score[receiver]) * float(value)
                         if contribution <= 0:
                             continue
-                        kind = "native_mlp_residual" if source == receiver else "fixed_attention"
-                        edges.append({
-                            "src": f"l{layer_index}:t{source}",
-                            "dst": f"l{layer_index + 1}:t{receiver}",
-                            "src_layer": layer_index,
-                            "dst_layer": layer_index + 1,
-                            "src_position": source,
-                            "dst_position": receiver,
-                            "weight": round(float(value), 10),
-                            "contribution": round(contribution, 10),
-                            "kind": kind,
-                            "raw_attention_contribution": round(float(attention_matrix[receiver, source]), 10),
-                            "raw_native_self_contribution": round(float(self_score[receiver]) if source == receiver else 0.0, 10),
-                        })
+                        kind = (
+                            "native_mlp_residual"
+                            if source == receiver
+                            else "fixed_attention"
+                        )
+                        edges.append(
+                            {
+                                "src": f"l{layer_index}:t{source}",
+                                "dst": f"l{layer_index + 1}:t{receiver}",
+                                "src_layer": layer_index,
+                                "dst_layer": layer_index + 1,
+                                "src_position": source,
+                                "dst_position": receiver,
+                                "weight": round(float(value), 10),
+                                "contribution": round(contribution, 10),
+                                "kind": kind,
+                                "raw_attention_contribution": round(
+                                    float(attention_matrix[receiver, source]), 10
+                                ),
+                                "raw_native_self_contribution": round(
+                                    (
+                                        float(self_score[receiver])
+                                        if source == receiver
+                                        else 0.0
+                                    ),
+                                    10,
+                                ),
+                            }
+                        )
             score = torch.matmul(score.unsqueeze(0), normalized).squeeze(0)
             score = score / score.sum().clamp_min(1e-12)
             del matrix, attention_matrix, self_score, normalized
         return score, edges
 
-    def _native_layer_contributions(self, index: int, attention: Any, trace: _NativeTrace) -> tuple[Any, Any, Any]:
+    def _native_layer_contributions(
+        self, index: int, attention: Any, trace: _NativeTrace
+    ) -> tuple[Any, Any, Any]:
         """Compute target-logit edge contributions for one frozen-forward layer."""
 
         torch = self.torch
@@ -559,10 +778,16 @@ class NativeMLPAttributionGraphBuilder(AttentionAttributionGraphBuilder):
         n_kv_heads = n_heads // attn_module.num_key_value_groups
 
         with torch.no_grad():
-            values = attn_module.v_proj(attn_input).view(1, -1, n_kv_heads, head_dim)[0].float()
+            values = (
+                attn_module.v_proj(attn_input)
+                .view(1, -1, n_kv_heads, head_dim)[0]
+                .float()
+            )
             if n_kv_heads != n_heads:
                 values = values.repeat_interleave(n_heads // n_kv_heads, dim=1)
-            output_grads = torch.matmul(attn_output_grad, attn_module.o_proj.weight.detach().float())
+            output_grads = torch.matmul(
+                attn_output_grad, attn_module.o_proj.weight.detach().float()
+            )
             output_grads = output_grads.view(-1, n_heads, head_dim)
             dot_products = torch.einsum("thd,shd->hts", output_grads, values)
             attention_matrix = (dot_products * attn_weights).clamp_min(0).sum(dim=0)
@@ -572,7 +797,9 @@ class NativeMLPAttributionGraphBuilder(AttentionAttributionGraphBuilder):
             up = layer.mlp.up_proj(mlp_input).float()
             features = layer.mlp.act_fn(gate) * up
             mlp_grad = trace.mlp_outputs[index].grad[0].detach().float()
-            decoder_grad = torch.matmul(mlp_grad, layer.mlp.down_proj.weight.detach().float())
+            decoder_grad = torch.matmul(
+                mlp_grad, layer.mlp.down_proj.weight.detach().float()
+            )
             feature_contribution = (features * decoder_grad).clamp_min(0)
             sparse_contribution = torch.topk(
                 feature_contribution,
@@ -595,33 +822,53 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
 
     method = "qwen_direct_activation_target_logit_attribution"
 
-    def build(self, record: dict, target_answer: str, *, k: int = 5, top_tokens: int = 50) -> dict:
+    def build(
+        self, record: dict, target_answer: str, *, k: int = 5, top_tokens: int = 50
+    ) -> dict:
         torch = self.torch
         contexts = self._truncate_contexts(retrieved_contexts(record)[:k])
         text, spans = self._render(record, contexts, target_answer)
-        encoded = self.tokenizer(
-            text,
-            add_special_tokens=False,
-            return_offsets_mapping=True,
-            return_tensors="pt",
-            truncation=True,
-            max_length=self.max_length,
-        )
+        encoded = self._encode_without_truncation(text)
+        sequence_tokens = int(encoded["input_ids"].shape[-1])
+        sequence_limit = self._sequence_limit()
+        if sequence_limit and sequence_tokens > sequence_limit:
+            return self._empty(
+                record,
+                target_answer,
+                "sequence_exceeds_model_context",
+                sequence_tokens,
+                {"sequence_limit": sequence_limit},
+            )
         input_ids = encoded["input_ids"].to(self.device)
-        offsets = [tuple(map(int, pair)) for pair in encoded["offset_mapping"][0].tolist()]
+        offsets = [
+            tuple(map(int, pair)) for pair in encoded["offset_mapping"][0].tolist()
+        ]
         token_meta = self._token_metadata(input_ids[0].tolist(), offsets, spans)
-        answer_positions = [item["position"] for item in token_meta if item["region"] == "answer"]
+        answer_positions = [
+            item["position"] for item in token_meta if item["region"] == "answer"
+        ]
         target_positions = [position for position in answer_positions if position > 0]
         if not target_positions:
-            return self._empty(record, target_answer, "answer_tokens_truncated", len(token_meta))
+            return self._empty(
+                record,
+                target_answer,
+                "answer_tokens_missing",
+                len(token_meta),
+            )
 
         trace = self._install_trace_hooks()
         try:
             with torch.enable_grad():
-                embeddings = self.model.get_input_embeddings()(input_ids).detach().requires_grad_(True)
-                output = self.model(inputs_embeds=embeddings, output_attentions=True, use_cache=False)
-                if not output.attentions or any(attention is None for attention in output.attentions):
-                    return self._empty(record, target_answer, "model_returned_no_attentions", len(token_meta))
+                embeddings = (
+                    self.model.get_input_embeddings()(input_ids)
+                    .detach()
+                    .requires_grad_(True)
+                )
+                output = self.model(
+                    inputs_embeds=embeddings,
+                    output_attentions=False,
+                    use_cache=False,
+                )
                 target_logits = [
                     output.logits[0, position - 1, input_ids[0, position]].float()
                     for position in target_positions
@@ -629,12 +876,22 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 target_logit_tensor = torch.stack(target_logits).mean()
                 target_logit_tensor.backward()
 
+            layer_count = len(self.model.model.layers)
+            position_ids = torch.arange(
+                len(token_meta),
+                device=input_ids.device,
+            ).unsqueeze(0)
+            with torch.no_grad():
+                position_embeddings = self.model.model.rotary_emb(
+                    embeddings.detach(),
+                    position_ids,
+                )
             if self.closed_flow or self.absorbing_flow:
                 edges, flow_diagnostics = self._closed_flow_edges(
-                    output.attentions,
                     trace,
                     token_meta,
                     target_positions,
+                    position_embeddings,
                 )
                 if self.absorbing_flow:
                     edges, flow_diagnostics = self._absorbing_flow_subgraph(
@@ -648,10 +905,10 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 )
             else:
                 edges = self._direct_edges(
-                    output.attentions,
                     trace,
                     token_meta,
                     target_positions,
+                    position_embeddings,
                 )
                 flow_diagnostics = {}
                 context_tokens, chunk_token_counts = self._direct_context_support(
@@ -668,7 +925,14 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             if self.closed_flow or self.absorbing_flow
             else self._prune_direct_edges(edges, self.max_edges)
         )
-        nodes = self._direct_nodes(kept_edges, token_meta, len(output.attentions), target_positions)
+        graph_status = self._contribution_graph_status(
+            kept_edges,
+            token_meta,
+            require_context_path=self.closed_flow or self.absorbing_flow,
+        )
+        nodes = self._direct_nodes(
+            kept_edges, token_meta, layer_count, target_positions
+        )
         target_outputs = [
             {
                 "answer_position": position,
@@ -686,7 +950,7 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             "question": str(record.get("question", "")),
             "gold_answer": str(record.get("answer", "")),
             "target_answer": target_answer,
-            "status": "ok",
+            "status": graph_status,
             "method": (
                 f"{self.method}_closed_flow"
                 if self.closed_flow
@@ -708,8 +972,8 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 "answer_positions": answer_positions,
                 "target_positions": target_positions,
                 "region_edge_mass": self._region_edge_mass(kept_edges, token_meta),
-                "layers": len(output.attentions),
-                "stages": 2 * len(output.attentions) + 2,
+                "layers": layer_count,
+                "stages": 2 * layer_count + 2,
                 "nodes": nodes,
                 "edges": kept_edges,
                 "edge_count_before_cap": len(edges),
@@ -717,7 +981,8 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                     (
                         "backward-conserved positive flow allocated in proportion to signed "
                         "local target-logit contribution from the actual residual, attention "
-                        "OV, or MLP output write"
+                        "OV, or MLP output write; the mean-logit answer objective is seeded "
+                        "uniformly across its answer-token predictors"
                     )
                     if self.closed_flow or self.absorbing_flow
                     else (
@@ -754,65 +1019,39 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                     )
                 ),
                 "flow_diagnostics": flow_diagnostics,
+                "attention_backend": "sdpa_forward_layerwise_exact_recompute",
                 "uses_transcoder": False,
             },
         }
 
     def _closed_flow_edges(
         self,
-        attentions: tuple[Any, ...],
         trace: _NativeTrace,
         token_meta: list[dict],
         target_positions: list[int],
+        position_embeddings: tuple[Any, Any],
     ) -> tuple[list[dict], dict]:
         """Trace a sparse conserved positive flow backward from the answer."""
 
         edges: list[dict] = []
-        final_layer = len(attentions) - 1
-        final_stage = 2 * len(attentions)
-        final_output = trace.layer_outputs[final_layer][0].detach().float()
-        final_grad = trace.layer_outputs[final_layer].grad[0].detach().float()
-        final_contribution = (final_grad * final_output).sum(dim=-1)
+        layer_count = len(self.model.model.layers)
+        final_layer = layer_count - 1
+        final_stage = 2 * layer_count
         predictors = sorted({position - 1 for position in target_positions})
-        positive_outputs = {
-            predictor: max(0.0, float(final_contribution[predictor]))
-            for predictor in predictors
-        }
-        output_total = sum(positive_outputs.values())
         active_post: dict[int, float] = defaultdict(float)
         sink_position = target_positions[-1]
-        if output_total <= 1e-15:
-            edge = self._closed_background_edge(
-                final_stage + 1,
-                sink_position,
-                1.0,
-                final_layer,
-                "answer_output",
-            )
-            edge["dst"] = "answer_target"
-            edge["target_positions"] = list(target_positions)
+        answer_edges = self._answer_objective_edges(
+            predictors,
+            final_stage=final_stage,
+            final_layer=final_layer,
+            sink_position=sink_position,
+            target_positions=target_positions,
+        )
+        for edge in answer_edges:
             edges.append(edge)
-        else:
-            for predictor, raw_value in positive_outputs.items():
-                if raw_value <= 0:
-                    continue
-                flow = raw_value / output_total
-                edge = self._closed_flow_edge(
-                    final_stage,
-                    predictor,
-                    final_stage + 1,
-                    sink_position,
-                    "answer_logit",
-                    raw_value,
-                    flow,
-                    final_layer,
-                )
-                edge["dst"] = "answer_target"
-                edge["target_positions"] = list(target_positions)
-                edges.append(edge)
-                active_post[predictor] += flow
+            active_post[int(edge["src_position"])] += float(edge["contribution"])
 
-        for layer_index in range(len(attentions) - 1, -1, -1):
+        for layer_index in range(layer_count - 1, -1, -1):
             if not active_post:
                 break
             pre_stage = 2 * layer_index
@@ -834,28 +1073,32 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 )
                 total = sum(value for _, value in values)
                 if total <= 1e-15:
-                    edges.append(self._closed_background_edge(
-                        post_stage,
-                        receiver,
-                        mass,
-                        layer_index,
-                        "mlp",
-                    ))
+                    edges.append(
+                        self._closed_background_edge(
+                            post_stage,
+                            receiver,
+                            mass,
+                            layer_index,
+                            "mlp",
+                        )
+                    )
                     continue
                 for kind, raw_value in values:
                     if raw_value <= 0:
                         continue
                     flow = mass * raw_value / total
-                    edges.append(self._closed_flow_edge(
-                        mid_stage,
-                        receiver,
-                        post_stage,
-                        receiver,
-                        kind,
-                        raw_value,
-                        flow,
-                        layer_index,
-                    ))
+                    edges.append(
+                        self._closed_flow_edge(
+                            mid_stage,
+                            receiver,
+                            post_stage,
+                            receiver,
+                            kind,
+                            raw_value,
+                            flow,
+                            layer_index,
+                        )
+                    )
                     active_mid[receiver] += flow
 
             if not active_mid:
@@ -863,7 +1106,7 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 continue
             attention_matrix = self._direct_attention_matrix(
                 layer_index,
-                attentions[layer_index],
+                position_embeddings,
                 trace.attn_outputs[layer_index].grad,
                 trace.attn_inputs[layer_index],
             )
@@ -884,30 +1127,57 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
 
                 retained_mass = 0.0
                 source_count = min(max(0, self.edge_topk), positive_row.numel())
+                candidate_sources: set[int] = set()
                 if source_count:
-                    values, sources = self.torch.topk(positive_row, source_count)
-                    for raw_value, source in zip(values.tolist(), sources.tolist()):
-                        if raw_value <= 0:
-                            continue
-                        flow = mass * float(raw_value) / total
-                        allocations.append({
+                    _, sources = self.torch.topk(positive_row, source_count)
+                    candidate_sources.update(int(source) for source in sources.tolist())
+                if layer_index == 0:
+                    context_sources = [
+                        source
+                        for source in range(receiver + 1)
+                        if token_meta[source]["region"] == "context"
+                        and any(
+                            character.isalnum()
+                            for character in str(token_meta[source].get("text", ""))
+                        )
+                    ]
+                    if context_sources:
+                        best_context = max(
+                            context_sources,
+                            key=lambda source: float(positive_row[source]),
+                        )
+                        if float(positive_row[best_context]) > 0:
+                            candidate_sources.add(best_context)
+                for source in sorted(
+                    candidate_sources,
+                    key=lambda item: (-float(positive_row[item]), item),
+                ):
+                    raw_value = float(positive_row[source])
+                    if raw_value <= 0:
+                        continue
+                    flow = mass * raw_value / total
+                    allocations.append(
+                        {
                             "receiver": receiver,
-                            "source": int(source),
+                            "source": source,
                             "kind": "attention_ov_write",
-                            "raw_value": float(raw_value),
+                            "raw_value": raw_value,
                             "flow": flow,
-                        })
-                        source_mass[int(source)] += flow
-                        retained_mass += flow
+                        }
+                    )
+                    source_mass[source] += flow
+                    retained_mass += flow
                 if residual_value > 0:
                     flow = mass * residual_value / total
-                    allocations.append({
-                        "receiver": receiver,
-                        "source": receiver,
-                        "kind": "attention_residual",
-                        "raw_value": residual_value,
-                        "flow": flow,
-                    })
+                    allocations.append(
+                        {
+                            "receiver": receiver,
+                            "source": receiver,
+                            "kind": "attention_residual",
+                            "raw_value": residual_value,
+                            "flow": flow,
+                        }
+                    )
                     source_mass[receiver] += flow
                     retained_mass += flow
                 dropped_by_receiver[receiver] += max(0.0, mass - retained_mass)
@@ -919,6 +1189,23 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                     key=lambda item: (-item[1], item[0]),
                 )[: max(0, self.max_receivers_per_layer)]
             }
+            if layer_index == 0 and self.max_receivers_per_layer > 0:
+                input_context_sources = [
+                    source
+                    for source in source_mass
+                    if token_meta[source]["region"] == "context"
+                    and any(
+                        character.isalnum()
+                        for character in str(token_meta[source].get("text", ""))
+                    )
+                ]
+                if input_context_sources:
+                    selected_sources.add(
+                        max(
+                            input_context_sources,
+                            key=lambda source: (source_mass[source], -source),
+                        )
+                    )
             active_pre: dict[int, float] = defaultdict(float)
             for allocation in allocations:
                 receiver = int(allocation["receiver"])
@@ -927,36 +1214,132 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 if source not in selected_sources:
                     dropped_by_receiver[receiver] += flow
                     continue
-                edges.append(self._closed_flow_edge(
-                    pre_stage,
-                    source,
-                    mid_stage,
-                    receiver,
-                    str(allocation["kind"]),
-                    float(allocation["raw_value"]),
-                    flow,
-                    layer_index,
-                ))
+                edges.append(
+                    self._closed_flow_edge(
+                        pre_stage,
+                        source,
+                        mid_stage,
+                        receiver,
+                        str(allocation["kind"]),
+                        float(allocation["raw_value"]),
+                        flow,
+                        layer_index,
+                    )
+                )
                 active_pre[source] += flow
             for receiver, flow in dropped_by_receiver.items():
                 if flow <= 1e-15:
                     continue
-                edges.append(self._closed_background_edge(
-                    mid_stage,
-                    receiver,
-                    flow,
-                    layer_index,
-                    "attention_beam",
-                ))
+                edges.append(
+                    self._closed_background_edge(
+                        mid_stage,
+                        receiver,
+                        flow,
+                        layer_index,
+                        "attention_beam",
+                    )
+                )
             active_post = dict(active_pre)
 
         diagnostics = self._closed_flow_diagnostics(edges, token_meta)
-        diagnostics.update({
-            "edge_topk": self.edge_topk,
-            "receiver_beam": self.max_receivers_per_layer,
-            "flow_edges": len(edges),
-        })
+        diagnostics.update(
+            {
+                "answer_seed_policy": "uniform_mean_logit_objective",
+                "answer_predictors": len(predictors),
+                "answer_seed_mass": sum(
+                    float(edge["contribution"]) for edge in answer_edges
+                ),
+                "input_context_root_preservation": "best_positive_word_token",
+                "edge_topk": self.edge_topk,
+                "receiver_beam": self.max_receivers_per_layer,
+                "flow_edges": len(edges),
+            }
+        )
         return edges, diagnostics
+
+    @classmethod
+    def _answer_objective_edges(
+        cls,
+        predictors: list[int],
+        *,
+        final_stage: int,
+        final_layer: int,
+        sink_position: int,
+        target_positions: list[int],
+    ) -> list[dict]:
+        """Seed the mean clean-answer logit objective without residual heuristics."""
+
+        if not predictors:
+            return []
+        seed = 1.0 / len(predictors)
+        edges = []
+        for predictor in predictors:
+            edge = cls._closed_flow_edge(
+                final_stage,
+                predictor,
+                final_stage + 1,
+                sink_position,
+                "answer_objective",
+                seed,
+                seed,
+                final_layer,
+            )
+            edge["dst"] = "answer_target"
+            edge["target_positions"] = list(target_positions)
+            edges.append(edge)
+        return edges
+
+    @staticmethod
+    def _contribution_graph_status(
+        edges: list[dict],
+        token_meta: list[dict],
+        *,
+        require_context_path: bool,
+    ) -> str:
+        """Reject structurally unusable graphs instead of labelling them ``ok``."""
+
+        positive_edges = [
+            edge for edge in edges if float(edge.get("contribution", 0.0)) > 0
+        ]
+        if not positive_edges:
+            return "empty_contribution_graph"
+        if not any(
+            str(edge.get("dst", "")) == "answer_target" for edge in positive_edges
+        ):
+            return "missing_answer_terminal"
+        if not require_context_path:
+            return "ok"
+
+        context_roots = {
+            str(edge["src"])
+            for edge in positive_edges
+            if int(edge.get("src_layer", -1)) == 0
+            and 0 <= int(edge.get("src_position", -1)) < len(token_meta)
+            and token_meta[int(edge["src_position"])]["region"] == "context"
+            and any(
+                character.isalnum()
+                for character in str(
+                    token_meta[int(edge["src_position"])].get("text", "")
+                )
+            )
+        }
+        if not context_roots:
+            return "no_context_input_flow"
+        forward: dict[str, set[str]] = defaultdict(set)
+        for edge in positive_edges:
+            forward[str(edge["src"])].add(str(edge["dst"]))
+        reachable = set(context_roots)
+        frontier = list(context_roots)
+        while frontier:
+            node = frontier.pop()
+            for successor in forward.get(node, ()):
+                if successor in reachable:
+                    continue
+                reachable.add(successor)
+                frontier.append(successor)
+        if "answer_target" not in reachable:
+            return "no_context_to_answer_path"
+        return "ok"
 
     @staticmethod
     def _closed_flow_edge(
@@ -1028,9 +1411,7 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             for edge in edges
             if str(edge.get("src", "")).startswith("background::")
         ]
-        absorbed_mass = sum(
-            float(edge.get("contribution", 0.0)) for edge in removed
-        )
+        absorbed_mass = sum(float(edge.get("contribution", 0.0)) for edge in removed)
         return retained, {
             **closed_diagnostics,
             "proposal_background_flow": closed_diagnostics.get(
@@ -1118,16 +1499,20 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             flow = input_flow.get(position, 0.0)
             chunk_id = str(item["chunk_id"])
             chunk_token_counts[chunk_id] = chunk_token_counts.get(chunk_id, 0) + 1
-            context_tokens.append({
-                **item,
-                "support": round(flow, 12),
-                "signed_support": round(flow, 12),
-                "negative_support": 0.0,
-                "relevance": round(flow, 12),
-                "embedding_support": round(max(0.0, float(embedding_value)), 10),
-                "signed_embedding_support": round(float(embedding_value), 10),
-            })
-        context_tokens.sort(key=lambda item: (-float(item["support"]), item["position"]))
+            context_tokens.append(
+                {
+                    **item,
+                    "support": round(flow, 12),
+                    "signed_support": round(flow, 12),
+                    "negative_support": 0.0,
+                    "relevance": round(flow, 12),
+                    "embedding_support": round(max(0.0, float(embedding_value)), 10),
+                    "signed_embedding_support": round(float(embedding_value), 10),
+                }
+            )
+        context_tokens.sort(
+            key=lambda item: (-float(item["support"]), item["position"])
+        )
         return context_tokens, chunk_token_counts
 
     def _direct_context_support(
@@ -1168,24 +1553,36 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             negative = outgoing_negative.get(position, 0.0)
             chunk_id = str(item["chunk_id"])
             chunk_token_counts[chunk_id] = chunk_token_counts.get(chunk_id, 0) + 1
-            context_tokens.append({
-                **item,
-                "support": round(positive, 10),
-                "signed_support": round(positive - negative, 10),
-                "negative_support": round(negative, 10),
-                "relevance": round(positive + negative, 10),
-                "embedding_support": round(max(0.0, float(embedding_value)), 10),
-                "signed_embedding_support": round(float(embedding_value), 10),
-            })
-        context_tokens.sort(key=lambda item: (-float(item["support"]), item["position"]))
+            context_tokens.append(
+                {
+                    **item,
+                    "support": round(positive, 10),
+                    "signed_support": round(positive - negative, 10),
+                    "negative_support": round(negative, 10),
+                    "relevance": round(positive + negative, 10),
+                    "embedding_support": round(max(0.0, float(embedding_value)), 10),
+                    "signed_embedding_support": round(float(embedding_value), 10),
+                }
+            )
+        context_tokens.sort(
+            key=lambda item: (-float(item["support"]), item["position"])
+        )
         return context_tokens, chunk_token_counts
 
     @staticmethod
     def _prune_direct_edges(edges: list[dict], max_edges: int) -> list[dict]:
         """Keep the answer sink connected while globally pruning by relevance."""
 
-        mandatory = [edge for edge in edges if edge["kind"] == "answer_logit"]
-        optional = [edge for edge in edges if edge["kind"] != "answer_logit"]
+        mandatory = [
+            edge
+            for edge in edges
+            if edge["kind"] in {"answer_logit", "answer_objective"}
+        ]
+        optional = [
+            edge
+            for edge in edges
+            if edge["kind"] not in {"answer_logit", "answer_objective"}
+        ]
         optional.sort(key=lambda edge: -float(edge["relevance"]))
         if max_edges <= 0:
             return mandatory
@@ -1193,16 +1590,17 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
 
     def _direct_edges(
         self,
-        attentions: tuple[Any, ...],
         trace: _NativeTrace,
         token_meta: list[dict],
         target_positions: list[int],
+        position_embeddings: tuple[Any, Any],
     ) -> list[dict]:
         edges = []
-        for layer_index, attention in enumerate(attentions):
+        layer_count = len(self.model.model.layers)
+        for layer_index in range(layer_count):
             attention_matrix = self._direct_attention_matrix(
                 layer_index,
-                attention,
+                position_embeddings,
                 trace.attn_outputs[layer_index].grad,
                 trace.attn_inputs[layer_index],
             )
@@ -1225,7 +1623,9 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 + mlp_residual.abs()
             )
             receiver_count = min(self.max_receivers_per_layer, len(token_meta))
-            receivers = self.torch.topk(receiver_relevance, receiver_count).indices.tolist()
+            receivers = self.torch.topk(
+                receiver_relevance, receiver_count
+            ).indices.tolist()
             pre_stage = 2 * layer_index
             mid_stage = pre_stage + 1
             post_stage = pre_stage + 2
@@ -1238,15 +1638,17 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                         value = float(source_values[source])
                         if abs(value) <= 1e-12:
                             continue
-                        edges.append(self._direct_edge(
-                            pre_stage,
-                            source,
-                            mid_stage,
-                            receiver,
-                            "attention_ov_write",
-                            value,
-                            layer_index,
-                        ))
+                        edges.append(
+                            self._direct_edge(
+                                pre_stage,
+                                source,
+                                mid_stage,
+                                receiver,
+                                "attention_ov_write",
+                                value,
+                                layer_index,
+                            )
+                        )
                 for kind, value in (
                     ("attention_residual", float(attention_residual[receiver])),
                     ("mlp_residual", float(mlp_residual[receiver])),
@@ -1255,59 +1657,104 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                     if abs(value) <= 1e-12:
                         continue
                     src_stage = pre_stage if kind == "attention_residual" else mid_stage
-                    dst_stage = mid_stage if kind == "attention_residual" else post_stage
-                    edges.append(self._direct_edge(
-                        src_stage,
-                        receiver,
-                        dst_stage,
-                        receiver,
-                        kind,
-                        value,
-                        layer_index,
-                    ))
+                    dst_stage = (
+                        mid_stage if kind == "attention_residual" else post_stage
+                    )
+                    edges.append(
+                        self._direct_edge(
+                            src_stage,
+                            receiver,
+                            dst_stage,
+                            receiver,
+                            kind,
+                            value,
+                            layer_index,
+                        )
+                    )
 
-        final_layer = len(attentions) - 1
-        final_stage = 2 * len(attentions)
-        final_output = trace.layer_outputs[final_layer][0].detach().float()
-        final_grad = trace.layer_outputs[final_layer].grad[0].detach().float()
-        final_contribution = (final_grad * final_output).sum(dim=-1)
+        final_layer = layer_count - 1
+        final_stage = 2 * layer_count
         sink_position = target_positions[-1]
-        for predictor in sorted({position - 1 for position in target_positions}):
-            value = float(final_contribution[predictor])
-            if abs(value) <= 1e-12:
-                continue
-            edge = self._direct_edge(
-                final_stage,
-                predictor,
-                final_stage + 1,
-                sink_position,
-                "answer_logit",
-                value,
-                final_layer,
+        edges.extend(
+            self._answer_objective_edges(
+                sorted({position - 1 for position in target_positions}),
+                final_stage=final_stage,
+                final_layer=final_layer,
+                sink_position=sink_position,
+                target_positions=target_positions,
             )
-            edge["dst"] = "answer_target"
-            edge["target_positions"] = list(target_positions)
-            edges.append(edge)
+        )
         return edges
 
     def _direct_attention_matrix(
         self,
         layer_index: int,
-        attention: Any,
+        position_embeddings: tuple[Any, Any],
         attention_output_grad: Any,
         attention_input: Any,
     ) -> Any:
         torch = self.torch
         layer = self.model.model.layers[layer_index]
         module = layer.self_attn
-        attn_weights = attention[0].detach().float()
-        n_heads = attn_weights.shape[0]
+        n_heads = module.config.num_attention_heads
+        n_kv_heads = module.config.num_key_value_heads
         head_dim = module.head_dim
-        n_kv_heads = n_heads // module.num_key_value_groups
         with torch.no_grad():
-            values = module.v_proj(attention_input[0].detach()).view(
-                -1, n_kv_heads, head_dim
-            ).float()
+            hidden_states = attention_input[0].detach()
+            sequence_length = hidden_states.shape[0]
+            query_states = (
+                module.q_proj(hidden_states)
+                .view(1, sequence_length, n_heads, head_dim)
+                .transpose(1, 2)
+            )
+            key_states = (
+                module.k_proj(hidden_states)
+                .view(1, sequence_length, n_kv_heads, head_dim)
+                .transpose(1, 2)
+            )
+            cos, sin = position_embeddings
+            cos = cos.unsqueeze(1).to(query_states.dtype)
+            sin = sin.unsqueeze(1).to(query_states.dtype)
+            query_states = query_states * cos + self._rotate_half(query_states) * sin
+            key_states = key_states * cos + self._rotate_half(key_states) * sin
+            if n_kv_heads != n_heads:
+                key_states = key_states.repeat_interleave(
+                    module.num_key_value_groups,
+                    dim=1,
+                )
+            attention_scores = (
+                torch.matmul(
+                    query_states,
+                    key_states.transpose(2, 3),
+                )
+                * module.scaling
+            )
+            positions = torch.arange(
+                sequence_length,
+                device=attention_scores.device,
+            )
+            causal_mask = positions.unsqueeze(0) > positions.unsqueeze(1)
+            if (
+                module.config.use_sliding_window
+                and getattr(module.config, "sliding_window", None) is not None
+                and layer_index >= module.config.max_window_layers
+            ):
+                too_old = positions.unsqueeze(0) <= (
+                    positions.unsqueeze(1) - int(module.config.sliding_window)
+                )
+                causal_mask = causal_mask | too_old
+            attention_scores.masked_fill_(
+                causal_mask.unsqueeze(0).unsqueeze(0),
+                torch.finfo(attention_scores.dtype).min,
+            )
+            attn_weights = torch.softmax(
+                attention_scores,
+                dim=-1,
+                dtype=torch.float32,
+            ).to(query_states.dtype)[0]
+            del attention_scores, query_states, key_states
+
+            values = module.v_proj(hidden_states).view(-1, n_kv_heads, head_dim).float()
             if n_kv_heads != n_heads:
                 values = values.repeat_interleave(n_heads // n_kv_heads, dim=1)
             output_grads = torch.matmul(
@@ -1316,6 +1763,16 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             ).view(-1, n_heads, head_dim)
             dot_products = torch.einsum("thd,shd->hts", output_grads, values)
             return (dot_products * attn_weights).sum(dim=0)
+
+    def _rotate_half(self, hidden_states: Any) -> Any:
+        midpoint = hidden_states.shape[-1] // 2
+        return self.torch.cat(
+            (
+                -hidden_states[..., midpoint:],
+                hidden_states[..., :midpoint],
+            ),
+            dim=-1,
+        )
 
     @staticmethod
     def _direct_edge(
@@ -1382,23 +1839,27 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             else:
                 stage_name = "post_attention"
                 model_layer = stage // 2
-            nodes.append({
-                "node_id": f"s{stage}:t{position}",
-                "stage": stage,
-                "stage_name": stage_name,
-                "model_layer": model_layer,
-                **token_meta[position],
-            })
+            nodes.append(
+                {
+                    "node_id": f"s{stage}:t{position}",
+                    "stage": stage,
+                    "stage_name": stage_name,
+                    "model_layer": model_layer,
+                    **token_meta[position],
+                }
+            )
         nodes.extend(background_nodes[node] for node in sorted(background_nodes))
         if has_sink:
-            nodes.append({
-                "node_id": "answer_target",
-                "stage": sink_stage,
-                "stage_name": "answer_logit",
-                "model_layer": layer_count,
-                "position": target_positions[-1],
-                "region": "answer",
-                "target_positions": list(target_positions),
-                "text": "<answer-target>",
-            })
+            nodes.append(
+                {
+                    "node_id": "answer_target",
+                    "stage": sink_stage,
+                    "stage_name": "answer_logit",
+                    "model_layer": layer_count,
+                    "position": target_positions[-1],
+                    "region": "answer",
+                    "target_positions": list(target_positions),
+                    "text": "<answer-target>",
+                }
+            )
         return nodes

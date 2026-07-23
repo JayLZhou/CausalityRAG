@@ -10,11 +10,12 @@ verifies the selected intervention on the reader:
 ```text
 retrieval records
   -> frozen context/linguistic units
+  -> frozen clean answers generated concurrently by vLLM
   -> direct-activation absorbing contribution DAG
   -> projected token contribution network
   -> geometric weighted min-cuts
   -> fixed-point strict replacement registry
-  -> reader intervention and local-HF verification
+  -> concurrent vLLM reader intervention evaluation
 ```
 
 Query tokens, generated answer tokens, retrieval results, and model weights are
@@ -83,11 +84,11 @@ coexist under `configs/`.
 |---|---|---|
 | Annotation service | `scripts/spacy_annotation_server.py` | localhost API |
 | Context units | `scripts/build_context_units.py` | frozen context-unit JSONL |
+| Clean reader targets | `scripts/generate_reader_targets.py` | vLLM answer JSONL |
 | Contribution graph | `scripts/build_contribution_graph.py` | graph JSONL |
 | Flow optimization | `scripts/solve_contribution_flow.py` | candidate JSONL |
 | Replacement registry | `scripts/build_replacement_registry.py` | registry JSONL |
 | Reader evaluation | `scripts/evaluate_reader.py` | intervention JSONL |
-| Local-HF verification | `scripts/verify_hf_results.py` | verified JSONL |
 | Artifact manifest | `scripts/build_artifact_manifest.py` | manifest JSON |
 | Tests | `scripts/run_tests.py` | lightweight test report |
 
@@ -100,11 +101,11 @@ the optimization network.
 | Stage | Required input | Produced artifact | Acceptance check |
 |---|---|---|---|
 | 1. Context units | retrieval records, spaCy | `context_units.jsonl` | `queries=N`, nonzero units, context hashes stored |
-| 2. Contribution graph | records, frozen clean reader answer, local model | `contribution_graph.jsonl` | every row is `ok`, method is direct activation, clean answer stored |
-| 3. Graph optimization | graph, context units | initial flow JSONL | projected-token network and geometric solver recorded |
-| 4. Registry closure | flow candidates, replacement pools | registry plus re-solved flow | zero evaluated registry misses |
-| 5. Reader evaluation | final flow, fixed registry, clean answer | native evaluation JSONL | zero registry misses and replacement failures |
-| 6. Local-HF verification | saved edits, same local model | `hf_verification.jsonl` | clean and edited variants regenerated with eager attention |
+| 2. Clean targets | records, vLLM | `clean_targets.jsonl` | every ID has one frozen greedy answer |
+| 3. Contribution graph | records, clean targets, same checkpoint in HF SDPA | `contribution_graph.jsonl` | every row is `ok`, has a positive context-to-answer path, and stores the clean answer |
+| 4. Graph optimization | graph, context units | initial flow JSONL | projected-token network and geometric solver recorded |
+| 5. Registry closure | flow candidates, replacement pools | registry plus re-solved flow | zero evaluated registry misses |
+| 6. Reader evaluation | final flow, fixed registry, clean answer, vLLM | native evaluation JSONL | zero registry misses and replacement failures |
 | 7. Manifest | all frozen artifacts | `manifest.json` | hashes, sizes, line counts, commit, and dirty state recorded |
 
 The immutable dependency chain is:
@@ -112,12 +113,12 @@ The immutable dependency chain is:
 ```text
 DATA + K
   -> TOKEN_UNITS
-  -> CLEAN_TARGET + CONTRIBUTION_GRAPH
+  -> VLLM_CLEAN_TARGETS
+  -> HF_SDPA_CONTRIBUTION_GRAPH
   -> PURE_GRAPH_FLOW_CANDIDATES
   -> FIXED_REPLACEMENT_REGISTRY
   -> FINAL_GRAPH_FLOW_CANDIDATES
-  -> READER_EVALUATIONS
-  -> LOCAL_HF_VERIFICATION
+  -> VLLM_READER_EVALUATIONS
   -> MANIFEST
 ```
 
@@ -138,7 +139,11 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements-gpu.txt
 ```
 
-This environment runs graph construction and local Hugging Face verification.
+This environment runs graph construction. The local Hugging Face SDPA model is
+used only because contribution tracing needs gradients and intermediate
+activations; it does not generate a second set of reader metrics. Attention
+weights are recomputed exactly one layer at a time after backward, avoiding the
+all-layer eager-attention memory peak.
 
 ### spaCy environment
 
@@ -197,6 +202,21 @@ Accepted aliases include `_id`/`qid`/`question_id` for IDs,
 contexts, and `text`/`content`/`passage`/`body` for context text. Every stage
 preserves the record ID; misaligned or missing IDs fail fast.
 
+## Retrieval contract
+
+This repository starts from frozen retrieval records; it does not silently
+re-chunk, re-embed, rerank, or shorten them. `K` selects the first `K` complete
+retrieved chunks and never means a token budget.
+
+For comparable multi-dataset experiments, freeze the same upstream retrieval
+protocol before running this pipeline: chunk unit and token size, overlap,
+embedding checkpoint, embedded fields, query instruction, tokenizer context
+handling, vector normalization, index and similarity metric, top-k, and any
+reranker. Record all of these values in the dataset `run.yaml`. A legacy
+artifact built with variable native paragraphs or an artificial embedding
+length cap is not directly comparable to a fixed-chunk artifact and must be
+regenerated before cross-dataset aggregation.
+
 ## Services and environment variables
 
 Start the spaCy service in the spaCy environment:
@@ -206,8 +226,8 @@ export YVETTE_SPACY_MODEL=en_core_web_lg
 python scripts/spacy_annotation_server.py --host 127.0.0.1 --port 8021
 ```
 
-Graph targeting and reader evaluation use an OpenAI-compatible
-chat-completions server:
+Clean-target generation, replacement editing, and final reader evaluation use
+one vLLM OpenAI-compatible endpoint:
 
 ```bash
 export CAUSALITYRAG_SPACY_BASE_URL=http://127.0.0.1:8021
@@ -217,6 +237,14 @@ export CAUSALITYRAG_LLM_MODEL=qwen2.5-7b
 
 The older `YVETTE_LLM_BASE_URL` and `YVETTE_LLM_MODEL` names remain supported
 as fallbacks.
+
+The checkpoint behind that served model must be the same checkpoint passed to
+`build_contribution_graph.py --model-path`. These are not two reader
+evaluations. vLLM is the only answer-generation and answer-change backend. The
+HF SDPA load is an attribution instrument used only during graph construction.
+If both would use the same GPU, first generate and save `clean_targets.jsonl`,
+stop vLLM, build the graphs, and then restart vLLM for registry closure and
+final evaluation.
 
 ## Multi-dataset execution
 
@@ -231,11 +259,11 @@ The canonical storage layout is:
 runs/<dataset>/<run-id>/
   run.yaml
   01_context/
-  02_graph/
-  03_flow/
-  04_registry/
-  05_evaluation/
-  06_verification/
+  02_reader/
+  03_graph/
+  04_flow/
+  05_registry/
+  06_evaluation/
   manifest.json
 ```
 
@@ -256,28 +284,28 @@ export K=5
 export BETA=0.1
 export ETA=1.0
 export GAMMA=1.0
-export MAX_K_GUESS=0
 export RELAXED_FLOW_THRESHOLD=0.2
 
 export RUN_DIR="${RUN_ROOT}/${DATASET}/${RUN_ID}"
 export CONTEXT_DIR="${RUN_DIR}/01_context"
-export GRAPH_DIR="${RUN_DIR}/02_graph"
-export FLOW_DIR="${RUN_DIR}/03_flow"
-export REGISTRY_DIR="${RUN_DIR}/04_registry"
-export EVALUATION_DIR="${RUN_DIR}/05_evaluation"
-export VERIFICATION_DIR="${RUN_DIR}/06_verification"
+export READER_DIR="${RUN_DIR}/02_reader"
+export GRAPH_DIR="${RUN_DIR}/03_graph"
+export FLOW_DIR="${RUN_DIR}/04_flow"
+export REGISTRY_DIR="${RUN_DIR}/05_registry"
+export EVALUATION_DIR="${RUN_DIR}/06_evaluation"
 
 export CONTEXT_UNITS="${CONTEXT_DIR}/context_units.jsonl"
+export CLEAN_TARGETS="${READER_DIR}/clean_targets.jsonl"
 export GRAPH="${GRAPH_DIR}/contribution_graph.jsonl"
 export FLOW_INITIAL="${FLOW_DIR}/initial.jsonl"
 
 mkdir -p \
   "$CONTEXT_DIR" \
+  "$READER_DIR" \
   "$GRAPH_DIR" \
   "$FLOW_DIR" \
   "$REGISTRY_DIR" \
-  "$EVALUATION_DIR" \
-  "$VERIFICATION_DIR"
+  "$EVALUATION_DIR"
 
 cp "$CONFIG" "$RUN_DIR/run.yaml"
 ```
@@ -285,7 +313,7 @@ cp "$CONFIG" "$RUN_DIR/run.yaml"
 `CF_POOLS` is a JSON object with `type_pool` and optional tab-delimited
 `role_pool` keys. `TYPE_RULES` is optional. If no compatible rule metadata YAML
 is available, leave it empty and remove the `--type-rules "$TYPE_RULES"` line
-from stages 4 and 5. Create `CONFIG` by copying
+from stages 5 and 6. Create `CONFIG` by copying
 `configs/dataset_template.yaml`, then fill in the same frozen values exported
 above.
 
@@ -310,7 +338,29 @@ python scripts/build_context_units.py \
 Use `--backend local-process --spacy-model en_core_web_lg` when spaCy is
 installed in the current environment.
 
-### 2. Build the direct-activation absorbing contribution graph
+### 2. Freeze clean reader targets with vLLM
+
+Start the Qwen checkpoint with vLLM under the served name exported in
+`CAUSALITYRAG_LLM_MODEL`, then submit clean-answer requests concurrently:
+
+```bash
+python scripts/generate_reader_targets.py \
+  --input "$DATA" \
+  --out "$CLEAN_TARGETS" \
+  --summary-out "$READER_DIR/clean_targets.summary.json" \
+  --workers 16 \
+  --n "$N" \
+  --k "$K"
+```
+
+This JSONL is the only clean-answer source used downstream. It is generated
+once, saved in input order, and reused as the graph target and flip baseline.
+
+### 3. Build the direct-activation absorbing contribution graph
+
+When vLLM and graph construction share a GPU, stop vLLM before this command.
+The local HF SDPA load consumes the frozen vLLM answers; it does not generate
+answers itself.
 
 ```bash
 python scripts/build_contribution_graph.py \
@@ -318,11 +368,10 @@ python scripts/build_contribution_graph.py \
   --out "$GRAPH" \
   --summary-out "$GRAPH_DIR/summary.json" \
   --model-path "$MODEL" \
-  --target reader \
+  --target results \
+  --target-results "$CLEAN_TARGETS" \
   --device cuda \
   --dtype bfloat16 \
-  --max-context-tokens 800 \
-  --max-length 1024 \
   --edge-topk 6 \
   --max-receivers-per-layer 48 \
   --max-edges 5000 \
@@ -334,11 +383,18 @@ python scripts/build_contribution_graph.py \
 
 Each row stores the frozen `clean_answer` used as its graph target.
 
-The OpenAI-compatible reader selected by `CAUSALITYRAG_LLM_MODEL` must use the
-same model weights, prompt, top-k contexts, and greedy decoding contract as
-the local model at `MODEL`.
+No per-chunk or whole-prompt truncation is configured. All retrieved text is
+rendered and tokenized exactly. The only applicable sequence boundary is the
+checkpoint's real model context window; exceeding it is reported as
+`sequence_exceeds_model_context` instead of silently clipping evidence.
 
-### 3. Produce an initial contribution-flow solution
+The answer-objective sink is seeded uniformly across the predictors of the
+mean clean-answer-token logit. A graph is accepted only when it has positive
+answer-terminal flow and a positive context-to-answer path. Empty or unusable
+graphs receive an explicit failure status, and the command exits nonzero after
+writing its status summary.
+
+### 4. Produce an initial contribution-flow solution
 
 ```bash
 python scripts/solve_contribution_flow.py \
@@ -353,16 +409,14 @@ python scripts/solve_contribution_flow.py \
   --beta "$BETA" \
   --eta "$ETA" \
   --gamma "$GAMMA" \
-  --max-k-guess "$MAX_K_GUESS" \
   --n "$N" \
   --k "$K"
 ```
 
-`--max-k-guess 0` means the geometric grid runs through the complete editable
-token count. A positive value truncates the guarantee to instances whose graph
-optimum is no larger than that value.
+There is no edit-budget parameter. The geometric grid always covers the full
+editable-token count; `GAMMA` controls only the spacing of its internal scales.
 
-### 4. Close the strict replacement registry
+### 5. Close the strict replacement registry
 
 Selection never sees replacement text. The registry fixes one answer-blind
 replacement per candidate and marks invalid tokens uncuttable.
@@ -429,7 +483,6 @@ python scripts/solve_contribution_flow.py \
   --beta "$BETA" \
   --eta "$ETA" \
   --gamma "$GAMMA" \
-  --max-k-guess "$MAX_K_GUESS" \
   --n "$N" \
   --k "$K"
 ```
@@ -486,7 +539,6 @@ python scripts/solve_contribution_flow.py \
   --beta "$BETA" \
   --eta "$ETA" \
   --gamma "$GAMMA" \
-  --max-k-guess "$MAX_K_GUESS" \
   --n "$N" \
   --k "$K"
 
@@ -497,17 +549,18 @@ Keep `REGISTRY_FIXED_POINT` pointed at whichever numbered registry reached the
 fixed point. The copy to `final.jsonl` gives every dataset the same downstream
 path while preserving all numbered closure iterations.
 
-### 5. Evaluate saved selections with the served reader
+### 6. Evaluate saved selections with vLLM
 
 Run only the native graph-threshold evaluation. With `BETA=0.1` and `ETA=1`,
 the solver accepts candidates up to the relaxed residual-flow fraction
-`(1 + ETA) * BETA = 0.20`:
+`(1 + ETA) * BETA = 0.20`. Restart the same vLLM endpoint used in stage 2
+before running:
 
 ```bash
 python scripts/evaluate_reader.py \
   --input "$DATA" \
   --gate "$FLOW" \
-  --clean-reference "$GRAPH" \
+  --clean-reference "$CLEAN_TARGETS" \
   --replacement-registry "$REGISTRY" \
   --context-units "$CONTEXT_UNITS" \
   --cf-pools "$CF_POOLS" \
@@ -516,36 +569,19 @@ python scripts/evaluate_reader.py \
   --summary-out "$EVALUATION_DIR/native.summary.json" \
   --remaining-flow-threshold "$RELAXED_FLOW_THRESHOLD" \
   --clean-correct-policy exact \
+  --reader-workers 16 \
   --strict-replacements \
   --k "$K"
 ```
+
+All independent edited-context requests are submitted concurrently to vLLM.
+The stored stage-2 clean answer remains the baseline, so clean inference is not
+repeated here.
 
 The primary output is the contribution-flow selection. The artifact also
 contains a cardinality-matched ranking by graph-local token support for
 diagnostic comparison; it is not ARC-JSD and is not part of the proposed
 selector.
-
-### 6. Perform final local-HF eager verification
-
-Served-reader results are diagnostic. Final answer-change metrics should be
-recomputed with the same local model weights and eager attention backend used
-for scoring:
-
-```bash
-python scripts/verify_hf_results.py \
-  --input "$DATA" \
-  --results "$EVALUATION_DIR/native.jsonl" \
-  --out "$VERIFICATION_DIR/local_hf.jsonl" \
-  --summary-out "$VERIFICATION_DIR/local_hf.summary.json" \
-  --model-path "$MODEL" \
-  --device cuda \
-  --dtype bfloat16 \
-  --max-new-tokens 96 \
-  --k "$K"
-```
-
-Use `--clean-targets` only when a separate JSONL explicitly freezes
-`{"id", "target_answer"}` pairs.
 
 ### 7. Freeze an artifact manifest
 
@@ -554,10 +590,11 @@ python scripts/build_artifact_manifest.py \
   --repository . \
   --artifacts \
     "$CONTEXT_UNITS" \
+    "$CLEAN_TARGETS" \
     "$GRAPH" \
     "$FLOW" \
     "$REGISTRY" \
-    "$VERIFICATION_DIR/local_hf.jsonl" \
+    "$EVALUATION_DIR/native.jsonl" \
   --metadata-json "{\"dataset\":\"$DATASET\",\"run_id\":\"$RUN_ID\",\"n\":$N,\"k\":$K}" \
   --out "$RUN_DIR/manifest.json"
 ```
@@ -573,10 +610,13 @@ runs/<dataset>/<run-id>/
   01_context/
     context_units.jsonl
     summary.json
-  02_graph/
+  02_reader/
+    clean_targets.jsonl
+    clean_targets.summary.json
+  03_graph/
     contribution_graph.jsonl
     summary.json
-  03_flow/
+  04_flow/
     initial.jsonl
     initial.summary.json
     iteration_01.jsonl
@@ -584,17 +624,14 @@ runs/<dataset>/<run-id>/
     ... additional closure iterations ...
     final.jsonl
     final.summary.json
-  04_registry/
+  05_registry/
     iteration_01.jsonl
     iteration_01.summary.json
     ... additional closure iterations ...
     final.jsonl
-  05_evaluation/
+  06_evaluation/
     native.jsonl
     native.summary.json
-  06_verification/
-    local_hf.jsonl
-    local_hf.summary.json
   manifest.json
 ```
 
@@ -608,25 +645,28 @@ runs/<dataset>/<run-id>/
 - `layer-copy-token` is the current CLI name for projecting all transformer
   layer copies of one context token into one token node. It is not the old
   grouped layer-copy rounding method.
-- The final solver is `geometric-k-guessing` with explicit `BETA`, `ETA`,
-  `GAMMA`, and `MAX_K_GUESS`.
-- `MAX_K_GUESS=0` covers the full editable token domain.
+- The final solver is `geometric-k-guessing` with explicit `BETA`, `ETA`, and
+  `GAMMA`; it always covers the full editable-token domain and uses no edit
+  budget.
 - Invalid replacements remain in the flow graph but are made uncuttable.
 - Registry closure ends only when
   `evaluated_candidate_registry_misses == 0`.
 - Native evaluation uses the solver's relaxed threshold
   `(1 + ETA) * BETA`.
-- Final reported reader results come from local-HF eager verification rather
-  than the served-reader diagnostic.
+- vLLM is the sole clean/edited answer backend; HF SDPA is used only for
+  contribution tracing.
+- Contexts and prompts are not silently truncated. A real model-window
+  overflow or a missing context-to-answer graph path fails explicitly.
 
 ## Output and reproducibility rules
 
 - JSONL stage outputs are immutable inputs to later stages.
 - Keep the same `id`, record order, top-k value, model weights, tokenizer,
-  prompt, dtype, and eager-attention backend throughout a final run.
+  prompt, and greedy decoding contract throughout a final run.
+- Record vLLM as the reader backend and HF SDPA as the attribution backend;
+  do not report them as two reader evaluations.
 - Use the frozen context-unit artifact to enforce context hashes and offsets.
 - Do not regenerate replacements separately for competing selectors.
-- Do not interpret vLLM/server disagreement as an intervention effect.
 - Record the final registry fixed point and artifact manifest.
 
 ## Tests
@@ -638,7 +678,7 @@ or development environment:
 The final test suite covers input normalization, token offsets, contextual
 replacement validity, reader metrics, direct contribution graphs, projected
 token flow, exact weighted min-cuts, geometric scales, registry filtering, and
-saved-intervention verification. ARC-JSD tests are retained under `exp/`.
+saved-intervention evaluation. ARC-JSD tests are retained under `exp/`.
 
 ```bash
 python scripts/run_tests.py
@@ -658,8 +698,8 @@ on the GPU server before starting its frozen full run.
 
 Report every dataset separately before producing macro or micro aggregates.
 Each dataset result must reference its own manifest, sample count, retrieval
-depth, clean-correct coverage, native-threshold metrics, and local-HF
-verification summary. Cross-dataset aggregation is valid only after the
+depth, clean-correct coverage, and vLLM native-threshold summary.
+Cross-dataset aggregation is valid only after the
 per-dataset artifacts pass the same acceptance checks.
 
 Historical dataset-specific baselines, ablations, plotting scripts, and

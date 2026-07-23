@@ -1,4 +1,4 @@
-"""OpenAI-compatible reader calls for answer-change verification."""
+"""vLLM reader calls and experimental local-HF reader utilities."""
 
 from __future__ import annotations
 
@@ -20,11 +20,23 @@ Return STRICT JSON: {{"answer": "..."}}"""
 
 
 class ReaderClient:
-    def __init__(self, base_url: str | None = None, model: str | None = None, timeout: int = 120) -> None:
-        self.base_url = (base_url or os.environ.get("CAUSALITYRAG_LLM_BASE_URL")
-                         or os.environ.get("YVETTE_LLM_BASE_URL")
-                         or "http://127.0.0.1:8000/v1").rstrip("/")
-        self.model = model or os.environ.get("CAUSALITYRAG_LLM_MODEL") or os.environ.get("YVETTE_LLM_MODEL") or "qwen2.5-7b"
+    """Concurrent-safe client for the vLLM OpenAI-compatible endpoint."""
+
+    def __init__(
+        self, base_url: str | None = None, model: str | None = None, timeout: int = 120
+    ) -> None:
+        self.base_url = (
+            base_url
+            or os.environ.get("CAUSALITYRAG_LLM_BASE_URL")
+            or os.environ.get("YVETTE_LLM_BASE_URL")
+            or "http://127.0.0.1:8000/v1"
+        ).rstrip("/")
+        self.model = (
+            model
+            or os.environ.get("CAUSALITYRAG_LLM_MODEL")
+            or os.environ.get("YVETTE_LLM_MODEL")
+            or "qwen2.5-7b"
+        )
         self.timeout = timeout
 
     def answer(self, question: str, contexts: list[dict]) -> str:
@@ -32,7 +44,12 @@ class ReaderClient:
             "model": self.model,
             "messages": [
                 {"role": "system", "content": READ_SYSTEM},
-                {"role": "user", "content": READ_USER.format(question=question, passages=format_passages(contexts))},
+                {
+                    "role": "user",
+                    "content": READ_USER.format(
+                        question=question, passages=format_passages(contexts)
+                    ),
+                },
             ],
             "temperature": 0,
             "max_tokens": 96,
@@ -53,7 +70,7 @@ class ReaderClient:
 
 
 class LocalHFReader:
-    """Greedy local Hugging Face reader used for final verification."""
+    """Greedy local Hugging Face reader retained for experimental cross-checks."""
 
     def __init__(
         self,
@@ -61,7 +78,7 @@ class LocalHFReader:
         *,
         device: str = "cuda",
         dtype: str = "bfloat16",
-        attn_implementation: str = "eager",
+        attn_implementation: str = "sdpa",
     ) -> None:
         try:
             import torch
@@ -71,9 +88,7 @@ class LocalHFReader:
                 AutoTokenizer,
             )
         except ImportError as exc:  # pragma: no cover - GPU integration
-            raise RuntimeError(
-                "LocalHFReader requires torch and transformers"
-            ) from exc
+            raise RuntimeError("LocalHFReader requires torch and transformers") from exc
 
         self.torch = torch
         self.device = device
@@ -113,8 +128,7 @@ class LocalHFReader:
             return []
         torch = self.torch
         prompts = [
-            self._prompt_ids(question, contexts)
-            for contexts in context_variants
+            self._prompt_ids(question, contexts) for contexts in context_variants
         ]
         max_prompt_length = max(len(prompt) for prompt in prompts)
         input_ids = torch.full(
@@ -144,9 +158,7 @@ class LocalHFReader:
         responses = []
         for sequence in generated[:, max_prompt_length:].tolist():
             if self.tokenizer.eos_token_id in sequence:
-                sequence = sequence[
-                    :sequence.index(self.tokenizer.eos_token_id)
-                ]
+                sequence = sequence[: sequence.index(self.tokenizer.eos_token_id)]
             responses.append(
                 self.tokenizer.decode(
                     sequence,
@@ -182,7 +194,10 @@ class LocalHFReader:
 
 
 def format_passages(contexts: list[dict]) -> str:
-    return "\n\n".join(f"[{ctx.get('chunk_id', i)}] {ctx.get('text', '')}" for i, ctx in enumerate(contexts))
+    return "\n\n".join(
+        f"[{ctx.get('chunk_id', i)}] {ctx.get('text', '')}"
+        for i, ctx in enumerate(contexts)
+    )
 
 
 def parse_json_object(text: str):

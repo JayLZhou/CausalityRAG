@@ -11,7 +11,7 @@ from itertools import islice
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.arc_jsd import context_sentence_units
+from exp.arc_jsd import context_sentence_units
 from exp.group_flow_oracle import solve_exact_group_flow_blocker
 from causalityrag.io import iter_records, load_records, record_id
 from causalityrag.linguistics import SpacyAnnotationClient

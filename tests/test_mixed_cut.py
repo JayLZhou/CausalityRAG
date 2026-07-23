@@ -55,6 +55,19 @@ def test_mixed_cut_uses_shared_flow_structure_beyond_unary_scores():
     assert abs(remaining_support_flow(network, {"a"}) - 9.0) < 1e-9
 
 
+def test_projected_network_propagates_graph_construction_failure():
+    network = build_projected_token_contribution_network(
+        {
+            "status": "no_context_to_answer_path",
+            "graph": {"edges": []},
+        },
+        [],
+    )
+
+    assert network.status == "no_context_to_answer_path"
+    assert network.diagnostics["graph_status"] == "no_context_to_answer_path"
+
+
 def test_fixed_lambda_wrapper_returns_one_exact_supported_cut():
     units = [_unit("a", 0, 1), _unit("b", 1, 2), _unit("c", 2, 3)]
     row = {
@@ -115,9 +128,7 @@ def test_parametric_sweep_returns_non_unary_candidate():
         points=80,
     )
     assert sweep["status"] == "ok"
-    candidate = next(
-        row for row in sweep["candidates"] if row["selected_ids"] == ["c"]
-    )
+    candidate = next(row for row in sweep["candidates"] if row["selected_ids"] == ["c"])
     assert candidate["differs_from_unary"]
     assert candidate["flow_improvement_over_unary"] > 0
 
@@ -150,15 +161,9 @@ def test_binary_lambda_finds_largest_supported_threshold_cut():
 
     assert result["status"] == "ok"
     assert result["strict_candidate"]["selected_ids"] == ["a"]
-    assert abs(
-        result["strict_candidate"]["remaining_support_fraction"] - 0.4
-    ) < 1e-9
-    assert abs(
-        result["diagnostics"]["lambda_feasible_lower"] - 0.6
-    ) < 1e-8
-    assert result["diagnostics"][
-        "residual_cut_monotone_over_ascending_lambda"
-    ]
+    assert abs(result["strict_candidate"]["remaining_support_fraction"] - 0.4) < 1e-9
+    assert abs(result["diagnostics"]["lambda_feasible_lower"] - 0.6) < 1e-8
+    assert result["diagnostics"]["residual_cut_monotone_over_ascending_lambda"]
 
 
 def test_normalized_graph_is_rejected():
@@ -424,7 +429,10 @@ def test_layer_copy_rounding_preserves_stages_and_returns_token_labels():
     assert network.diagnostics["projection"] == "layered_copy_group_relaxation"
     assert network.diagnostics["maximum_active_group_rank"] == 2
     assert set(network.token_nodes_by_unit.values()) == {
-        "s0:t0", "s0:t1", "s1:t0", "s1:t1",
+        "s0:t0",
+        "s0:t1",
+        "s1:t0",
+        "s1:t1",
     }
     assert abs(remaining_support_flow(network, set()) - 7.0) < 1e-9
 
@@ -438,14 +446,11 @@ def test_layer_copy_rounding_preserves_stages_and_returns_token_labels():
     assert candidate is not None
     assert set(candidate["selected_ids"]) <= {"a", "b"}
     assert all(
-        gate_id.startswith("copy::")
-        for gate_id in candidate["selected_copy_ids"]
+        gate_id.startswith("copy::") for gate_id in candidate["selected_copy_ids"]
     )
     assert candidate["remaining_support_flow"] <= 3.5 + 1e-9
     assert result["diagnostics"]["cardinality_factor"] == 4.0
-    assert [
-        candidate["budget"] for candidate in result["budget_candidates"]
-    ] == [1, 2]
+    assert [candidate["budget"] for candidate in result["budget_candidates"]] == [1, 2]
 
     capped = build_layered_copy_contribution_network(
         row,
@@ -466,9 +471,10 @@ def test_layer_copy_rounding_preserves_stages_and_returns_token_labels():
     assert abs(remaining_support_flow(hybrid, set()) - 1.0) < 1e-9
     assert abs(remaining_group_support_flow(hybrid, {"d"}) - 5.0 / 6.0) < 1e-9
     assert hybrid.diagnostics["maximum_active_group_rank"] == 3
-    assert [
-        candidate["n_selected"] for candidate in result["budget_candidates"]
-    ] == [1, 1]
+    assert [candidate["n_selected"] for candidate in result["budget_candidates"]] == [
+        1,
+        1,
+    ]
 
     restricted = restrict_group_editable_units(hybrid, {"b", "d"})
     assert set(restricted.selection_unit_by_gate.values()) == {"b", "d"}

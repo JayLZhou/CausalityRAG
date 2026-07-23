@@ -1,4 +1,4 @@
-"""Replacement-based ARC-JSD attribution over context word tokens."""
+"""Experimental replacement-based ARC-JSD attribution over context word tokens."""
 
 from __future__ import annotations
 

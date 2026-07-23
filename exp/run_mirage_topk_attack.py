@@ -10,7 +10,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.arc_jsd import ArcJsdModel, all_context_word_units
+from exp.arc_jsd import ArcJsdModel, all_context_word_units
 from causalityrag.io import iter_records, record_id, retrieved_contexts
 from causalityrag.linguistics import SpacyAnnotationClient
 from exp.mirage import MirageScorer

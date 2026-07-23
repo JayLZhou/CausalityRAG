@@ -1,6 +1,6 @@
 """Tests for historical ARC-JSD attribution and hybrid-support utilities."""
 
-from causalityrag.arc_jsd import (
+from exp.arc_jsd import (
     all_context_word_units,
     ablate_context_sentences,
     conservative_sentence_pair_graph,

@@ -8,6 +8,7 @@ import math
 import os
 import random
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -49,6 +50,9 @@ def main() -> None:
     )
     parser.add_argument("--remaining-flow-threshold", type=float, default=0.2)
     parser.add_argument("--k", type=int, default=5)
+    parser.add_argument("--reader-workers", type=int, default=16)
+    parser.add_argument("--reader-base-url", default="")
+    parser.add_argument("--reader-model", default="")
     parser.add_argument("--include-clean-incorrect", action="store_true")
     parser.add_argument(
         "--clean-correct-policy",
@@ -66,27 +70,21 @@ def main() -> None:
     args = parser.parse_args()
     if not 0 <= args.remaining_flow_threshold < 1:
         raise ValueError("remaining flow threshold must be in [0, 1)")
+    if args.reader_workers <= 0:
+        raise ValueError("reader workers must be positive")
 
-    records_by_id = {
-        record_id(record): record for record in load_records(args.input)
-    }
+    records_by_id = {record_id(record): record for record in load_records(args.input)}
     reference_by_id = {
         str(row.get("id")): row for row in load_records(args.clean_reference)
     }
     gate_rows = load_records(args.gate)
     registry_by_id = (
-        {
-            str(row.get("id")): row
-            for row in load_records(args.replacement_registry)
-        }
+        {str(row.get("id")): row for row in load_records(args.replacement_registry)}
         if args.replacement_registry
         else {}
     )
     units_by_id = (
-        {
-            str(row.get("id")): row
-            for row in load_records(args.context_units)
-        }
+        {str(row.get("id")): row for row in load_records(args.context_units)}
         if args.context_units
         else {}
     )
@@ -95,153 +93,208 @@ def main() -> None:
         raise RuntimeError("spaCy annotation service is unhealthy")
     library = TypedRuleLibrary.from_files(args.cf_pools, args.type_rules or None)
     editor = GenericReplacementClient()
-    reader = ReaderClient()
+    reader = ReaderClient(
+        base_url=args.reader_base_url or None,
+        model=args.reader_model or None,
+    )
 
     rows = []
-    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    with open(args.out, "w", encoding="utf-8") as output:
-        for gate_row in gate_rows:
-            identifier = str(gate_row.get("id", ""))
-            reference = reference_by_id.get(identifier)
-            if reference is None:
-                raise ValueError(f"missing clean reference for {identifier}")
-            record = records_by_id.get(identifier)
-            if record is None:
-                raise ValueError(f"missing input record for {identifier}")
-            clean_answer = str(reference.get("clean_answer", ""))
-            gold_answer = str(record.get("answer", ""))
-            clean_correct_exact = answers_exact_match(clean_answer, gold_answer)
-            clean_correct_lenient = answers_match(clean_answer, gold_answer)
-            clean_correct_stored = bool(reference.get("clean_correct"))
-            clean_correct = {
-                "exact": clean_correct_exact,
-                "lenient": clean_correct_lenient,
-                "stored": clean_correct_stored,
-            }[args.clean_correct_policy]
-            if not args.include_clean_incorrect and not clean_correct:
-                continue
-            candidate = threshold_candidate(
-                gate_row.get("candidates", []),
-                args.remaining_flow_threshold,
-            )
-            if candidate is None:
-                no_candidate = {
-                    "status": "no_candidate_under_selection_rule",
-                    "selected_ids": [],
-                    "selected_tokens": [],
-                    "n_selected": 0,
-                    "flip": False,
-                }
-                row = {
-                    "index": gate_row.get("index"),
-                    "id": identifier,
-                    "question": gate_row.get("question"),
-                    "gold_answer": gold_answer,
-                    "clean_answer": clean_answer,
-                    "clean_correct": clean_correct,
-                    "clean_correct_policy": args.clean_correct_policy,
-                    "clean_correct_exact": clean_correct_exact,
-                    "clean_correct_lenient": clean_correct_lenient,
-                    "clean_correct_stored": clean_correct_stored,
-                    "remaining_flow_threshold": args.remaining_flow_threshold,
-                    "candidate_remaining_support_fraction": None,
-                    "candidate_unary_remaining_support_fraction": None,
-                    "replacement_contract": (
-                        "strict_contextual_pos_morphology"
-                        if args.strict_replacements
-                        else "surface_valid_non_deleting_word"
-                    ),
-                    "reader_calls": 0,
-                    "methods": {
-                        "residual_flow": dict(no_candidate),
-                        "unary_matched": dict(no_candidate),
-                    },
-                }
-                rows.append(row)
-                output.write(json.dumps(row, ensure_ascii=False) + "\n")
-                output.flush()
-                continue
-            context_row = units_by_id.get(identifier)
-            if context_row is not None:
-                units = units_from_context_row(record, context_row, k=args.k)
-            else:
-                units, _ = context_sentence_units(record, k=args.k, nlp=nlp)
-            by_id = {str(unit["unit_id"]): unit for unit in units}
-            contexts = retrieved_contexts(record)[:args.k]
-            method_rows = {}
-            reader_answer_cache: dict[tuple[tuple[str, str], ...], str] = {}
-            reader_calls = 0
-            replacement_cache = dict(
-                registry_by_id.get(identifier, {}).get("replacements", {})
-            )
-            for method, selected_ids in (
-                ("residual_flow", candidate["selected_ids"]),
-                ("unary_matched", candidate["unary_matched_ids"]),
-            ):
-                selected = [by_id[unit_id] for unit_id in selected_ids]
-                if registry_by_id:
-                    missing = [
-                        unit_id for unit_id in selected_ids
-                        if unit_id not in replacement_cache
-                    ]
-                    if missing:
-                        method_rows[method] = {
-                            "status": "replacement_registry_missing",
-                            "selected_ids": selected_ids,
-                            "selected_tokens": [
-                                str(unit.get("text", "")) for unit in selected
-                            ],
-                            "n_selected": len(selected),
-                            "missing_registry_ids": missing,
-                        }
-                        continue
-                replacements, rejected = build_selected_replacements(
-                    selected,
-                    contexts,
-                    library,
-                    editor,
-                    nlp,
-                    replacement_cache,
-                    allow_relaxed_fallback=(
-                        not args.strict_replacements and not registry_by_id
-                    ),
-                )
-                result = {
-                    "selected_ids": selected_ids,
-                    "selected_tokens": [str(unit.get("text", "")) for unit in selected],
-                    "n_selected": len(selected),
-                    "rejected": rejected,
-                }
-                if rejected:
-                    result["status"] = "strict_replacement_failed"
-                    method_rows[method] = result
+    pending_requests: list[tuple[str, list[dict]]] = []
+    for gate_row in gate_rows:
+        identifier = str(gate_row.get("id", ""))
+        reference = reference_by_id.get(identifier)
+        if reference is None:
+            raise ValueError(f"missing clean reference for {identifier}")
+        record = records_by_id.get(identifier)
+        if record is None:
+            raise ValueError(f"missing input record for {identifier}")
+        clean_answer = str(reference.get("clean_answer", ""))
+        gold_answer = str(record.get("answer", ""))
+        clean_correct_exact = answers_exact_match(clean_answer, gold_answer)
+        clean_correct_lenient = answers_match(clean_answer, gold_answer)
+        clean_correct_stored = bool(reference.get("clean_correct"))
+        clean_correct = {
+            "exact": clean_correct_exact,
+            "lenient": clean_correct_lenient,
+            "stored": clean_correct_stored,
+        }[args.clean_correct_policy]
+        if not args.include_clean_incorrect and not clean_correct:
+            continue
+        candidate = threshold_candidate(
+            gate_row.get("candidates", []),
+            args.remaining_flow_threshold,
+        )
+        if candidate is None:
+            no_candidate = {
+                "status": "no_candidate_under_selection_rule",
+                "selected_ids": [],
+                "selected_tokens": [],
+                "n_selected": 0,
+                "flip": False,
+            }
+            row = {
+                "index": gate_row.get("index"),
+                "id": identifier,
+                "question": gate_row.get("question"),
+                "gold_answer": gold_answer,
+                "clean_answer": clean_answer,
+                "clean_correct": clean_correct,
+                "clean_correct_policy": args.clean_correct_policy,
+                "clean_correct_exact": clean_correct_exact,
+                "clean_correct_lenient": clean_correct_lenient,
+                "clean_correct_stored": clean_correct_stored,
+                "remaining_flow_threshold": args.remaining_flow_threshold,
+                "candidate_remaining_support_fraction": None,
+                "candidate_unary_remaining_support_fraction": None,
+                "replacement_contract": (
+                    "strict_contextual_pos_morphology"
+                    if args.strict_replacements
+                    else "surface_valid_non_deleting_word"
+                ),
+                "reader_backend": "vllm_openai_compatible",
+                "reader_calls": 0,
+                "methods": {
+                    "residual_flow": dict(no_candidate),
+                    "unary_matched": dict(no_candidate),
+                },
+            }
+            rows.append(row)
+            continue
+        context_row = units_by_id.get(identifier)
+        if context_row is not None:
+            units = units_from_context_row(record, context_row, k=args.k)
+        else:
+            units, _ = context_sentence_units(record, k=args.k, nlp=nlp)
+        by_id = {str(unit["unit_id"]): unit for unit in units}
+        contexts = retrieved_contexts(record)[: args.k]
+        method_rows = {}
+        reader_job_by_signature: dict[
+            tuple[tuple[str, str], ...],
+            int,
+        ] = {}
+        replacement_cache = dict(
+            registry_by_id.get(identifier, {}).get("replacements", {})
+        )
+        for method, selected_ids in (
+            ("residual_flow", candidate["selected_ids"]),
+            ("unary_matched", candidate["unary_matched_ids"]),
+        ):
+            selected = [by_id[unit_id] for unit_id in selected_ids]
+            if registry_by_id:
+                missing = [
+                    unit_id
+                    for unit_id in selected_ids
+                    if unit_id not in replacement_cache
+                ]
+                if missing:
+                    method_rows[method] = {
+                        "status": "replacement_registry_missing",
+                        "selected_ids": selected_ids,
+                        "selected_tokens": [
+                            str(unit.get("text", "")) for unit in selected
+                        ],
+                        "n_selected": len(selected),
+                        "missing_registry_ids": missing,
+                    }
                     continue
-                revision = apply_token_replacements(
-                    record,
-                    selected,
-                    replacements,
-                    k=args.k,
-                )
-                signature = tuple(sorted(
+            replacements, rejected = build_selected_replacements(
+                selected,
+                contexts,
+                library,
+                editor,
+                nlp,
+                replacement_cache,
+                allow_relaxed_fallback=(
+                    not args.strict_replacements and not registry_by_id
+                ),
+            )
+            result = {
+                "selected_ids": selected_ids,
+                "selected_tokens": [str(unit.get("text", "")) for unit in selected],
+                "n_selected": len(selected),
+                "rejected": rejected,
+            }
+            if rejected:
+                result["status"] = "strict_replacement_failed"
+                method_rows[method] = result
+                continue
+            revision = apply_token_replacements(
+                record,
+                selected,
+                replacements,
+                k=args.k,
+            )
+            signature = tuple(
+                sorted(
                     (str(edit["unit_id"]), str(edit["new"]))
                     for edit in revision["edits"]
                     if edit.get("ok")
-                ))
-                cache_hit = signature in reader_answer_cache
-                if cache_hit:
-                    answer = reader_answer_cache[signature]
-                else:
-                    answer = reader.answer(
+                )
+            )
+            cache_hit = signature in reader_job_by_signature
+            if not cache_hit:
+                reader_job_by_signature[signature] = len(pending_requests)
+                pending_requests.append(
+                    (
                         str(record.get("question", "")),
                         revision["edited_contexts"],
                     )
-                    reader_answer_cache[signature] = answer
-                    reader_calls += 1
-                result.update({
-                    "status": "ok",
+                )
+            result.update(
+                {
+                    "status": "pending_reader",
                     "edits": revision["edits"],
-                    "answer": answer,
+                    "_reader_job": reader_job_by_signature[signature],
                     "reader_cache_hit": cache_hit,
+                }
+            )
+            method_rows[method] = result
+
+        row = {
+            "index": gate_row.get("index"),
+            "id": identifier,
+            "question": gate_row.get("question"),
+            "gold_answer": gold_answer,
+            "clean_answer": clean_answer,
+            "clean_correct": clean_correct,
+            "clean_correct_policy": args.clean_correct_policy,
+            "clean_correct_exact": clean_correct_exact,
+            "clean_correct_lenient": clean_correct_lenient,
+            "clean_correct_stored": clean_correct_stored,
+            "remaining_flow_threshold": args.remaining_flow_threshold,
+            "candidate_remaining_support_fraction": candidate[
+                "remaining_support_fraction"
+            ],
+            "candidate_unary_remaining_support_fraction": candidate[
+                "unary_remaining_support_fraction"
+            ],
+            "replacement_contract": (
+                "strict_contextual_pos_morphology"
+                if args.strict_replacements
+                else "surface_valid_non_deleting_word"
+            ),
+            "reader_backend": "vllm_openai_compatible",
+            "reader_calls": len(reader_job_by_signature),
+            "methods": method_rows,
+        }
+        rows.append(row)
+
+    answers = run_reader_requests(
+        reader,
+        pending_requests,
+        workers=args.reader_workers,
+    )
+    for row in rows:
+        for result in row["methods"].values():
+            if result.get("status") != "pending_reader":
+                continue
+            answer = answers[int(result.pop("_reader_job"))]
+            clean_answer = str(row["clean_answer"])
+            gold_answer = str(row["gold_answer"])
+            result.update(
+                {
+                    "status": "ok",
+                    "answer": answer,
                     "flip": not answers_exact_match(answer, clean_answer),
                     "lenient_containment_flip": not answers_match(
                         answer,
@@ -259,43 +312,21 @@ def main() -> None:
                         answer,
                         gold_answer,
                     ),
-                })
-                method_rows[method] = result
+                }
+            )
 
-            row = {
-                "index": gate_row.get("index"),
-                "id": identifier,
-                "question": gate_row.get("question"),
-                "gold_answer": gold_answer,
-                "clean_answer": clean_answer,
-                "clean_correct": clean_correct,
-                "clean_correct_policy": args.clean_correct_policy,
-                "clean_correct_exact": clean_correct_exact,
-                "clean_correct_lenient": clean_correct_lenient,
-                "clean_correct_stored": clean_correct_stored,
-                "remaining_flow_threshold": args.remaining_flow_threshold,
-                "candidate_remaining_support_fraction": candidate[
-                    "remaining_support_fraction"
-                ],
-                "candidate_unary_remaining_support_fraction": candidate[
-                    "unary_remaining_support_fraction"
-                ],
-                "replacement_contract": (
-                    "strict_contextual_pos_morphology"
-                    if args.strict_replacements
-                    else "surface_valid_non_deleting_word"
-                ),
-                "reader_calls": reader_calls,
-                "methods": method_rows,
-            }
-            rows.append(row)
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    with open(args.out, "w", encoding="utf-8") as output:
+        for row in rows:
             output.write(json.dumps(row, ensure_ascii=False) + "\n")
             output.flush()
+            flow = row["methods"]["residual_flow"]
+            unary = row["methods"]["unary_matched"]
             print(
                 f"[reader-evaluation] index={row['index']} "
-                f"k={candidate['n_selected']} "
-                f"flow={method_rows['residual_flow'].get('flip')} "
-                f"unary={method_rows['unary_matched'].get('flip')}",
+                f"k={flow.get('n_selected', 0)} "
+                f"flow={flow.get('flip')} "
+                f"unary={unary.get('flip')}",
                 flush=True,
             )
 
@@ -305,6 +336,32 @@ def main() -> None:
     if args.summary_out:
         with open(args.summary_out, "w", encoding="utf-8") as output:
             output.write(rendered + "\n")
+
+
+def run_reader_requests(
+    reader: ReaderClient,
+    requests: list[tuple[str, list[dict]]],
+    *,
+    workers: int,
+) -> list[str]:
+    """Submit independent answer requests concurrently to the vLLM server."""
+
+    answers = [""] * len(requests)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(reader.answer, question, contexts): index
+            for index, (question, contexts) in enumerate(requests)
+        }
+        completed = 0
+        for future in as_completed(futures):
+            index = futures[future]
+            answers[index] = future.result()
+            completed += 1
+            print(
+                f"[vllm-reader] {completed}/{len(requests)}",
+                flush=True,
+            )
+    return answers
 
 
 def threshold_candidate(
@@ -327,16 +384,17 @@ def threshold_candidate(
         ),
         default=None,
     )
+
+
 def summarize(rows: list[dict]) -> dict:
     summary = {
         "queries": len(rows),
         "remaining_flow_threshold": (
             rows[0]["remaining_flow_threshold"] if rows else None
         ),
-        "clean_correct_policy": (
-            rows[0].get("clean_correct_policy") if rows else None
-        ),
+        "clean_correct_policy": (rows[0].get("clean_correct_policy") if rows else None),
         "reader_calls": sum(int(row.get("reader_calls", 0)) for row in rows),
+        "reader_backend": "vllm_openai_compatible",
     }
     for method in ("residual_flow", "unary_matched"):
         valid = [
@@ -346,8 +404,7 @@ def summarize(rows: list[dict]) -> dict:
         ]
         flips = sum(bool(result.get("flip")) for result in valid)
         candidate_queries = sum(
-            row["methods"][method]["status"]
-            != "no_candidate_under_selection_rule"
+            row["methods"][method]["status"] != "no_candidate_under_selection_rule"
             for row in rows
         )
         summary[method] = {
@@ -359,11 +416,7 @@ def summarize(rows: list[dict]) -> dict:
             "flips": flips,
             "flip_rate": flips / len(valid) if valid else None,
             "overall_flip_rate": flips / len(rows) if rows else None,
-            "candidate_coverage": (
-                candidate_queries / len(rows)
-                if rows
-                else None
-            ),
+            "candidate_coverage": (candidate_queries / len(rows) if rows else None),
             "mean_selected_tokens": (
                 sum(int(result["n_selected"]) for result in valid) / len(valid)
                 if valid
@@ -432,8 +485,7 @@ def _mcnemar_exact_p(left_only: int, right_only: int) -> float | None:
     if discordant == 0:
         return 1.0
     tail = sum(
-        math.comb(discordant, index)
-        for index in range(min(left_only, right_only) + 1)
+        math.comb(discordant, index) for index in range(min(left_only, right_only) + 1)
     ) / (2**discordant)
     return min(1.0, 2.0 * tail)
 

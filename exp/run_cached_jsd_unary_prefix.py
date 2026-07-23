@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.arc_jsd import context_sentence_units
+from exp.arc_jsd import context_sentence_units
 from causalityrag.io import iter_records, record_id, retrieved_contexts
 from causalityrag.linguistics import SpacyAnnotationClient
 from causalityrag.reader import ReaderClient, answers_match

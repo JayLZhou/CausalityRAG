@@ -26,6 +26,8 @@ python exp/run_mirage_topk_attack.py --help
 - `run_token_ilp.py` and `run_token_attack.py`: original token-ILP pipeline.
 - `EXPERIMENTS_HOTPOTQA.md`: the earlier broad experimental protocol.
 - `RESULTS_HOTPOTQA_1000.md`: the earlier hybrid HotpotQA result report.
+- `verify_hf_results.py`: historical local-HF cross-check from the earlier
+  dual-reader workflow; final metrics now come directly from vLLM.
 
 Experimental tests live beside the corresponding implementation:
 

@@ -37,6 +37,12 @@ def build_raw_contribution_network(
         raise ValueError("minimum_capacity must be non-negative")
     if capacity_mode not in {"raw", "backward-conserved"}:
         raise ValueError("capacity_mode must be raw or backward-conserved")
+    graph_status = str(graph_row.get("status", "ok"))
+    if graph_status != "ok":
+        return _empty_network(
+            graph_status,
+            {"graph_status": graph_status},
+        )
     graph = graph_row.get("graph", {})
     semantics = str(graph.get("edge_weight_semantics", ""))
     target_objective = str(graph.get("target_objective", ""))
@@ -140,9 +146,7 @@ def build_raw_contribution_network(
         edges=active_edges,
         roots_by_unit=active_roots_by_unit,
         token_nodes_by_unit={},
-        selection_unit_by_gate={
-            unit_id: unit_id for unit_id in active_roots_by_unit
-        },
+        selection_unit_by_gate={unit_id: unit_id for unit_id in active_roots_by_unit},
         gate_scope="input_roots",
         unit_scores=unit_scores,
         sink=sink,
@@ -150,9 +154,7 @@ def build_raw_contribution_network(
             "edge_weight_semantics": semantics,
             "target_objective": target_objective,
             "capacity_field": (
-                "contribution"
-                if capacity_mode == "raw"
-                else "backward_conserved_flow"
+                "contribution" if capacity_mode == "raw" else "backward_conserved_flow"
             ),
             "normalization": capacity_mode,
             "projection": "input_root_gates",
@@ -186,6 +188,12 @@ def build_projected_token_contribution_network(
         raise ValueError("minimum_capacity must be non-negative")
     if capacity_mode not in {"raw", "backward-conserved"}:
         raise ValueError("capacity_mode must be raw or backward-conserved")
+    graph_status = str(graph_row.get("status", "ok"))
+    if graph_status != "ok":
+        return _empty_network(
+            graph_status,
+            {"graph_status": graph_status},
+        )
     graph = graph_row.get("graph", {})
     semantics = str(graph.get("edge_weight_semantics", ""))
     target_objective = str(graph.get("target_objective", ""))
@@ -300,8 +308,7 @@ def build_projected_token_contribution_network(
     for src, _, capacity in active_edges:
         outgoing[src] += capacity
     unit_scores = {
-        unit_id: outgoing.get(node, 0.0)
-        for unit_id, node in active_token_nodes.items()
+        unit_id: outgoing.get(node, 0.0) for unit_id, node in active_token_nodes.items()
     }
     capacities = [capacity for _, _, capacity in active_edges]
     return RawContributionNetwork(
@@ -310,9 +317,7 @@ def build_projected_token_contribution_network(
         edges=active_edges,
         roots_by_unit=active_roots,
         token_nodes_by_unit=active_token_nodes,
-        selection_unit_by_gate={
-            unit_id: unit_id for unit_id in active_token_nodes
-        },
+        selection_unit_by_gate={unit_id: unit_id for unit_id in active_token_nodes},
         gate_scope="contracted_token_nodes",
         unit_scores=unit_scores,
         sink=sink,
@@ -320,9 +325,7 @@ def build_projected_token_contribution_network(
             "edge_weight_semantics": semantics,
             "target_objective": target_objective,
             "capacity_field": (
-                "contribution"
-                if capacity_mode == "raw"
-                else "backward_conserved_flow"
+                "contribution" if capacity_mode == "raw" else "backward_conserved_flow"
             ),
             "normalization": capacity_mode,
             "projection": "layer_copy_token_contraction",
@@ -363,6 +366,12 @@ def build_layered_copy_contribution_network(
         raise ValueError("capacity_mode must be raw or backward-conserved")
     if max_copies_per_unit is not None and max_copies_per_unit <= 0:
         raise ValueError("max_copies_per_unit must be positive when provided")
+    graph_status = str(graph_row.get("status", "ok"))
+    if graph_status != "ok":
+        return _empty_network(
+            graph_status,
+            {"graph_status": graph_status},
+        )
     graph = graph_row.get("graph", {})
     semantics = str(graph.get("edge_weight_semantics", ""))
     target_objective = str(graph.get("target_objective", ""))
@@ -467,14 +476,16 @@ def build_layered_copy_contribution_network(
             selected_gate_nodes.update(optional)
             continue
         remaining_slots = max(0, max_copies_per_unit - len(mandatory))
-        selected_gate_nodes.update(sorted(
-            optional,
-            key=lambda node: (
-                -min(incoming.get(node, 0.0), outgoing.get(node, 0.0)),
-                node_stage.get(node, -1),
-                node,
-            ),
-        )[:remaining_slots])
+        selected_gate_nodes.update(
+            sorted(
+                optional,
+                key=lambda node: (
+                    -min(incoming.get(node, 0.0), outgoing.get(node, 0.0)),
+                    node_stage.get(node, -1),
+                    node,
+                ),
+            )[:remaining_slots]
+        )
 
     token_nodes_by_gate: dict[str, str] = {}
     selection_unit_by_gate: dict[str, str] = {}
@@ -512,8 +523,7 @@ def build_layered_copy_contribution_network(
     for unit_id in selection_unit_by_gate.values():
         copies_per_unit[unit_id] += 1
     uncapped_copies_per_unit = {
-        unit_id: len(nodes)
-        for unit_id, nodes in candidate_nodes_by_unit.items()
+        unit_id: len(nodes) for unit_id, nodes in candidate_nodes_by_unit.items()
     }
     all_candidate_nodes = set().union(*candidate_nodes_by_unit.values())
     excluded_gate_nodes = all_candidate_nodes - selected_gate_nodes
@@ -540,9 +550,7 @@ def build_layered_copy_contribution_network(
             "edge_weight_semantics": semantics,
             "target_objective": target_objective,
             "capacity_field": (
-                "contribution"
-                if capacity_mode == "raw"
-                else "backward_conserved_flow"
+                "contribution" if capacity_mode == "raw" else "backward_conserved_flow"
             ),
             "normalization": capacity_mode,
             "projection": "layered_copy_group_relaxation",
@@ -556,12 +564,9 @@ def build_layered_copy_contribution_network(
                 sum(copies_per_unit.values()) / len(copies_per_unit)
             ),
             "max_copies_per_unit": max_copies_per_unit,
-            "uncapped_editable_layer_copies": sum(
-                uncapped_copies_per_unit.values()
-            ),
+            "uncapped_editable_layer_copies": sum(uncapped_copies_per_unit.values()),
             "excluded_layer_copies": (
-                sum(uncapped_copies_per_unit.values())
-                - len(token_nodes_by_gate)
+                sum(uncapped_copies_per_unit.values()) - len(token_nodes_by_gate)
             ),
             "uncapped_copy_throughput": uncapped_copy_throughput,
             "excluded_copy_throughput": excluded_copy_throughput,
@@ -600,9 +605,7 @@ def augment_with_unary_support(
     unary_total = sum(scores.values())
 
     graph_flow = (
-        remaining_support_flow(network, frozenset())
-        if network.status == "ok"
-        else 0.0
+        remaining_support_flow(network, frozenset()) if network.status == "ok" else 0.0
     )
     graph_available = graph_flow > 0
     unary_available = unary_total > 0
@@ -624,12 +627,8 @@ def augment_with_unary_support(
     else:
         effective_graph_weight = 0.0
         effective_unary_weight = 1.0
-    graph_scale = (
-        effective_graph_weight / graph_flow if graph_available else 0.0
-    )
-    unary_scale = (
-        effective_unary_weight / unary_total if unary_available else 0.0
-    )
+    graph_scale = effective_graph_weight / graph_flow if graph_available else 0.0
+    unary_scale = effective_unary_weight / unary_total if unary_available else 0.0
 
     identity_token_gates = (
         graph_available
@@ -660,9 +659,7 @@ def augment_with_unary_support(
         if graph_scale > 0 and capacity > 0
     ]
     roots_by_gate = dict(network.roots_by_unit) if graph_available else {}
-    token_nodes_by_gate = (
-        dict(network.token_nodes_by_unit) if graph_available else {}
-    )
+    token_nodes_by_gate = dict(network.token_nodes_by_unit) if graph_available else {}
     selection_unit_by_gate = (
         dict(network.selection_unit_by_gate) if graph_available else {}
     )
@@ -748,9 +745,7 @@ def _augment_identity_token_support(
     ]
     roots = dict(network.roots_by_unit) if graph_available else {}
     token_nodes = dict(network.token_nodes_by_unit) if graph_available else {}
-    selection = (
-        dict(network.selection_unit_by_gate) if graph_available else {}
-    )
+    selection = dict(network.selection_unit_by_gate) if graph_available else {}
     gate_scores = {gate_id: 0.0 for gate_id in token_nodes}
     for index, (unit_id, score) in enumerate(sorted(scores.items())):
         capacity = score * unary_scale
@@ -791,9 +786,7 @@ def _augment_identity_token_support(
             "editable_token_groups": len(token_nodes),
             "maximum_active_group_rank": 1,
             "mean_active_group_rank": 1.0 if token_nodes else 0.0,
-            "copies_per_unit": {
-                unit_id: 1 for unit_id in token_nodes
-            },
+            "copies_per_unit": {unit_id: 1 for unit_id in token_nodes},
             "minimum_active_capacity": min(capacities),
             "maximum_active_capacity": max(capacities),
             "total_active_capacity": sum(capacities),
@@ -885,7 +878,9 @@ def _projected_edge_capacities(
     relevance[sink] = 1.0
     conserved = [0.0] * len(edges)
     terminal_mass: dict[str, float] = {}
-    for node in sorted(node_stage, key=lambda item: (node_stage[item], item), reverse=True):
+    for node in sorted(
+        node_stage, key=lambda item: (node_stage[item], item), reverse=True
+    ):
         mass = relevance.get(node, 0.0)
         if mass <= 0:
             continue
@@ -909,10 +904,7 @@ def _projected_edge_capacities(
         incoming_flow[str(edges[index]["dst"])] += flow
     internal_nodes = set(incoming_flow) & set(outgoing_flow)
     conservation_error = max(
-        (
-            abs(incoming_flow[node] - outgoing_flow[node])
-            for node in internal_nodes
-        ),
+        (abs(incoming_flow[node] - outgoing_flow[node]) for node in internal_nodes),
         default=0.0,
     )
     input_terminal_mass = sum(
@@ -945,9 +937,7 @@ def solve_mixed_cut(
         raise ValueError("token_cost must be finite and non-negative")
     state = _run_flow(
         network,
-        {
-            gate_id: token_cost for gate_id in _purchasable_gate_ids(network)
-        },
+        {gate_id: token_cost for gate_id in _purchasable_gate_ids(network)},
     )
     selected = sorted(
         unit_id
@@ -1113,19 +1103,23 @@ def sweep_mixed_cuts(
         unary_ids = unary_order[:size]
         unary_flow = remaining_support_flow(network, set(unary_ids))
         union = selected | set(unary_ids)
-        candidates.append({
-            **result,
-            "remaining_support_flow": residual_flow,
-            "remaining_support_fraction": residual_flow / initial_flow,
-            "unary_matched_ids": unary_ids,
-            "unary_remaining_support_flow": unary_flow,
-            "unary_remaining_support_fraction": unary_flow / initial_flow,
-            "differs_from_unary": list(selection) != sorted(unary_ids),
-            "flow_improvement_over_unary": unary_flow - residual_flow,
-            "jaccard_distance_from_unary": (
-                0.0 if not union else 1.0 - len(selected & set(unary_ids)) / len(union)
-            ),
-        })
+        candidates.append(
+            {
+                **result,
+                "remaining_support_flow": residual_flow,
+                "remaining_support_fraction": residual_flow / initial_flow,
+                "unary_matched_ids": unary_ids,
+                "unary_remaining_support_flow": unary_flow,
+                "unary_remaining_support_fraction": unary_flow / initial_flow,
+                "differs_from_unary": list(selection) != sorted(unary_ids),
+                "flow_improvement_over_unary": unary_flow - residual_flow,
+                "jaccard_distance_from_unary": (
+                    0.0
+                    if not union
+                    else 1.0 - len(selected & set(unary_ids)) / len(union)
+                ),
+            }
+        )
     candidates.sort(
         key=lambda row: (
             row["n_selected"],
@@ -1149,12 +1143,11 @@ def sweep_mixed_cuts(
                 candidate["n_selected"] > 0 for candidate in candidates
             ),
             "cardinality_monotone_over_descending_lambda": all(
-                left <= right
-                for left, right in zip(cardinalities, cardinalities[1:])
+                left <= right for left, right in zip(cardinalities, cardinalities[1:])
             ),
-            "candidate_cardinalities": sorted({
-                candidate["n_selected"] for candidate in candidates
-            }),
+            "candidate_cardinalities": sorted(
+                {candidate["n_selected"] for candidate in candidates}
+            ),
         },
     }
 
@@ -1193,7 +1186,7 @@ def solve_fixed_mixed_cut(
         editable,
         key=lambda unit_id: (-network.unit_scores[unit_id], unit_id),
     )
-    unary_ids = unary_order[:len(selected)]
+    unary_ids = unary_order[: len(selected)]
     residual_flow = remaining_support_flow(network, selected)
     unary_flow = remaining_support_flow(network, set(unary_ids))
     union = selected | set(unary_ids)
@@ -1209,9 +1202,7 @@ def solve_fixed_mixed_cut(
         "differs_from_unary": result["selected_ids"] != sorted(unary_ids),
         "flow_improvement_over_unary": unary_flow - residual_flow,
         "jaccard_distance_from_unary": (
-            0.0
-            if not union
-            else 1.0 - len(selected & set(unary_ids)) / len(union)
+            0.0 if not union else 1.0 - len(selected & set(unary_ids)) / len(union)
         ),
     }
     return {
@@ -1347,22 +1338,24 @@ def search_mixed_cut_threshold(
         unary_ids = unary_order[:size]
         unary_flow = remaining_support_flow(network, set(unary_ids))
         union = selected | set(unary_ids)
-        candidates.append({
-            **result,
-            "remaining_support_flow": residual_flow,
-            "remaining_support_fraction": residual_flow / initial_flow,
-            "strict_feasible": residual_flow <= threshold + 1e-12,
-            "unary_matched_ids": unary_ids,
-            "unary_remaining_support_flow": unary_flow,
-            "unary_remaining_support_fraction": unary_flow / initial_flow,
-            "differs_from_unary": list(selection) != sorted(unary_ids),
-            "flow_improvement_over_unary": unary_flow - residual_flow,
-            "jaccard_distance_from_unary": (
-                0.0
-                if not union
-                else 1.0 - len(selected & set(unary_ids)) / len(union)
-            ),
-        })
+        candidates.append(
+            {
+                **result,
+                "remaining_support_flow": residual_flow,
+                "remaining_support_fraction": residual_flow / initial_flow,
+                "strict_feasible": residual_flow <= threshold + 1e-12,
+                "unary_matched_ids": unary_ids,
+                "unary_remaining_support_flow": unary_flow,
+                "unary_remaining_support_fraction": unary_flow / initial_flow,
+                "differs_from_unary": list(selection) != sorted(unary_ids),
+                "flow_improvement_over_unary": unary_flow - residual_flow,
+                "jaccard_distance_from_unary": (
+                    0.0
+                    if not union
+                    else 1.0 - len(selected & set(unary_ids)) / len(union)
+                ),
+            }
+        )
     candidates.sort(
         key=lambda row: (
             row["n_selected"],
@@ -1505,9 +1498,7 @@ def solve_bicriteria_flow_interdiction(
             }
         else:
             by_selection[selection]["guessed_k_values"].append(guessed_k)
-            by_selection[selection]["flow_penalty_mu_values"].append(
-                flow_penalty
-            )
+            by_selection[selection]["flow_penalty_mu_values"].append(flow_penalty)
 
     candidates = []
     for selection, result in by_selection.items():
@@ -1517,23 +1508,25 @@ def solve_bicriteria_flow_interdiction(
         unary_ids = unary_order[:size]
         unary_flow = remaining_support_flow(network, set(unary_ids))
         union = selected | set(unary_ids)
-        candidates.append({
-            **result,
-            "remaining_support_flow": residual_flow,
-            "remaining_support_fraction": residual_flow / initial_flow,
-            "strict_feasible": residual_flow <= threshold + 1e-12,
-            "bicriteria_feasible": residual_flow <= relaxed_threshold + 1e-12,
-            "unary_matched_ids": unary_ids,
-            "unary_remaining_support_flow": unary_flow,
-            "unary_remaining_support_fraction": unary_flow / initial_flow,
-            "differs_from_unary": list(selection) != sorted(unary_ids),
-            "flow_improvement_over_unary": unary_flow - residual_flow,
-            "jaccard_distance_from_unary": (
-                0.0
-                if not union
-                else 1.0 - len(selected & set(unary_ids)) / len(union)
-            ),
-        })
+        candidates.append(
+            {
+                **result,
+                "remaining_support_flow": residual_flow,
+                "remaining_support_fraction": residual_flow / initial_flow,
+                "strict_feasible": residual_flow <= threshold + 1e-12,
+                "bicriteria_feasible": residual_flow <= relaxed_threshold + 1e-12,
+                "unary_matched_ids": unary_ids,
+                "unary_remaining_support_flow": unary_flow,
+                "unary_remaining_support_fraction": unary_flow / initial_flow,
+                "differs_from_unary": list(selection) != sorted(unary_ids),
+                "flow_improvement_over_unary": unary_flow - residual_flow,
+                "jaccard_distance_from_unary": (
+                    0.0
+                    if not union
+                    else 1.0 - len(selected & set(unary_ids)) / len(union)
+                ),
+            }
+        )
     candidates.sort(
         key=lambda row: (
             row["n_selected"],
@@ -1544,11 +1537,7 @@ def solve_bicriteria_flow_interdiction(
 
     def best(feasibility_field: str) -> dict | None:
         return min(
-            (
-                candidate
-                for candidate in candidates
-                if candidate[feasibility_field]
-            ),
+            (candidate for candidate in candidates if candidate[feasibility_field]),
             key=lambda row: (
                 row["n_selected"],
                 row["remaining_support_flow"],
@@ -1575,7 +1564,8 @@ def solve_bicriteria_flow_interdiction(
             "eta": eta,
             "strict_flow_threshold": threshold,
             "bicriteria_flow_threshold": relaxed_threshold,
-            "max_k_guess": guess_limit,
+            "cardinality_scale_limit": guess_limit,
+            "full_editable_domain": guess_limit == len(editable),
             "gamma": gamma,
             "guess_scales": guesses,
             "mincut_calls": len(guesses),
@@ -1584,17 +1574,17 @@ def solve_bicriteria_flow_interdiction(
                 candidate["n_selected"] > 0 for candidate in candidates
             ),
             "strict_candidate_found": best("strict_feasible") is not None,
-            "bicriteria_candidate_found": (
-                best("bicriteria_feasible") is not None
-            ),
-            "cardinality_factor": (
-                1.0
-                + (1.0 if gamma is None else 1.0 + gamma) / eta
-            ),
+            "bicriteria_candidate_found": (best("bicriteria_feasible") is not None),
+            "cardinality_factor": (1.0 + (1.0 if gamma is None else 1.0 + gamma) / eta),
             "residual_flow_factor": 1.0 + eta,
             "guarantee_scope": (
-                "strict-threshold optimum when its cardinality is no larger "
-                "than max_k_guess; guarantee applies to graph residual flow only"
+                "the full editable-token domain; guarantee applies to graph "
+                "residual flow only"
+                if guess_limit == len(editable)
+                else (
+                    "strict-threshold optima within the configured internal "
+                    "scale limit; guarantee applies to graph residual flow only"
+                )
             ),
         },
     }
@@ -1756,39 +1746,41 @@ def _reverse_delete_budget_candidates(
             unary_flow = remaining_group_support_flow(network, set(unary_ids))
             selected = set(selection)
             union = selected | set(unary_ids)
-            options.append({
-                "status": "optimal_supported_then_reverse_delete",
-                "budget": budget,
-                "selected_ids": sorted(selection),
-                "n_selected": size,
-                "remaining_support_flow": residual_flow,
-                "remaining_support_fraction": residual_flow / initial_flow,
-                "strict_feasible": residual_flow <= threshold + 1e-12,
-                "bicriteria_feasible": (
-                    residual_flow <= relaxed_threshold + 1e-12
-                ),
-                "unary_matched_ids": unary_ids,
-                "unary_remaining_support_flow": unary_flow,
-                "unary_remaining_support_fraction": unary_flow / initial_flow,
-                "differs_from_unary": sorted(selection) != sorted(unary_ids),
-                "flow_improvement_over_unary": unary_flow - residual_flow,
-                "jaccard_distance_from_unary": (
-                    0.0
-                    if not union
-                    else 1.0 - len(selected & set(unary_ids)) / len(union)
-                ),
-                "source_candidate_ids": source_candidate["selected_ids"],
-                "solver": "supported_group_cut_reverse_delete_budget_repair",
-            })
+            options.append(
+                {
+                    "status": "optimal_supported_then_reverse_delete",
+                    "budget": budget,
+                    "selected_ids": sorted(selection),
+                    "n_selected": size,
+                    "remaining_support_flow": residual_flow,
+                    "remaining_support_fraction": residual_flow / initial_flow,
+                    "strict_feasible": residual_flow <= threshold + 1e-12,
+                    "bicriteria_feasible": (residual_flow <= relaxed_threshold + 1e-12),
+                    "unary_matched_ids": unary_ids,
+                    "unary_remaining_support_flow": unary_flow,
+                    "unary_remaining_support_fraction": unary_flow / initial_flow,
+                    "differs_from_unary": sorted(selection) != sorted(unary_ids),
+                    "flow_improvement_over_unary": unary_flow - residual_flow,
+                    "jaccard_distance_from_unary": (
+                        0.0
+                        if not union
+                        else 1.0 - len(selected & set(unary_ids)) / len(union)
+                    ),
+                    "source_candidate_ids": source_candidate["selected_ids"],
+                    "solver": "supported_group_cut_reverse_delete_budget_repair",
+                }
+            )
         if options:
-            budget_candidates.append(min(
-                options,
-                key=lambda row: (
-                    row["remaining_support_flow"],
-                    row["n_selected"],
-                    row["selected_ids"],
-                ),
-            ))
+            budget_candidates.append(
+                min(
+                    options,
+                    key=lambda row: (
+                        row["remaining_support_flow"],
+                        row["n_selected"],
+                        row["selected_ids"],
+                    ),
+                )
+            )
     return budget_candidates, repair_flow_calls
 
 
@@ -1881,13 +1873,10 @@ def solve_group_bicriteria_flow_interdiction(
     for guessed_k in range(1, guess_limit + 1):
         flow_penalty = guessed_k / (eta * threshold)
         relaxation_scale = 1.0 / flow_penalty
-        immutable_gate_cost = sum(
-            capacity for _, _, capacity in network.edges
-        ) + 1.0
+        immutable_gate_cost = sum(capacity for _, _, capacity in network.edges) + 1.0
         gate_costs = {
             gate_id: (
-                relaxation_scale
-                / rank_by_unit[network.selection_unit_by_gate[gate_id]]
+                relaxation_scale / rank_by_unit[network.selection_unit_by_gate[gate_id]]
                 if gate_id in network.selection_unit_by_gate
                 else immutable_gate_cost
             )
@@ -1900,10 +1889,14 @@ def solve_group_bicriteria_flow_interdiction(
             for gate_id in selected_copy_ids
         ):
             raise RuntimeError("weighted min-cut selected an immutable token gate")
-        selection = tuple(sorted({
-            network.selection_unit_by_gate[gate_id]
-            for gate_id in selected_copy_ids
-        }))
+        selection = tuple(
+            sorted(
+                {
+                    network.selection_unit_by_gate[gate_id]
+                    for gate_id in selected_copy_ids
+                }
+            )
+        )
         rounded_flow = cached_group_flow(selection)
         unscaled_copy_cost = sum(
             1.0 / rank_by_unit[network.selection_unit_by_gate[gate_id]]
@@ -1918,9 +1911,7 @@ def solve_group_bicriteria_flow_interdiction(
             "guessed_k_values": [guessed_k],
             "flow_penalty_mu_values": [flow_penalty],
             "copy_relaxation_cost": unscaled_copy_cost,
-            "copy_cut_remaining_support_flow": copy_result[
-                "residual_cut_capacity"
-            ],
+            "copy_cut_remaining_support_flow": copy_result["residual_cut_capacity"],
             "remaining_support_flow": rounded_flow,
             "remaining_support_fraction": rounded_flow / initial_flow,
             "strict_feasible": rounded_flow <= threshold + 1e-12,
@@ -1942,9 +1933,7 @@ def solve_group_bicriteria_flow_interdiction(
                 previous["n_selected_copies"],
             ):
                 candidate["guessed_k_values"] = previous["guessed_k_values"]
-                candidate["flow_penalty_mu_values"] = previous[
-                    "flow_penalty_mu_values"
-                ]
+                candidate["flow_penalty_mu_values"] = previous["flow_penalty_mu_values"]
                 by_selection[selection] = candidate
 
     candidates = []
@@ -1954,21 +1943,24 @@ def solve_group_bicriteria_flow_interdiction(
         unary_ids = unary_order[:size]
         unary_flow = cached_group_flow(unary_ids)
         union = selected | set(unary_ids)
-        candidates.append({
-            **candidate,
-            "unary_matched_ids": unary_ids,
-            "unary_remaining_support_flow": unary_flow,
-            "unary_remaining_support_fraction": unary_flow / initial_flow,
-            "differs_from_unary": list(candidate["selected_ids"]) != sorted(unary_ids),
-            "flow_improvement_over_unary": (
-                unary_flow - candidate["remaining_support_flow"]
-            ),
-            "jaccard_distance_from_unary": (
-                0.0
-                if not union
-                else 1.0 - len(selected & set(unary_ids)) / len(union)
-            ),
-        })
+        candidates.append(
+            {
+                **candidate,
+                "unary_matched_ids": unary_ids,
+                "unary_remaining_support_flow": unary_flow,
+                "unary_remaining_support_fraction": unary_flow / initial_flow,
+                "differs_from_unary": list(candidate["selected_ids"])
+                != sorted(unary_ids),
+                "flow_improvement_over_unary": (
+                    unary_flow - candidate["remaining_support_flow"]
+                ),
+                "jaccard_distance_from_unary": (
+                    0.0
+                    if not union
+                    else 1.0 - len(selected & set(unary_ids)) / len(union)
+                ),
+            }
+        )
     candidates.sort(
         key=lambda row: (
             row["n_selected"],
@@ -1979,11 +1971,7 @@ def solve_group_bicriteria_flow_interdiction(
 
     def best(feasibility_field: str) -> dict | None:
         return min(
-            (
-                candidate
-                for candidate in candidates
-                if candidate[feasibility_field]
-            ),
+            (candidate for candidate in candidates if candidate[feasibility_field]),
             key=lambda row: (
                 row["n_selected"],
                 row["remaining_support_flow"],
@@ -2014,40 +2002,42 @@ def solve_group_bicriteria_flow_interdiction(
         unary_ids = unary_order[:size]
         unary_flow = cached_group_flow(unary_ids)
         union = selected | set(unary_ids)
-        repaired_candidates.append({
-            **source_candidate,
-            "status": "optimal_rounded_then_threshold_pruned",
-            "selected_ids": selection,
-            "selected_copy_ids": [],
-            "n_selected": size,
-            "n_selected_copies": None,
-            "remaining_support_flow": repair["remaining_support_flow"],
-            "remaining_support_fraction": (
-                repair["remaining_support_flow"] / initial_flow
-            ),
-            "strict_feasible": (
-                repair["remaining_support_flow"] <= threshold + 1e-12
-            ),
-            "bicriteria_feasible": (
-                repair["remaining_support_flow"] <= relaxed_threshold + 1e-12
-            ),
-            "unary_matched_ids": unary_ids,
-            "unary_remaining_support_flow": unary_flow,
-            "unary_remaining_support_fraction": unary_flow / initial_flow,
-            "differs_from_unary": selection != sorted(unary_ids),
-            "flow_improvement_over_unary": (
-                unary_flow - repair["remaining_support_flow"]
-            ),
-            "jaccard_distance_from_unary": (
-                0.0
-                if not union
-                else 1.0 - len(selected & set(unary_ids)) / len(union)
-            ),
-            "source_candidate_ids": source_candidate["selected_ids"],
-            "threshold_repair": repair_name,
-            "threshold_repair_flow_calls": repair["flow_calls"],
-            "solver": "weighted_copy_mincut_group_rounding_threshold_pruning",
-        })
+        repaired_candidates.append(
+            {
+                **source_candidate,
+                "status": "optimal_rounded_then_threshold_pruned",
+                "selected_ids": selection,
+                "selected_copy_ids": [],
+                "n_selected": size,
+                "n_selected_copies": None,
+                "remaining_support_flow": repair["remaining_support_flow"],
+                "remaining_support_fraction": (
+                    repair["remaining_support_flow"] / initial_flow
+                ),
+                "strict_feasible": (
+                    repair["remaining_support_flow"] <= threshold + 1e-12
+                ),
+                "bicriteria_feasible": (
+                    repair["remaining_support_flow"] <= relaxed_threshold + 1e-12
+                ),
+                "unary_matched_ids": unary_ids,
+                "unary_remaining_support_flow": unary_flow,
+                "unary_remaining_support_fraction": unary_flow / initial_flow,
+                "differs_from_unary": selection != sorted(unary_ids),
+                "flow_improvement_over_unary": (
+                    unary_flow - repair["remaining_support_flow"]
+                ),
+                "jaccard_distance_from_unary": (
+                    0.0
+                    if not union
+                    else 1.0 - len(selected & set(unary_ids)) / len(union)
+                ),
+                "source_candidate_ids": source_candidate["selected_ids"],
+                "threshold_repair": repair_name,
+                "threshold_repair_flow_calls": repair["flow_calls"],
+                "solver": "weighted_copy_mincut_group_rounding_threshold_pruning",
+            }
+        )
     by_repaired_selection = {tuple(row["selected_ids"]): row for row in candidates}
     for candidate in repaired_candidates:
         selection = tuple(candidate["selected_ids"])
@@ -2096,7 +2086,8 @@ def solve_group_bicriteria_flow_interdiction(
             "eta": eta,
             "strict_flow_threshold": threshold,
             "bicriteria_flow_threshold": relaxed_threshold,
-            "max_k_guess": guess_limit,
+            "cardinality_scale_limit": guess_limit,
+            "full_editable_domain": guess_limit == len(gates_by_unit),
             "mincut_calls": guess_limit,
             "candidate_flow_calls": candidate_flow_calls,
             "threshold_repair_flow_calls": threshold_repair_flow_calls,
@@ -2112,8 +2103,12 @@ def solve_group_bicriteria_flow_interdiction(
             "cardinality_factor": maximum_rank * (1.0 + 1.0 / eta),
             "residual_flow_factor": 1.0 + eta,
             "guarantee_scope": (
-                "grouped layered-copy residual-flow optimum when its cardinality "
-                "is no larger than max_k_guess; guarantee applies to the graph only"
+                "the full editable-token domain; guarantee applies to the graph only"
+                if guess_limit == len(gates_by_unit)
+                else (
+                    "grouped layered-copy residual-flow optima within the configured "
+                    "internal scale limit; guarantee applies to the graph only"
+                )
             ),
         },
     }
@@ -2293,19 +2288,23 @@ def sweep_prize_collecting_separators(
         unary_ids = unary_order[:size]
         unary_covered = covered_source_prize(network, prizes, set(unary_ids))
         union = selected | set(unary_ids)
-        candidates.append({
-            **result,
-            "covered_source_prize": covered,
-            "covered_source_fraction": covered / total_prize,
-            "unary_matched_ids": unary_ids,
-            "unary_covered_source_prize": unary_covered,
-            "unary_covered_source_fraction": unary_covered / total_prize,
-            "differs_from_unary": list(selection) != sorted(unary_ids),
-            "coverage_improvement_over_unary": covered - unary_covered,
-            "jaccard_distance_from_unary": (
-                0.0 if not union else 1.0 - len(selected & set(unary_ids)) / len(union)
-            ),
-        })
+        candidates.append(
+            {
+                **result,
+                "covered_source_prize": covered,
+                "covered_source_fraction": covered / total_prize,
+                "unary_matched_ids": unary_ids,
+                "unary_covered_source_prize": unary_covered,
+                "unary_covered_source_fraction": unary_covered / total_prize,
+                "differs_from_unary": list(selection) != sorted(unary_ids),
+                "coverage_improvement_over_unary": covered - unary_covered,
+                "jaccard_distance_from_unary": (
+                    0.0
+                    if not union
+                    else 1.0 - len(selected & set(unary_ids)) / len(union)
+                ),
+            }
+        )
     candidates.sort(
         key=lambda row: (
             row["n_selected"],
@@ -2331,12 +2330,11 @@ def sweep_prize_collecting_separators(
                 candidate["n_selected"] > 0 for candidate in candidates
             ),
             "cardinality_monotone_over_descending_lambda": all(
-                left <= right
-                for left, right in zip(cardinalities, cardinalities[1:])
+                left <= right for left, right in zip(cardinalities, cardinalities[1:])
             ),
-            "candidate_cardinalities": sorted({
-                candidate["n_selected"] for candidate in candidates
-            }),
+            "candidate_cardinalities": sorted(
+                {candidate["n_selected"] for candidate in candidates}
+            ),
         },
     }
 

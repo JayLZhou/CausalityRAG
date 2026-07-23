@@ -1,4 +1,4 @@
-"""Verify saved interventions with one local Hugging Face eager reader."""
+"""Historical local-HF reader cross-check; not part of the final pipeline."""
 
 from __future__ import annotations
 
@@ -50,15 +50,11 @@ def main() -> None:
     parser.add_argument("--max-new-tokens", type=int, default=96)
     args = parser.parse_args()
 
-    records_by_id = {
-        record_id(record): record for record in load_records(args.input)
-    }
+    records_by_id = {record_id(record): record for record in load_records(args.input)}
     evaluations_by_id = load_evaluation_methods(args.results)
     missing = sorted(set(evaluations_by_id) - set(records_by_id))
     if missing:
-        raise ValueError(
-            f"evaluation rows have no input record: {missing[:5]}"
-        )
+        raise ValueError(f"evaluation rows have no input record: {missing[:5]}")
     clean_answers_by_id = None
     if args.clean_targets:
         clean_answers_by_id = {
@@ -66,13 +62,10 @@ def main() -> None:
             for row in iter_records(args.clean_targets)
             if row.get("id")
         }
-        missing_clean = sorted(
-            set(evaluations_by_id) - set(clean_answers_by_id)
-        )
+        missing_clean = sorted(set(evaluations_by_id) - set(clean_answers_by_id))
         if missing_clean:
             raise ValueError(
-                "evaluation rows have no frozen clean answer: "
-                f"{missing_clean[:5]}"
+                "evaluation rows have no frozen clean answer: " f"{missing_clean[:5]}"
             )
 
     model = LocalHFReader(
@@ -88,15 +81,15 @@ def main() -> None:
             started = time.monotonic()
             record = records_by_id[identifier]
             question = str(record.get("question", ""))
-            clean_contexts = retrieved_contexts(record)[:args.k]
+            clean_contexts = retrieved_contexts(record)[: args.k]
             methods = evaluations_by_id[identifier]
             variants = {} if clean_answers_by_id is not None else {(): clean_contexts}
             signature_by_method = {}
             for method_name, method in methods.items():
                 edits = [edit for edit in method.get("edits", []) if edit.get("ok")]
-                signature = tuple(sorted(
-                    (str(edit["unit_id"]), str(edit["new"])) for edit in edits
-                ))
+                signature = tuple(
+                    sorted((str(edit["unit_id"]), str(edit["new"])) for edit in edits)
+                )
                 signature_by_method[method_name] = signature
                 if clean_answers_by_id is not None and not signature:
                     continue
@@ -109,9 +102,7 @@ def main() -> None:
                     }
                     for edit in edits
                 ]
-                replacements = {
-                    str(edit["unit_id"]): edit for edit in edits
-                }
+                replacements = {str(edit["unit_id"]): edit for edit in edits}
                 revision = apply_token_replacements(
                     record,
                     units,
@@ -176,9 +167,9 @@ def main() -> None:
                 "clean_exact": answers_exact_match(clean_answer, gold_answer),
                 "clean_token_f1": answer_token_f1(clean_answer, gold_answer),
                 "verification_mode": (
-                    "frozen_clean_batched_edits_local_hf_eager"
+                    "frozen_clean_batched_edits_local_hf_sdpa"
                     if clean_answers_by_id is not None
-                    else "batched_local_hf_eager"
+                    else "batched_local_hf_sdpa"
                 ),
                 "n_unique_edited_variants": (
                     len(variants)
@@ -254,7 +245,8 @@ def summarize(rows: list[dict]) -> dict:
             ),
             "vllm_hf_exact_agreement": sum(
                 result["vllm_hf_exact_agreement"] for _, result in pairs
-            ) / len(pairs),
+            )
+            / len(pairs),
             "mean_selected_tokens": statistics.fmean(
                 result["n_selected"] for _, result in pairs
             ),
@@ -280,13 +272,9 @@ def summarize(rows: list[dict]) -> dict:
     return {
         "queries": len(rows),
         "exact_clean_queries": sum(row["clean_exact"] for row in rows),
-        "unique_edited_variants": sum(
-            row["n_unique_edited_variants"] for row in rows
-        ),
+        "unique_edited_variants": sum(row["n_unique_edited_variants"] for row in rows),
         "mean_seconds": (
-            statistics.fmean(row["elapsed_seconds"] for row in rows)
-            if rows
-            else None
+            statistics.fmean(row["elapsed_seconds"] for row in rows) if rows else None
         ),
         "methods": methods,
         "paired": paired,
@@ -321,7 +309,9 @@ def paired_method_summary(
         "left_only_flips": left_only,
         "right_only_flips": right_only,
         "both_flip": sum(left_flip and right_flip for left_flip, right_flip in pairs),
-        "neither_flips": sum(not left_flip and not right_flip for left_flip, right_flip in pairs),
+        "neither_flips": sum(
+            not left_flip and not right_flip for left_flip, right_flip in pairs
+        ),
         "flip_rate_difference": (
             sum(differences) / len(differences) if differences else None
         ),
@@ -335,8 +325,7 @@ def mcnemar_exact_p(left_only: int, right_only: int) -> float:
     if discordant == 0:
         return 1.0
     tail = sum(
-        math.comb(discordant, index)
-        for index in range(min(left_only, right_only) + 1)
+        math.comb(discordant, index) for index in range(min(left_only, right_only) + 1)
     ) / (2**discordant)
     return min(1.0, 2.0 * tail)
 

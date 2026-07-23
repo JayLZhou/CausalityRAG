@@ -3,7 +3,7 @@
 import json
 import tempfile
 
-from scripts.verify_hf_results import (
+from exp.verify_hf_results import (
     answer_from_response,
     load_evaluation_methods,
     paired_method_summary,

@@ -8,7 +8,6 @@ from causalityrag.mixed_cut import (
     solve_bicriteria_flow_interdiction,
 )
 from causalityrag.reader import (
-    LocalHFReader,
     ReaderClient,
     answers_exact_match,
     answers_match,
@@ -17,7 +16,6 @@ from causalityrag.revision import apply_token_replacements
 
 __all__ = [
     "RawContributionNetwork",
-    "LocalHFReader",
     "ReaderClient",
     "apply_token_replacements",
     "answers_exact_match",

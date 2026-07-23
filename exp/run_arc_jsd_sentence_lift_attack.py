@@ -10,7 +10,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.arc_jsd import (
+from exp.arc_jsd import (
     ArcJsdModel,
     ablate_context_sentence,
     context_sentence_units,
