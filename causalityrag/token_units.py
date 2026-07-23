@@ -212,6 +212,211 @@ def classify_token(token: str) -> str:
     return "CONTENT"
 
 
+def all_context_word_units(
+    record: dict,
+    *,
+    k: int = 5,
+    nlp=None,
+) -> list[dict]:
+    """Return every non-punctuation surface token in retrieved contexts."""
+
+    units = []
+    for context in retrieved_contexts(record)[:k]:
+        chunk_id = str(context["chunk_id"])
+        annotation = (
+            nlp.annotate(context["text"])
+            if hasattr(nlp, "annotate")
+            else None
+        )
+        doc = (
+            nlp(context["text"])
+            if nlp is not None and annotation is None
+            else None
+        )
+        for match in TOKEN_RE.finditer(context["text"]):
+            token = match.group(0)
+            unit_type = classify_token(token)
+            if unit_type == "PUNCT":
+                continue
+            spacy_token = None
+            entity = None
+            if annotation is not None:
+                spacy_token = next(
+                    (
+                        item
+                        for item in annotation["tokens"]
+                        if int(item["start"]) < match.end()
+                        and match.start() < int(item["end"])
+                    ),
+                    None,
+                )
+                entity = next(
+                    (
+                        item
+                        for item in annotation["entities"]
+                        if int(item["start"]) < match.end()
+                        and match.start() < int(item["end"])
+                    ),
+                    None,
+                )
+                if entity is not None:
+                    from causalityrag.rules import ONTO_TYPES
+
+                    if str(entity["label"]).upper() in ONTO_TYPES:
+                        unit_type = str(entity["label"]).upper()
+            elif doc is not None:
+                spacy_token = next(
+                    (
+                        item
+                        for item in doc
+                        if item.idx < match.end()
+                        and match.start() < item.idx + len(item)
+                    ),
+                    None,
+                )
+                entity = next(
+                    (
+                        ent
+                        for ent in doc.ents
+                        if ent.start_char < match.end()
+                        and match.start() < ent.end_char
+                    ),
+                    None,
+                )
+                if entity is not None:
+                    from causalityrag.rules import ONTO_TYPES
+
+                    if entity.label_.upper() in ONTO_TYPES:
+                        unit_type = entity.label_.upper()
+            unit = {
+                "unit_id": (
+                    f"token:{chunk_id}:{match.start()}:{match.end()}"
+                ),
+                "text": token,
+                "type": unit_type,
+                "chunk_id": chunk_id,
+                "chunk_rank": int(context["rank"]),
+                "chunk_char_start": match.start(),
+                "chunk_char_end": match.end(),
+                "cost": 1.0,
+                "sources": ["context_tokenization"],
+            }
+            if spacy_token is not None and isinstance(spacy_token, dict):
+                unit.update({
+                    "pos": spacy_token["pos"],
+                    "tag": spacy_token["tag"],
+                    "lemma": spacy_token["lemma"],
+                    "morph": spacy_token["morph"],
+                })
+            elif spacy_token is not None:
+                unit.update({
+                    "pos": spacy_token.pos_,
+                    "tag": spacy_token.tag_,
+                    "lemma": spacy_token.lemma_,
+                    "morph": spacy_token.morph.to_dict(),
+                })
+            if (
+                entity is not None
+                and isinstance(entity, dict)
+                and unit_type == str(entity["label"]).upper()
+            ):
+                entity_tokens = entity["tokens"]
+                entity_token_index = next(
+                    (
+                        index
+                        for index, item in enumerate(entity_tokens)
+                        if int(item["start"]) < match.end()
+                        and match.start() < int(item["end"])
+                    ),
+                    0,
+                )
+                unit.update({
+                    "entity_text": entity["text"],
+                    "entity_token_index": entity_token_index,
+                    "entity_token_count": len(entity_tokens),
+                })
+            elif (
+                entity is not None
+                and unit_type == entity.label_.upper()
+            ):
+                entity_tokens = [
+                    item for item in entity if not item.is_space
+                ]
+                entity_token_index = next(
+                    (
+                        index
+                        for index, item in enumerate(entity_tokens)
+                        if item.idx < match.end()
+                        and match.start() < item.idx + len(item)
+                    ),
+                    0,
+                )
+                unit.update({
+                    "entity_text": entity.text,
+                    "entity_token_index": entity_token_index,
+                    "entity_token_count": len(entity_tokens),
+                })
+            units.append(unit)
+    return units
+
+
+def context_sentence_units(
+    record: dict,
+    *,
+    k: int = 5,
+    nlp=None,
+) -> tuple[list[dict], list[dict]]:
+    """Return context word units and punctuation-delimited sentence spans."""
+
+    units = all_context_word_units(record, k=k, nlp=nlp)
+    sentences = []
+    sentence_by_chunk: dict[str, list[dict]] = {}
+    for context in retrieved_contexts(record)[:k]:
+        chunk_id = str(context["chunk_id"])
+        chunk_sentences = []
+        matches = re.finditer(
+            r"\S(?:.*?\S)?(?:[.!?]+(?=\s|$)|$)",
+            context["text"],
+            re.S,
+        )
+        for index, match in enumerate(matches):
+            sentence = {
+                "sentence_id": (
+                    f"sentence:{chunk_id}:{match.start()}:{match.end()}"
+                ),
+                "chunk_id": chunk_id,
+                "chunk_rank": int(context["rank"]),
+                "sentence_index": index,
+                "chunk_char_start": match.start(),
+                "chunk_char_end": match.end(),
+                "text": match.group(0),
+            }
+            chunk_sentences.append(sentence)
+            sentences.append(sentence)
+        sentence_by_chunk[chunk_id] = chunk_sentences
+    for unit in units:
+        containing = next(
+            (
+                sentence
+                for sentence in sentence_by_chunk.get(
+                    str(unit["chunk_id"]),
+                    [],
+                )
+                if int(sentence["chunk_char_start"])
+                <= int(unit["chunk_char_start"])
+                and int(unit["chunk_char_end"])
+                <= int(sentence["chunk_char_end"])
+            ),
+            None,
+        )
+        if containing is None:
+            raise ValueError(
+                f"no sentence span contains {unit['unit_id']}"
+            )
+        unit["sentence_id"] = containing["sentence_id"]
+    return units, sentences
+
+
 def token_cost(token: str, mode: str) -> float:
     if mode == "unit":
         return 1.0

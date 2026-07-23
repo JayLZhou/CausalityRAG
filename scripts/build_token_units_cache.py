@@ -13,9 +13,9 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.arc_jsd import context_sentence_units
 from causalityrag.io import load_records, record_id, retrieved_contexts
 from causalityrag.linguistics import SpacyAnnotationClient
+from causalityrag.token_units import context_sentence_units
 
 
 _LOCAL_NLP = None

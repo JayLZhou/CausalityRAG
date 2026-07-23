@@ -1,18 +1,29 @@
-"""Token-level minimum evidence cut tools for RAG answer resilience."""
+"""Contribution-flow tools for token-level RAG answer resilience."""
 
-from causalityrag.ilp import ILPResult, Unit, solve_budgeted_support, solve_min_cost_cover
-from causalityrag.revision import apply_typed_token_revisions
-from causalityrag.rules import TypedRuleLibrary
-from causalityrag.token_units import TokenUnit, build_token_units, run_token_ilp_record
+from causalityrag.mixed_cut import (
+    RawContributionNetwork,
+    build_projected_token_contribution_network,
+    remaining_support_flow,
+    restrict_group_editable_units,
+    solve_bicriteria_flow_interdiction,
+)
+from causalityrag.reader import (
+    LocalHFReader,
+    ReaderClient,
+    answers_exact_match,
+    answers_match,
+)
+from causalityrag.revision import apply_token_replacements
 
 __all__ = [
-    "ILPResult",
-    "TokenUnit",
-    "TypedRuleLibrary",
-    "Unit",
-    "apply_typed_token_revisions",
-    "build_token_units",
-    "run_token_ilp_record",
-    "solve_budgeted_support",
-    "solve_min_cost_cover",
+    "RawContributionNetwork",
+    "LocalHFReader",
+    "ReaderClient",
+    "apply_token_replacements",
+    "answers_exact_match",
+    "answers_match",
+    "build_projected_token_contribution_network",
+    "remaining_support_flow",
+    "restrict_group_editable_units",
+    "solve_bicriteria_flow_interdiction",
 ]

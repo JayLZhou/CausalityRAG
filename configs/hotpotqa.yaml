@@ -1,4 +1,8 @@
-experiment: hotpotqa_token_resilience_v1
+# Reference configuration for the final HotpotQA pipeline.
+# The current command-line scripts use explicit flags; this file records the
+# frozen defaults and artifact names used by Readme.md.
+
+experiment: hotpotqa_contribution_flow_final
 seed: 20260711
 
 data:
@@ -11,6 +15,8 @@ reader:
   model_path: /data1/yujia/models/Qwen2.5-7B-Instruct
   served_model: qwen2.5-7b
   base_url: http://127.0.0.1:8000/v1
+  attention_implementation: eager
+  dtype: bfloat16
   decoding: greedy
   max_new_tokens: 96
 
@@ -18,36 +24,43 @@ annotation:
   spacy_model: en_core_web_lg
   base_url: http://127.0.0.1:8021
 
-lift:
-  sentence_metric: jsd
-  signed: true
-  feature_top_k: 64
-  routing_last_layers: 8
-  pair_envelope: positive_part
+contribution_graph:
+  method: direct-activation
+  absorbing_flow: true
+  max_context_tokens: 800
+  max_length: 1024
+  edge_topk: 6
+  max_receivers_per_layer: 48
+  max_edges: 5000
 
 optimization:
-  objective: max_supermodular_value_per_edit_cost
-  solver: dinkelbach_maximum_closure
-  max_iterations: 100
-  tolerance: 1.0e-9
+  projection: layer-copy-token
+  capacity_mode: raw
+  solver: geometric-k-guessing
+  beta: 0.25
+  eta: 1.0
+  gamma: 1.0
+  max_k_guess: 0  # zero means all editable tokens
 
 replacement:
-  mode: shared_registry
+  mode: fixed_point_shared_registry
   deletion_allowed: false
   require_single_token: true
   require_contextual_pos: true
+  require_contextual_tag: true
   require_contextual_morphology: true
   entity_policy: same_type_same_length_same_slot
-  generic_attempts: 2
 
 evaluation:
-  budgets: [1, 2, 3, 5, 10]
-  random_seeds: 5
-  bootstrap_samples: 10000
-  restricted_oracle_queries: 50
-  restricted_oracle_pool: 10
-  fidelity_queries: 100
-  singleton_samples_per_query: 20
-  pair_samples_per_query: 100
-  human_answer_audit: 200
-  human_edit_audit: 200
+  budgets: [1, 3, 5]
+  native_remaining_flow_threshold: 0.5
+  clean_correct_policy: exact
+  final_backend: local_hf_eager
+
+artifacts:
+  directory: out/hotpotqa_final
+  token_units: token_units.jsonl
+  contribution_graph: contribution_graph.jsonl
+  contribution_flow: contribution_flow.jsonl
+  replacement_registry: replacement_registry.jsonl
+  hf_verification: hf_verification.jsonl

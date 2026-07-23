@@ -7,6 +7,11 @@ def test_exact_match_does_not_use_substring_containment():
     assert answers_exact_match("The United States", "United States")
 
 
+def test_exact_match_is_reflexive_for_punctuation_answers():
+    assert answers_exact_match("...", "...")
+    assert answers_exact_match("[]", "[]")
+
+
 def test_answer_token_f1_uses_normalized_token_overlap():
     assert answer_token_f1("The United States", "United States") == 1.0
     assert answer_token_f1("Paris", "Paris Texas") == 2.0 / 3.0

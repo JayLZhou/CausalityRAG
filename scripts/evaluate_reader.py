@@ -1,0 +1,520 @@
+"""Evaluate contribution-flow selections with matched token replacements."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import random
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from causalityrag.io import load_records, record_id, retrieved_contexts
+from causalityrag.linguistics import SpacyAnnotationClient
+from causalityrag.reader import (
+    ReaderClient,
+    answer_token_f1,
+    answers_exact_match,
+    answers_match,
+)
+from causalityrag.replacement import (
+    GenericReplacementClient,
+    build_selected_replacements,
+)
+from causalityrag.revision import apply_token_replacements
+from causalityrag.rules import TypedRuleLibrary
+from causalityrag.token_units import (
+    context_sentence_units,
+    units_from_cache_row,
+)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", required=True)
+    parser.add_argument("--gate", required=True)
+    parser.add_argument("--clean-reference", required=True)
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--summary-out", default="")
+    parser.add_argument("--cf-pools", required=True)
+    parser.add_argument("--type-rules", default="")
+    parser.add_argument("--replacement-registry", default="")
+    parser.add_argument("--units-cache", default="")
+    parser.add_argument("--remaining-flow-threshold", type=float, default=0.9)
+    parser.add_argument("--max-tokens", type=int, default=10)
+    parser.add_argument(
+        "--selection-mode",
+        choices=("threshold", "budget"),
+        default="threshold",
+    )
+    parser.add_argument("--token-budget", type=int, default=5)
+    parser.add_argument("--k", type=int, default=5)
+    parser.add_argument("--include-clean-incorrect", action="store_true")
+    parser.add_argument(
+        "--clean-correct-policy",
+        choices=("exact", "lenient", "stored"),
+        default="exact",
+    )
+    parser.add_argument("--strict-replacements", action="store_true")
+    parser.add_argument(
+        "--spacy-base-url",
+        default=os.environ.get(
+            "CAUSALITYRAG_SPACY_BASE_URL",
+            "http://127.0.0.1:8021",
+        ),
+    )
+    args = parser.parse_args()
+    if not 0 <= args.remaining_flow_threshold < 1:
+        raise ValueError("remaining flow threshold must be in [0, 1)")
+    if args.max_tokens < 0:
+        raise ValueError("max tokens must be non-negative; zero means unlimited")
+    if args.token_budget <= 0:
+        raise ValueError("token budget must be positive")
+
+    records_by_id = {
+        record_id(record): record for record in load_records(args.input)
+    }
+    reference_by_id = {
+        str(row.get("id")): row for row in load_records(args.clean_reference)
+    }
+    gate_rows = load_records(args.gate)
+    registry_by_id = (
+        {
+            str(row.get("id")): row
+            for row in load_records(args.replacement_registry)
+        }
+        if args.replacement_registry
+        else {}
+    )
+    units_by_id = (
+        {
+            str(row.get("id")): row
+            for row in load_records(args.units_cache)
+        }
+        if args.units_cache
+        else {}
+    )
+    nlp = SpacyAnnotationClient(args.spacy_base_url)
+    if not nlp.health().get("ok"):
+        raise RuntimeError("spaCy annotation service is unhealthy")
+    library = TypedRuleLibrary.from_files(args.cf_pools, args.type_rules or None)
+    editor = GenericReplacementClient()
+    reader = ReaderClient()
+
+    rows = []
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    with open(args.out, "w", encoding="utf-8") as output:
+        for gate_row in gate_rows:
+            identifier = str(gate_row.get("id", ""))
+            reference = reference_by_id.get(identifier)
+            if reference is None:
+                raise ValueError(f"missing clean reference for {identifier}")
+            record = records_by_id.get(identifier)
+            if record is None:
+                raise ValueError(f"missing input record for {identifier}")
+            clean_answer = str(reference.get("clean_answer", ""))
+            gold_answer = str(record.get("answer", ""))
+            clean_correct_exact = answers_exact_match(clean_answer, gold_answer)
+            clean_correct_lenient = answers_match(clean_answer, gold_answer)
+            clean_correct_stored = bool(reference.get("clean_correct"))
+            clean_correct = {
+                "exact": clean_correct_exact,
+                "lenient": clean_correct_lenient,
+                "stored": clean_correct_stored,
+            }[args.clean_correct_policy]
+            if not args.include_clean_incorrect and not clean_correct:
+                continue
+            candidate = (
+                budget_candidate(
+                    gate_row.get("budget_candidates")
+                    or gate_row.get("candidates", []),
+                    min(args.token_budget, args.max_tokens),
+                )
+                if args.selection_mode == "budget"
+                else threshold_candidate(
+                    gate_row.get("candidates", []),
+                    args.remaining_flow_threshold,
+                    args.max_tokens,
+                )
+            )
+            if candidate is None:
+                no_candidate = {
+                    "status": "no_candidate_under_selection_rule",
+                    "selected_ids": [],
+                    "selected_tokens": [],
+                    "n_selected": 0,
+                    "flip": False,
+                }
+                row = {
+                    "index": gate_row.get("index"),
+                    "id": identifier,
+                    "question": gate_row.get("question"),
+                    "gold_answer": gold_answer,
+                    "clean_answer": clean_answer,
+                    "clean_correct": clean_correct,
+                    "clean_correct_policy": args.clean_correct_policy,
+                    "clean_correct_exact": clean_correct_exact,
+                    "clean_correct_lenient": clean_correct_lenient,
+                    "clean_correct_stored": clean_correct_stored,
+                    "remaining_flow_threshold": args.remaining_flow_threshold,
+                    "selection_mode": args.selection_mode,
+                    "token_budget": (
+                        args.token_budget
+                        if args.selection_mode == "budget"
+                        else None
+                    ),
+                    "candidate_remaining_support_fraction": None,
+                    "candidate_unary_remaining_support_fraction": None,
+                    "replacement_contract": (
+                        "strict_contextual_pos_morphology"
+                        if args.strict_replacements
+                        else "surface_valid_non_deleting_word"
+                    ),
+                    "reader_calls": 0,
+                    "methods": {
+                        "residual_flow": dict(no_candidate),
+                        "unary_matched": dict(no_candidate),
+                    },
+                }
+                rows.append(row)
+                output.write(json.dumps(row, ensure_ascii=False) + "\n")
+                output.flush()
+                continue
+            cached_units = units_by_id.get(identifier)
+            if cached_units is not None:
+                units = units_from_cache_row(record, cached_units, k=args.k)
+            else:
+                units, _ = context_sentence_units(record, k=args.k, nlp=nlp)
+            by_id = {str(unit["unit_id"]): unit for unit in units}
+            contexts = retrieved_contexts(record)[:args.k]
+            method_rows = {}
+            reader_answer_cache: dict[tuple[tuple[str, str], ...], str] = {}
+            reader_calls = 0
+            replacement_cache = dict(
+                registry_by_id.get(identifier, {}).get("replacements", {})
+            )
+            for method, selected_ids in (
+                ("residual_flow", candidate["selected_ids"]),
+                ("unary_matched", candidate["unary_matched_ids"]),
+            ):
+                selected = [by_id[unit_id] for unit_id in selected_ids]
+                if registry_by_id:
+                    missing = [
+                        unit_id for unit_id in selected_ids
+                        if unit_id not in replacement_cache
+                    ]
+                    if missing:
+                        method_rows[method] = {
+                            "status": "replacement_registry_missing",
+                            "selected_ids": selected_ids,
+                            "selected_tokens": [
+                                str(unit.get("text", "")) for unit in selected
+                            ],
+                            "n_selected": len(selected),
+                            "missing_registry_ids": missing,
+                        }
+                        continue
+                replacements, rejected = build_selected_replacements(
+                    selected,
+                    contexts,
+                    library,
+                    editor,
+                    nlp,
+                    replacement_cache,
+                    allow_relaxed_fallback=(
+                        not args.strict_replacements and not registry_by_id
+                    ),
+                )
+                result = {
+                    "selected_ids": selected_ids,
+                    "selected_tokens": [str(unit.get("text", "")) for unit in selected],
+                    "n_selected": len(selected),
+                    "rejected": rejected,
+                }
+                if rejected:
+                    result["status"] = "strict_replacement_failed"
+                    method_rows[method] = result
+                    continue
+                revision = apply_token_replacements(
+                    record,
+                    selected,
+                    replacements,
+                    k=args.k,
+                )
+                signature = tuple(sorted(
+                    (str(edit["unit_id"]), str(edit["new"]))
+                    for edit in revision["edits"]
+                    if edit.get("ok")
+                ))
+                cache_hit = signature in reader_answer_cache
+                if cache_hit:
+                    answer = reader_answer_cache[signature]
+                else:
+                    answer = reader.answer(
+                        str(record.get("question", "")),
+                        revision["edited_contexts"],
+                    )
+                    reader_answer_cache[signature] = answer
+                    reader_calls += 1
+                result.update({
+                    "status": "ok",
+                    "edits": revision["edits"],
+                    "answer": answer,
+                    "reader_cache_hit": cache_hit,
+                    "flip": not answers_exact_match(answer, clean_answer),
+                    "lenient_containment_flip": not answers_match(
+                        answer,
+                        clean_answer,
+                    ),
+                    "answer_token_f1_to_clean": answer_token_f1(
+                        answer,
+                        clean_answer,
+                    ),
+                    "gold_exact_after": answers_exact_match(
+                        answer,
+                        gold_answer,
+                    ),
+                    "gold_token_f1_after": answer_token_f1(
+                        answer,
+                        gold_answer,
+                    ),
+                })
+                method_rows[method] = result
+
+            row = {
+                "index": gate_row.get("index"),
+                "id": identifier,
+                "question": gate_row.get("question"),
+                "gold_answer": gold_answer,
+                "clean_answer": clean_answer,
+                "clean_correct": clean_correct,
+                "clean_correct_policy": args.clean_correct_policy,
+                "clean_correct_exact": clean_correct_exact,
+                "clean_correct_lenient": clean_correct_lenient,
+                "clean_correct_stored": clean_correct_stored,
+                "remaining_flow_threshold": args.remaining_flow_threshold,
+                "selection_mode": args.selection_mode,
+                "token_budget": (
+                    args.token_budget if args.selection_mode == "budget" else None
+                ),
+                "candidate_remaining_support_fraction": candidate[
+                    "remaining_support_fraction"
+                ],
+                "candidate_unary_remaining_support_fraction": candidate[
+                    "unary_remaining_support_fraction"
+                ],
+                "replacement_contract": (
+                    "strict_contextual_pos_morphology"
+                    if args.strict_replacements
+                    else "surface_valid_non_deleting_word"
+                ),
+                "reader_calls": reader_calls,
+                "methods": method_rows,
+            }
+            rows.append(row)
+            output.write(json.dumps(row, ensure_ascii=False) + "\n")
+            output.flush()
+            print(
+                f"[reader-evaluation] index={row['index']} "
+                f"k={candidate['n_selected']} "
+                f"flow={method_rows['residual_flow'].get('flip')} "
+                f"unary={method_rows['unary_matched'].get('flip')}",
+                flush=True,
+            )
+
+    summary = summarize(rows)
+    rendered = json.dumps(summary, ensure_ascii=False, indent=2)
+    print("[reader-evaluation summary]", rendered)
+    if args.summary_out:
+        with open(args.summary_out, "w", encoding="utf-8") as output:
+            output.write(rendered + "\n")
+
+
+def threshold_candidate(
+    candidates: list[dict],
+    remaining_flow_threshold: float,
+    max_tokens: int,
+) -> dict | None:
+    eligible = [
+        candidate
+        for candidate in candidates
+        if 0 < int(candidate.get("n_selected", 0))
+        and (
+            max_tokens == 0
+            or int(candidate.get("n_selected", 0)) <= max_tokens
+        )
+        and float(candidate.get("remaining_support_fraction", 1.0))
+        <= remaining_flow_threshold + 1e-12
+    ]
+    return min(
+        eligible,
+        key=lambda candidate: (
+            int(candidate["n_selected"]),
+            float(candidate["remaining_support_fraction"]),
+            candidate["selected_ids"],
+        ),
+        default=None,
+    )
+
+
+def budget_candidate(
+    candidates: list[dict],
+    token_budget: int,
+) -> dict | None:
+    """Return the supported candidate with least residual flow under budget."""
+
+    if token_budget <= 0:
+        raise ValueError("token_budget must be positive")
+    eligible = [
+        candidate
+        for candidate in candidates
+        if 0 < int(candidate.get("n_selected", 0)) <= token_budget
+    ]
+    return min(
+        eligible,
+        key=lambda candidate: (
+            float(candidate.get("remaining_support_fraction", 1.0)),
+            int(candidate["n_selected"]),
+            candidate["selected_ids"],
+        ),
+        default=None,
+    )
+
+
+def summarize(rows: list[dict]) -> dict:
+    summary = {
+        "queries": len(rows),
+        "selection_mode": rows[0]["selection_mode"] if rows else None,
+        "token_budget": rows[0]["token_budget"] if rows else None,
+        "remaining_flow_threshold": (
+            rows[0]["remaining_flow_threshold"] if rows else None
+        ),
+        "clean_correct_policy": (
+            rows[0].get("clean_correct_policy") if rows else None
+        ),
+        "reader_calls": sum(int(row.get("reader_calls", 0)) for row in rows),
+    }
+    for method in ("residual_flow", "unary_matched"):
+        valid = [
+            row["methods"][method]
+            for row in rows
+            if row["methods"][method]["status"] == "ok"
+        ]
+        flips = sum(bool(result.get("flip")) for result in valid)
+        candidate_queries = sum(
+            row["methods"][method]["status"]
+            != "no_candidate_under_selection_rule"
+            for row in rows
+        )
+        summary[method] = {
+            "total_queries": len(rows),
+            "candidate_queries": candidate_queries,
+            "valid_queries": len(valid),
+            "no_candidate_queries": len(rows) - candidate_queries,
+            "replacement_failures": candidate_queries - len(valid),
+            "flips": flips,
+            "flip_rate": flips / len(valid) if valid else None,
+            "overall_flip_rate": flips / len(rows) if rows else None,
+            "candidate_coverage": (
+                candidate_queries / len(rows)
+                if rows
+                else None
+            ),
+            "mean_selected_tokens": (
+                sum(int(result["n_selected"]) for result in valid) / len(valid)
+                if valid
+                else None
+            ),
+        }
+    paired = [
+        row
+        for row in rows
+        if row["methods"]["residual_flow"]["status"] == "ok"
+        and row["methods"]["unary_matched"]["status"] == "ok"
+    ]
+    different = [
+        row
+        for row in paired
+        if set(row["methods"]["residual_flow"]["selected_ids"])
+        != set(row["methods"]["unary_matched"]["selected_ids"])
+    ]
+    residual_only = sum(
+        row["methods"]["residual_flow"]["flip"]
+        and not row["methods"]["unary_matched"]["flip"]
+        for row in paired
+    )
+    unary_only = sum(
+        row["methods"]["unary_matched"]["flip"]
+        and not row["methods"]["residual_flow"]["flip"]
+        for row in paired
+    )
+    paired_differences = [
+        int(row["methods"]["residual_flow"]["flip"])
+        - int(row["methods"]["unary_matched"]["flip"])
+        for row in paired
+    ]
+    summary["paired"] = {
+        "valid_queries": len(paired),
+        "same_token_sets": len(paired) - len(different),
+        "different_token_sets": len(different),
+        "residual_only_flips": residual_only,
+        "unary_only_flips": unary_only,
+        "both_flip": sum(
+            row["methods"]["residual_flow"]["flip"]
+            and row["methods"]["unary_matched"]["flip"]
+            for row in different
+        ),
+        "neither_flips": sum(
+            not row["methods"]["residual_flow"]["flip"]
+            and not row["methods"]["unary_matched"]["flip"]
+            for row in different
+        ),
+        "flip_rate_difference": (
+            sum(paired_differences) / len(paired_differences)
+            if paired_differences
+            else None
+        ),
+        "paired_bootstrap_95_ci": _paired_bootstrap_ci(paired_differences),
+        "mcnemar_exact_two_sided_p": _mcnemar_exact_p(
+            residual_only,
+            unary_only,
+        ),
+    }
+    return summary
+
+
+def _mcnemar_exact_p(left_only: int, right_only: int) -> float | None:
+    discordant = left_only + right_only
+    if discordant == 0:
+        return 1.0
+    tail = sum(
+        math.comb(discordant, index)
+        for index in range(min(left_only, right_only) + 1)
+    ) / (2**discordant)
+    return min(1.0, 2.0 * tail)
+
+
+def _paired_bootstrap_ci(
+    differences: list[int],
+    *,
+    samples: int = 10_000,
+    seed: int = 0,
+) -> list[float] | None:
+    if not differences:
+        return None
+    rng = random.Random(seed)
+    size = len(differences)
+    estimates = sorted(
+        sum(differences[rng.randrange(size)] for _ in range(size)) / size
+        for _ in range(samples)
+    )
+    return [
+        estimates[int(0.025 * (samples - 1))],
+        estimates[int(0.975 * (samples - 1))],
+    ]
+
+
+if __name__ == "__main__":
+    main()
