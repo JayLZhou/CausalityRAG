@@ -71,30 +71,23 @@ def main() -> None:
                 flush=True,
             )
 
-    empty_answers = [
-        identifiers[index]
-        for index, answer in enumerate(answers)
-        if not answer.strip()
-    ]
-    if empty_answers:
-        raise RuntimeError(
-            "vLLM returned empty clean answers; refusing to freeze unusable "
-            f"targets: {empty_answers[:10]}"
-        )
-
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     rows = []
     with open(args.out, "w", encoding="utf-8") as output:
         for record, answer in zip(records, answers):
+            nonempty = bool(answer.strip())
             row = {
                 "id": record_id(record),
                 "question": str(record.get("question", "")),
                 "gold_answer": str(record.get("answer", "")),
                 "clean_answer": answer,
+                "status": "ok" if nonempty else "reader_abstention_empty_answer",
                 "clean_correct": answers_exact_match(
                     answer,
                     str(record.get("answer", "")),
-                ),
+                )
+                if nonempty
+                else False,
                 "reader_backend": "vllm_openai_compatible",
                 "served_model": reader.model,
                 "retrieved_chunks": args.k,
@@ -106,6 +99,10 @@ def main() -> None:
     elapsed = time.monotonic() - started
     summary = {
         "records": len(rows),
+        "nonempty_targets": sum(row["status"] == "ok" for row in rows),
+        "reader_abstentions": sum(
+            row["status"] == "reader_abstention_empty_answer" for row in rows
+        ),
         "clean_correct": sum(bool(row["clean_correct"]) for row in rows),
         "clean_exact_match": (
             sum(bool(row["clean_correct"]) for row in rows) / len(rows)

@@ -101,8 +101,8 @@ the optimization network.
 | Stage | Required input | Produced artifact | Acceptance check |
 |---|---|---|---|
 | 1. Context units | retrieval records, spaCy | `context_units.jsonl` | `queries=N`, nonzero units, context hashes stored |
-| 2. Clean targets | records, vLLM | `clean_targets.jsonl` | every ID has one frozen greedy answer |
-| 3. Contribution graph | records, clean targets, same checkpoint in HF SDPA | `contribution_graph.jsonl` | every row is `ok`, has a positive context-to-answer path, and stores the clean answer |
+| 2. Clean targets | records, vLLM | `clean_targets.jsonl` | every ID has a frozen answer or explicit reader-abstention status |
+| 3. Contribution graph | records, clean targets, same checkpoint in HF SDPA | `contribution_graph.jsonl` | every non-abstention row is `ok`, has a positive context-to-answer path, and stores the clean answer |
 | 4. Graph optimization | graph, context units | initial flow JSONL | projected-token network and geometric solver recorded |
 | 5. Registry closure | flow candidates, replacement pools | registry plus re-solved flow | zero evaluated registry misses |
 | 6. Reader evaluation | final flow, fixed registry, clean answer, vLLM | native evaluation JSONL | zero registry misses and replacement failures |
@@ -355,9 +355,9 @@ python scripts/generate_reader_targets.py \
 
 This JSONL is the only clean-answer source used downstream. It is generated
 once, saved in input order, and reused as the graph target and flip baseline.
-The shared reader prompt requires a non-empty passage-supported span and uses
-the literal `unknown` when evidence is insufficient. This stage still fails
-instead of freezing any empty graph target.
+If the reader genuinely returns an empty answer, the row is frozen as
+`reader_abstention_empty_answer`; it is never converted to gold, `unknown`, or
+an `ok` empty graph.
 
 ### 3. Build the direct-activation absorbing contribution graph
 
@@ -391,10 +391,10 @@ checkpoint's real model context window; exceeding it is reported as
 `sequence_exceeds_model_context` instead of silently clipping evidence.
 
 The answer-objective sink is seeded uniformly across the predictors of the
-mean clean-answer-token logit. A graph is accepted only when it has positive
-answer-terminal flow and a positive context-to-answer path. Empty or unusable
-graphs receive an explicit failure status, and the command exits nonzero after
-writing its status summary.
+mean clean-answer-token logit. A non-abstention graph is accepted only when it
+has positive answer-terminal flow and a positive context-to-answer path. Empty
+or unusable graphs receive an explicit failure status. Reader abstentions are
+counted separately; any actual graph failure makes the command exit nonzero.
 
 ### 4. Produce an initial contribution-flow solution
 

@@ -11,17 +11,11 @@ from collections import Counter
 from typing import Sequence
 
 
-READ_SYSTEM = (
-    "Answer the question using ONLY the passages. Give the shortest answer span. "
-    "The answer must be non-empty; if uncertain, return the best-supported span "
-    "from the passages. Output JSON only."
-)
+READ_SYSTEM = "Answer the question using ONLY the passages. Give the shortest answer span. Output JSON only."
 READ_USER = """Passages:
 {passages}
 
 Question: {question}
-The answer string MUST NOT be empty. If the passages do not support an answer,
-use the literal answer "unknown".
 Return STRICT JSON: {{"answer": "..."}}"""
 
 

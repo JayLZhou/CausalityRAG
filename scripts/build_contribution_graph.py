@@ -95,7 +95,20 @@ def main() -> None:
     with open(args.out, "w", encoding="utf-8") as output:
         for index, (record, target) in enumerate(zip(records, targets), 1):
             started = time.monotonic()
-            row = builder.build(record, target, k=args.k, top_tokens=args.top_tokens)
+            if target.strip():
+                row = builder.build(
+                    record,
+                    target,
+                    k=args.k,
+                    top_tokens=args.top_tokens,
+                )
+            else:
+                row = builder._empty(
+                    record,
+                    target,
+                    "reader_abstention_empty_answer",
+                    0,
+                )
             row["clean_answer"] = target
             row["target_source"] = (
                 "frozen_vllm_results" if args.target == "results" else "gold_diagnostic"
@@ -116,11 +129,18 @@ def main() -> None:
             )
 
     ok = [row for row in rows if row["status"] == "ok"]
+    excluded = [
+        row
+        for row in rows
+        if row["status"] == "reader_abstention_empty_answer"
+    ]
+    failed = len(rows) - len(ok) - len(excluded)
     status_histogram = dict(sorted(Counter(str(row["status"]) for row in rows).items()))
     summary = {
         "records": len(rows),
         "ok": len(ok),
-        "failed": len(rows) - len(ok),
+        "excluded_reader_abstentions": len(excluded),
+        "failed": failed,
         "status_histogram": status_histogram,
         "avg_seconds": round(
             sum(row["elapsed_seconds"] for row in ok) / max(1, len(ok)), 3
@@ -138,7 +158,7 @@ def main() -> None:
     if args.summary_out:
         with open(args.summary_out, "w", encoding="utf-8") as output:
             output.write(rendered + "\n")
-    if len(ok) != len(rows):
+    if failed:
         raise RuntimeError(
             "contribution graph construction produced unusable rows: "
             f"{status_histogram}"
@@ -159,9 +179,8 @@ def answer_from_result_row(row: dict) -> str:
     if response:
         return answer_from_response(response)
     for key in ("clean_answer", "stored_clean_answer", "target_answer", "answer"):
-        value = str(row.get(key, "")).strip()
-        if value:
-            return value
+        if key in row:
+            return str(row[key]).strip()
     raise ValueError(f"target result row {row.get('id')} has no clean answer")
 
 
