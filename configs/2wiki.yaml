@@ -4,9 +4,9 @@ experiment: 2wiki_contribution_flow_final
 seed: 20260711
 
 data:
-  input: /data1/yujia/RAGData/2wiki-exp/results/retrieval_2wiki_top5_smoke10.jsonl
+  input: /data1/yujia/RAGData/2wiki-exp/results/retrieval_2wiki_top5_all1000.jsonl
   start: 0
-  count: 10
+  count: 1000
   retrieved_chunks: 5
 
 reader:
@@ -58,8 +58,8 @@ evaluation:
 
 artifacts:
   root: /data1/yujia/CausalityRAG/runs
-  run_id: smoke10-rf020
-  directory: /data1/yujia/CausalityRAG/runs/2wiki/smoke10-rf020
+  run_id: all1000-rf020
+  directory: /data1/yujia/CausalityRAG/runs/2wiki/all1000-rf020
   context_units: 01_context/context_units.jsonl
   contribution_graph: 02_graph/contribution_graph.jsonl
   contribution_flow_initial: 03_flow/initial.jsonl
