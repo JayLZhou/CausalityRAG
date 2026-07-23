@@ -60,8 +60,8 @@ evaluation:
 
 artifacts:
   root: /data1/yujia/CausalityRAG/runs
-  run_id: all1000-rf020
-  directory: /data1/yujia/CausalityRAG/runs/2wiki/all1000-rf020
+  run_id: all1000-final-v2
+  directory: /data1/yujia/CausalityRAG/runs/2wiki/all1000-final-v2
   context_units: 01_context/context_units.jsonl
   clean_targets: 02_reader/clean_targets.jsonl
   contribution_graph: 03_graph/contribution_graph.jsonl
