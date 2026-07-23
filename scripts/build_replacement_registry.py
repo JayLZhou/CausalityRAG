@@ -240,7 +240,7 @@ def build_registry_row(
         units, _ = context_sentence_units(record, k=k, nlp=nlp)
     by_id = {str(unit["unit_id"]): unit for unit in units}
     existing = existing_by_id.get(identifier, {})
-    candidate_ids: set[str] = set()
+    candidate_ids = existing_flow_candidate_ids(existing)
     for gate_by_id in gates:
         gate = gate_by_id.get(identifier)
         if gate is None:
@@ -290,6 +290,7 @@ def build_registry_row(
         "index": start + offset - 1,
         "id": identifier,
         "candidate_ids": sorted(candidate_ids),
+        "candidate_source": "contribution_flow",
         "replacements": valid,
         "invalid": invalid,
         "candidate_tokens": len(candidate_ids),
@@ -297,6 +298,17 @@ def build_registry_row(
         "invalid_tokens": len(candidate_ids) - len(valid),
         "contract": "strict_contextual_pos_tag_morphology",
         "answer_blind": True,
+    }
+
+
+def existing_flow_candidate_ids(existing: dict) -> set[str]:
+    """Retain prior candidates only when their source is explicitly pure flow."""
+
+    if existing.get("candidate_source") != "contribution_flow":
+        return set()
+    return {
+        str(unit_id)
+        for unit_id in existing.get("candidate_ids", [])
     }
 
 
