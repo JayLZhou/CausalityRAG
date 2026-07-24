@@ -53,6 +53,15 @@ def main() -> None:
     parser.add_argument("--reader-model", default="")
     parser.add_argument("--include-clean-incorrect", action="store_true")
     parser.add_argument(
+        "--fallback-to-minimum-flow-candidate",
+        action="store_true",
+        help=(
+            "when no candidate meets the remaining-flow threshold, evaluate "
+            "the nonempty contribution-flow candidate with minimum residual "
+            "flow and mark it as an above-threshold fallback"
+        ),
+    )
+    parser.add_argument(
         "--clean-correct-policy",
         choices=("exact", "lenient", "stored"),
         default="exact",
@@ -118,9 +127,10 @@ def main() -> None:
         }[args.clean_correct_policy]
         if not args.include_clean_incorrect and not clean_correct:
             continue
-        candidate = threshold_candidate(
+        candidate, candidate_selection = evaluation_candidate(
             gate_row.get("candidates", []),
             args.remaining_flow_threshold,
+            fallback_to_minimum_flow=args.fallback_to_minimum_flow_candidate,
         )
         if candidate is None:
             no_candidate = {
@@ -142,6 +152,13 @@ def main() -> None:
                 "clean_correct_lenient": clean_correct_lenient,
                 "clean_correct_stored": clean_correct_stored,
                 "include_clean_incorrect": args.include_clean_incorrect,
+                "selection_rule": (
+                    "threshold_then_minimum_flow_fallback"
+                    if args.fallback_to_minimum_flow_candidate
+                    else "threshold_only"
+                ),
+                "candidate_selection": candidate_selection,
+                "candidate_meets_remaining_flow_threshold": None,
                 "remaining_flow_threshold": args.remaining_flow_threshold,
                 "candidate_remaining_support_fraction": None,
                 "replacement_contract": (
@@ -256,6 +273,15 @@ def main() -> None:
             "clean_correct_lenient": clean_correct_lenient,
             "clean_correct_stored": clean_correct_stored,
             "include_clean_incorrect": args.include_clean_incorrect,
+            "selection_rule": (
+                "threshold_then_minimum_flow_fallback"
+                if args.fallback_to_minimum_flow_candidate
+                else "threshold_only"
+            ),
+            "candidate_selection": candidate_selection,
+            "candidate_meets_remaining_flow_threshold": (
+                candidate_selection == "within_threshold"
+            ),
             "remaining_flow_threshold": args.remaining_flow_threshold,
             "candidate_remaining_support_fraction": candidate[
                 "remaining_support_fraction"
@@ -376,6 +402,40 @@ def threshold_candidate(
     )
 
 
+def evaluation_candidate(
+    candidates: list[dict],
+    remaining_flow_threshold: float,
+    *,
+    fallback_to_minimum_flow: bool,
+) -> tuple[dict | None, str]:
+    """Select the threshold candidate, optionally falling back by residual flow."""
+
+    candidate = threshold_candidate(candidates, remaining_flow_threshold)
+    if candidate is not None:
+        return candidate, "within_threshold"
+    if not fallback_to_minimum_flow:
+        return None, "none"
+    nonempty = [
+        candidate
+        for candidate in candidates
+        if int(candidate.get("n_selected", 0)) > 0
+    ]
+    fallback = min(
+        nonempty,
+        key=lambda candidate: (
+            float(candidate.get("remaining_support_fraction", 1.0)),
+            int(candidate["n_selected"]),
+            candidate["selected_ids"],
+        ),
+        default=None,
+    )
+    return (
+        (fallback, "above_threshold_fallback")
+        if fallback is not None
+        else (None, "none")
+    )
+
+
 def summarize(rows: list[dict]) -> dict:
     summary = {
         "queries": len(rows),
@@ -398,6 +458,19 @@ def summarize(rows: list[dict]) -> dict:
         "clean_correct_policy": (rows[0].get("clean_correct_policy") if rows else None),
         "reader_calls": sum(int(row.get("reader_calls", 0)) for row in rows),
         "reader_backend": "vllm_openai_compatible",
+        "selection_rule": (
+            rows[0].get("selection_rule", "threshold_only")
+            if rows
+            else None
+        ),
+        "within_threshold_candidate_queries": sum(
+            row.get("candidate_selection") == "within_threshold"
+            for row in rows
+        ),
+        "above_threshold_fallback_queries": sum(
+            row.get("candidate_selection") == "above_threshold_fallback"
+            for row in rows
+        ),
     }
     method = "residual_flow"
     valid = [
@@ -426,6 +499,33 @@ def summarize(rows: list[dict]) -> dict:
             else None
         ),
     }
+    summary["candidate_threshold_strata"] = {}
+    for stratum in ("within_threshold", "above_threshold_fallback"):
+        stratum_results = [
+            row["methods"][method]
+            for row in rows
+            if row.get("candidate_selection") == stratum
+            and row["methods"][method]["status"] == "ok"
+        ]
+        stratum_flips = sum(
+            bool(result.get("flip"))
+            for result in stratum_results
+        )
+        summary["candidate_threshold_strata"][stratum] = {
+            "valid_queries": len(stratum_results),
+            "flips": stratum_flips,
+            "flip_rate": (
+                stratum_flips / len(stratum_results)
+                if stratum_results
+                else None
+            ),
+            "mean_selected_tokens": (
+                sum(int(result["n_selected"]) for result in stratum_results)
+                / len(stratum_results)
+                if stratum_results
+                else None
+            ),
+        }
     return summary
 
 

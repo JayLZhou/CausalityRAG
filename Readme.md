@@ -611,6 +611,21 @@ summary, `flip_rate` is conditional on a valid flow candidate and
 denominator. The all-query value is an answer-change rate, not a formal attack
 success rate, because it includes clean-incorrect queries.
 
+To actually test contribution-flow candidates that exist but remain above the
+configured threshold, run a separately named fallback evaluation by adding:
+
+```bash
+--fallback-to-minimum-flow-candidate
+```
+
+This keeps the normal candidate whenever one satisfies the threshold.
+Otherwise it edits and evaluates the nonempty contribution-flow candidate with
+the lowest remaining-flow fraction. The summary reports within-threshold and
+above-threshold fallback flips separately. A fallback result is an executed
+reader intervention, but it must not be reported as satisfying the configured
+flow bound. Queries with no registry-valid editable unit or no nonempty flow
+candidate still cannot be edited under the frozen intervention contract.
+
 ### 7. Freeze an artifact manifest
 
 ```bash
@@ -663,6 +678,10 @@ runs/<dataset>/<run-id>/
     clean_exact.summary.json
     all_queries.jsonl
     all_queries.summary.json
+    clean_exact_all_available.jsonl
+    clean_exact_all_available.summary.json
+    all_queries_all_available.jsonl
+    all_queries_all_available.summary.json
   manifest.json
 ```
 

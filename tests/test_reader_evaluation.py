@@ -1,6 +1,7 @@
 """Tests for reader evaluation of contribution-flow selections."""
 
 from scripts.evaluate_reader import (
+    evaluation_candidate,
     run_reader_requests,
     summarize,
     threshold_candidate,
@@ -41,6 +42,30 @@ def test_threshold_candidate_rejects_insufficient_cuts():
     ]
 
     assert threshold_candidate(candidates, 0.9) is None
+
+
+def test_evaluation_candidate_can_use_minimum_flow_fallback():
+    candidates = [
+        {
+            "n_selected": 2,
+            "remaining_support_fraction": 0.7,
+            "selected_ids": ["a", "b"],
+        },
+        {
+            "n_selected": 4,
+            "remaining_support_fraction": 0.4,
+            "selected_ids": ["a", "b", "c", "d"],
+        },
+    ]
+
+    selected, selection = evaluation_candidate(
+        candidates,
+        0.2,
+        fallback_to_minimum_flow=True,
+    )
+
+    assert selected is candidates[1]
+    assert selection == "above_threshold_fallback"
 
 
 def test_summary_counts_no_candidate_as_failure_in_overall_rate():

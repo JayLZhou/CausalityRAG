@@ -3,7 +3,7 @@
 Run date: 2026-07-24  
 Server: `yujia-server3`, GPU 2 (A100)  
 Run directory: `/data1/yujia/CausalityRAG/runs/2wiki/all1000-final-v3`  
-Repository commit: `cd4563c`
+Repository branch: `main`; the exact clean commit is recorded in `manifest.json`
 
 ## Frozen setup
 
@@ -54,6 +54,8 @@ replacement.
 An exact-normalized answer change relative to the frozen clean vLLM answer is
 counted as a flip.
 
+### Threshold-constrained primary metric
+
 | Metric | Clean-exact scope | All-query scope |
 |---|---:|---:|
 | Denominator | 275 | 1,000 |
@@ -77,6 +79,32 @@ answer in its denominator matches gold. The all-query scope is an
 answer-change diagnostic, not an attack-success rate, because 725 clean
 answers in that scope do not exactly match gold.
 
+### Actual interventions for above-threshold candidates
+
+The threshold-constrained metric does not send a reader request when no
+candidate has remaining flow at most 0.2. To test the available interventions
+rather than silently assigning all of them a failure, a second evaluation uses
+the normal threshold candidate when present and otherwise edits the nonempty
+contribution-flow candidate with the lowest remaining-flow fraction.
+
+| Metric | Clean-exact scope | All-query scope |
+|---|---:|---:|
+| Denominator | 275 | 1,000 |
+| Within-threshold candidates | 212 | 847 |
+| Above-threshold candidates actually tested | 49 | 123 |
+| Queries actually edited and evaluated | 261 | 970 |
+| Queries with no executable candidate | 14 | 30 |
+| Flips from within-threshold candidates | 152 | 603 |
+| Flips from above-threshold candidates | 29 | 73 |
+| Total flips | 181 | 676 |
+| Flip rate among edited queries | 69.35% | 69.69% |
+| End-to-end flip rate over the full scope | **65.82%** | **67.60%** |
+
+The above-threshold candidates achieved 29/49 flips (59.18%) in the
+clean-exact scope and 73/123 (59.35%) over all queries. These are real edited
+vLLM reader calls, but they do not satisfy the stated flow `<=0.2` constraint
+and therefore remain a separately labeled fallback result.
+
 ## No-candidate breakdown
 
 | Reason | Clean-exact scope | All-query scope |
@@ -86,6 +114,12 @@ answers in that scope do not exactly match gold.
 | Editable network but no nonempty supported candidate | 1 | 2 |
 | Empty clean reader target | 0 | 1 |
 | Total without a selected candidate | 63 | 153 |
+
+In the all-available evaluation, the 49/123 above-threshold rows in this table
+are actually edited and tested. Only 14 clean-exact queries and 30 all-scope
+queries remain without an executable candidate: 13/27 have no registry-valid
+editable unit, 1/2 have no nonempty supported flow candidate, and the all-scope
+set additionally contains one empty clean reader target.
 
 Among evaluated candidates, selected set sizes were 1–8 tokens for the
 clean-exact scope and 1–9 for all queries. The largest accepted remaining-flow
@@ -119,6 +153,10 @@ fractions were 0.198789 and 0.199448 respectively, both below 0.2.
     clean_exact.summary.json
     all_queries.jsonl
     all_queries.summary.json
+    clean_exact_all_available.jsonl
+    clean_exact_all_available.summary.json
+    all_queries_all_available.jsonl
+    all_queries_all_available.summary.json
   REPORT.md
   manifest.json
 ```
