@@ -105,6 +105,51 @@ clean-exact scope and 73/123 (59.35%) over all queries. These are real edited
 vLLM reader calls, but they do not satisfy the stated flow `<=0.2` constraint
 and therefore remain a separately labeled fallback result.
 
+## Fixed Top-5 graph-token baseline
+
+The requested baseline ranks every editable token by its graph-local outgoing
+contribution score in the same `layer-copy-token`, raw-capacity graph and
+selects the first five. It does not solve contribution flow and does not use
+ARC-JSD. Invalid strict replacements are skipped and the next ranked token is
+considered until the registry reaches a fixed point.
+
+The baseline registry reached zero misses after five iterations. It contains
+5,569 candidate tokens: 4,866 valid replacements and 703 invalid
+replacements. Among all queries, 945 can take exactly five valid active-graph
+tokens, 52 have only 1–4, two have none, and one has an empty clean target.
+Among the 275 clean-exact queries, all have an executable candidate, 267 take
+exactly five tokens, and the mean is 4.92 edits.
+
+### Clean-exact comparison
+
+| Method | Evaluated candidates | Mean edits | Flips | End-to-end rate |
+|---|---:|---:|---:|---:|
+| Contribution flow, flow `<=0.2` | 212/275 | 2.250 | 152 | 55.27% |
+| Contribution flow, all available | 261/275 | 2.222 | 181 | 65.82% |
+| Fixed Top-5 graph-local score | 275/275 | 4.920 | 214 | **77.82%** |
+
+### All-query comparison
+
+| Method | Evaluated candidates | Mean edits | Flips | End-to-end rate |
+|---|---:|---:|---:|---:|
+| Contribution flow, flow `<=0.2` | 847/1,000 | 2.259 | 603 | 60.30% |
+| Contribution flow, all available | 970/1,000 | 2.275 | 676 | 67.60% |
+| Fixed Top-5 graph-local score | 997/1,000 | 4.881 | 753 | **75.30%** |
+
+Top-5 obtains more flips, but it uses about 2.2 times as many edited tokens as
+contribution flow and almost always forces five edits. This is not an
+equal-edit-cost comparison. On the common clean-exact denominator, Top-5 has
+68 baseline-only flips versus six flow-only flips against the strict flow
+result. Against the all-available flow result, it has 41 baseline-only versus
+eight flow-only flips.
+
+If both methods are filtered to candidates whose graph remaining-flow
+fraction is at most 0.2, Top-5 has 152/275 clean-exact flips and 598/1,000
+all-query flips; contribution flow has 152/275 and 603/1,000 respectively.
+Thus Top-5's raw success advantage comes primarily from spending more edits
+and accepting 89 clean-exact / 252 all-query candidates above the flow
+threshold.
+
 ## No-candidate breakdown
 
 | Reason | Clean-exact scope | All-query scope |
@@ -157,6 +202,15 @@ fractions were 0.198789 and 0.199448 respectively, both below 0.2.
     clean_exact_all_available.summary.json
     all_queries_all_available.jsonl
     all_queries_all_available.summary.json
+  07_baselines/top5_graph_local/
+    selection/final.jsonl
+    selection/final.summary.json
+    registry/final.jsonl
+    registry/final.summary.json
+    evaluation/clean_exact.jsonl
+    evaluation/clean_exact.summary.json
+    evaluation/all_queries.jsonl
+    evaluation/all_queries.summary.json
   REPORT.md
   manifest.json
 ```

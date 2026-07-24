@@ -33,3 +33,13 @@ def test_registry_accumulates_only_explicit_pure_flow_history() -> None:
     assert existing_flow_candidate_ids(
         {"candidate_ids": ["historical-untyped-candidate"]}
     ) == set()
+
+
+def test_registry_accepts_explicit_selection_candidate() -> None:
+    assert registry_candidate_ids(
+        {
+            "selection_candidate": {
+                "selected_ids": ["top-1", "top-2"],
+            }
+        }
+    ) == {"top-1", "top-2"}

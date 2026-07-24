@@ -72,4 +72,8 @@ artifacts:
   evaluation_all_queries: 06_evaluation/all_queries.jsonl
   evaluation_clean_exact_all_available: 06_evaluation/clean_exact_all_available.jsonl
   evaluation_all_queries_all_available: 06_evaluation/all_queries_all_available.jsonl
+  baseline_top5_graph_local: 07_baselines/top5_graph_local/selection/final.jsonl
+  baseline_top5_graph_local_registry: 07_baselines/top5_graph_local/registry/final.jsonl
+  baseline_top5_graph_local_clean_exact: 07_baselines/top5_graph_local/evaluation/clean_exact.jsonl
+  baseline_top5_graph_local_all_queries: 07_baselines/top5_graph_local/evaluation/all_queries.jsonl
   manifest: manifest.json

@@ -759,3 +759,9 @@ Completed compact reports:
 Historical dataset-specific baselines, ablations, plotting scripts, and
 protocols are retained under `exp/` for provenance. They are not stable final
 entry points and may use historical terminology or artifact schemas.
+
+The explicitly requested fixed Top-K graph-token baseline is implemented by
+`exp/select_topk_graph_tokens.py`. It ranks tokens by graph-local outgoing
+contribution in the same projected graph, uses its own strict answer-blind
+replacement closure, and must be reported with its fixed edit count. It is
+not part of the proposed contribution-flow selector.

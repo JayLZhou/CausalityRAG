@@ -51,6 +51,11 @@ def main() -> None:
     parser.add_argument("--reader-workers", type=int, default=16)
     parser.add_argument("--reader-base-url", default="")
     parser.add_argument("--reader-model", default="")
+    parser.add_argument(
+        "--method-name",
+        default="residual_flow",
+        help="method key written under each row's methods object",
+    )
     parser.add_argument("--include-clean-incorrect", action="store_true")
     parser.add_argument(
         "--fallback-to-minimum-flow-candidate",
@@ -168,7 +173,8 @@ def main() -> None:
                 ),
                 "reader_backend": "vllm_openai_compatible",
                 "reader_calls": 0,
-                "methods": {"residual_flow": dict(no_candidate)},
+                "evaluated_method": args.method_name,
+                "methods": {args.method_name: dict(no_candidate)},
             }
             rows.append(row)
             continue
@@ -188,7 +194,7 @@ def main() -> None:
             registry_by_id.get(identifier, {}).get("replacements", {})
         )
         for method, selected_ids in (
-            ("residual_flow", candidate["selected_ids"]),
+            (args.method_name, candidate["selected_ids"]),
         ):
             selected = [by_id[unit_id] for unit_id in selected_ids]
             if registry_by_id:
@@ -293,6 +299,7 @@ def main() -> None:
             ),
             "reader_backend": "vllm_openai_compatible",
             "reader_calls": len(reader_job_by_signature),
+            "evaluated_method": args.method_name,
             "methods": method_rows,
         }
         rows.append(row)
@@ -338,7 +345,7 @@ def main() -> None:
         for row in rows:
             output.write(json.dumps(row, ensure_ascii=False) + "\n")
             output.flush()
-            flow = row["methods"]["residual_flow"]
+            flow = row["methods"][args.method_name]
             print(
                 f"[reader-evaluation] index={row['index']} "
                 f"k={flow.get('n_selected', 0)} "
@@ -472,7 +479,12 @@ def summarize(rows: list[dict]) -> dict:
             for row in rows
         ),
     }
-    method = "residual_flow"
+    method = (
+        str(rows[0].get("evaluated_method", "residual_flow"))
+        if rows
+        else "residual_flow"
+    )
+    summary["evaluated_method"] = method
     valid = [
         row["methods"][method]
         for row in rows

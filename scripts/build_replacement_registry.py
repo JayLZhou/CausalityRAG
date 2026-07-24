@@ -63,6 +63,7 @@ def _process_local_registry(task: dict) -> dict:
         nlp=_LOCAL_NLP,
         library=_LOCAL_LIBRARY,
         editor=_LOCAL_EDITOR,
+        candidate_source=task["candidate_source"],
     )
     row["editor_llm_calls"] = _LOCAL_EDITOR.calls - before
     return row
@@ -83,6 +84,11 @@ def main() -> None:
     )
     parser.add_argument("--cf-pools", required=True)
     parser.add_argument("--type-rules", default="")
+    parser.add_argument(
+        "--candidate-source",
+        default="contribution_flow",
+        help="provenance label used to accumulate only compatible registry rows",
+    )
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--n", type=int, default=100)
     parser.add_argument("--k", type=int, default=5)
@@ -151,6 +157,7 @@ def main() -> None:
                 nlp=nlp,
                 library=library,
                 editor=editor,
+                candidate_source=args.candidate_source,
             )
 
         executor = ThreadPoolExecutor(max_workers=args.workers)
@@ -174,6 +181,7 @@ def main() -> None:
                 "existing": existing_by_id.get(identifier),
                 "context_row": units_by_id.get(identifier),
                 "k": args.k,
+                "candidate_source": args.candidate_source,
             })
         executor = ProcessPoolExecutor(
             max_workers=args.workers,
@@ -209,6 +217,7 @@ def main() -> None:
         ),
         "workers": args.workers,
         "backend": args.backend,
+        "candidate_source": args.candidate_source,
         "contract": "strict_contextual_pos_tag_morphology",
         "answer_blind": True,
     }
@@ -231,6 +240,7 @@ def build_registry_row(
     nlp,
     library,
     editor,
+    candidate_source: str = "contribution_flow",
 ) -> dict:
     identifier = record_id(record)
     context_row = units_by_id.get(identifier)
@@ -240,7 +250,7 @@ def build_registry_row(
         units, _ = context_sentence_units(record, k=k, nlp=nlp)
     by_id = {str(unit["unit_id"]): unit for unit in units}
     existing = existing_by_id.get(identifier, {})
-    candidate_ids = existing_flow_candidate_ids(existing)
+    candidate_ids = existing_candidate_ids(existing, candidate_source)
     for gate_by_id in gates:
         gate = gate_by_id.get(identifier)
         if gate is None:
@@ -290,7 +300,7 @@ def build_registry_row(
         "index": start + offset - 1,
         "id": identifier,
         "candidate_ids": sorted(candidate_ids),
-        "candidate_source": "contribution_flow",
+        "candidate_source": candidate_source,
         "replacements": valid,
         "invalid": invalid,
         "candidate_tokens": len(candidate_ids),
@@ -301,10 +311,10 @@ def build_registry_row(
     }
 
 
-def existing_flow_candidate_ids(existing: dict) -> set[str]:
-    """Retain prior candidates only when their source is explicitly pure flow."""
+def existing_candidate_ids(existing: dict, candidate_source: str) -> set[str]:
+    """Retain prior candidates only when their provenance matches."""
 
-    if existing.get("candidate_source") != "contribution_flow":
+    if existing.get("candidate_source") != candidate_source:
         return set()
     return {
         str(unit_id)
@@ -312,11 +322,21 @@ def existing_flow_candidate_ids(existing: dict) -> set[str]:
     }
 
 
+def existing_flow_candidate_ids(existing: dict) -> set[str]:
+    """Backward-compatible helper for the final contribution-flow registry."""
+
+    return existing_candidate_ids(existing, "contribution_flow")
+
+
 def registry_candidate_ids(gate: dict) -> set[str]:
-    """Collect IDs needed by the strict witness and native candidate."""
+    """Collect IDs needed by flow or an explicit baseline candidate."""
 
     candidate_ids: set[str] = set()
-    for key in ("strict_candidate", "bicriteria_candidate"):
+    for key in (
+        "strict_candidate",
+        "bicriteria_candidate",
+        "selection_candidate",
+    ):
         candidate = gate.get(key)
         if not candidate:
             continue
