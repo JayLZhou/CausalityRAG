@@ -733,6 +733,10 @@ depth, clean-correct coverage, and vLLM native-threshold summary.
 Cross-dataset aggregation is valid only after the
 per-dataset artifacts pass the same acceptance checks.
 
+Completed compact reports:
+
+- [2WikiMultiHopQA all-1000 final-v3](results/2wiki_all1000_final_v3.md)
+
 Historical dataset-specific baselines, ablations, plotting scripts, and
 protocols are retained under `exp/` for provenance. They are not stable final
 entry points and may use historical terminology or artifact schemas.
