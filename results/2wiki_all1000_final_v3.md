@@ -1,7 +1,7 @@
 # 2WikiMultiHopQA all-1000 final contribution-flow run
 
 Run date: 2026-07-24  
-Server: `yujia-server3`, GPU 2 (A100)  
+Server: `yujia-server3` (three A100s; MIRAGE attribution on GPU 2)
 Run directory: `/data1/yujia/CausalityRAG/runs/2wiki/all1000-final-v3`  
 Repository branch: `main`; the exact clean commit is recorded in `manifest.json`
 
@@ -23,8 +23,9 @@ Repository branch: `main`; the exact clean commit is recorded in `manifest.json`
 - Edit budget: none
 - Replacement contract: answer-blind, non-deleting, one-token, strict
   contextual POS/tag/morphology
-- Evaluated selector: contribution-flow only. No cardinality-matched,
-  unary, ARC-JSD, or other diagnostic selector was generated or evaluated.
+- Proposed selector: contribution-flow only. No cardinality-matched, unary, or
+  ARC-JSD diagnostic selector was generated or evaluated. MIRAGE Top-5 is
+  reported separately as an external paper baseline.
 
 ## Stage checks
 
@@ -43,7 +44,10 @@ Repository branch: `main`; the exact clean commit is recorded in `manifest.json`
 | Registry fixed-point misses | 0 |
 | Final flow rows with an editable network | 972 |
 | Rows with no registry-editable units | 27 |
-| Server unit tests | 89 passed |
+| MIRAGE attribution rows / reader abstentions | 999 / 1 |
+| MIRAGE registry valid / invalid candidate words | 4,995 / 450 |
+| MIRAGE registry fixed-point misses | 0 |
+| Server unit tests | 93 passed |
 
 The final registry reached its fixed point after four numbered registry
 iterations. The final `allow-only` solve uses only tokens with a frozen valid
@@ -105,20 +109,30 @@ clean-exact scope and 73/123 (59.35%) over all queries. These are real edited
 vLLM reader calls, but they do not satisfy the stated flow `<=0.2` constraint
 and therefore remain a separately labeled fallback result.
 
-## Fixed Top-5 graph-token baseline
+## MIRAGE Top-5 baseline
 
-The requested baseline ranks every editable token by its graph-local outgoing
-contribution score in the same `layer-copy-token`, raw-capacity graph and
-selects the first five. It does not solve contribution flow and does not use
-ARC-JSD. Invalid strict replacements are skipped and the next ranked token is
-considered until the registry reaches a fixed point.
+The fixed Top-5 comparison follows MIRAGE (Qi et al., EMNLP 2024). For each
+frozen vLLM answer, it first selects response tokens whose full-context versus
+contextless KL score is at least the example mean plus one population standard
+deviation. It then ranks editable context words by the summed L2 norm of the
+contrastive embedding gradient between the clean response token and its
+contextless foil. Invalid strict replacements are skipped and the next ranked
+word is considered until the replacement registry reaches a fixed point.
 
-The baseline registry reached zero misses after five iterations. It contains
-5,569 candidate tokens: 4,866 valid replacements and 703 invalid
-replacements. Among all queries, 945 can take exactly five valid active-graph
-tokens, 52 have only 1–4, two have none, and one has an empty clean target.
-Among the 275 clean-exact queries, all have an executable candidate, 267 take
-exactly five tokens, and the mean is 4.92 edits.
+The HF copy of Qwen is used only for teacher-forced MIRAGE attribution; clean
+and edited answers are produced by the same concurrent vLLM reader used by the
+contribution-flow evaluation. MIRAGE Top-5 is evaluated as an external
+fixed-cardinality baseline, so the contribution-flow threshold is not applied.
+The clean-exact MIRAGE artifact is the exact-filtered subset of its single
+all-query reader execution, avoiding a duplicate GPU execution of the same
+interventions.
+
+MIRAGE attribution completed for 999/1,000 queries in 500.11 seconds on GPU 2
+(0.500 seconds/query); the remaining row is the frozen empty-answer
+abstention. The strict replacement registry reached zero candidate misses
+after six closure iterations. It contains 5,445 ranked candidate words:
+4,995 valid replacements and 450 invalid replacements. Every non-abstention
+query therefore receives exactly five valid edits.
 
 ### Clean-exact comparison
 
@@ -126,7 +140,12 @@ exactly five tokens, and the mean is 4.92 edits.
 |---|---:|---:|---:|---:|
 | Contribution flow, flow `<=0.2` | 212/275 | 2.250 | 152 | 55.27% |
 | Contribution flow, all available | 261/275 | 2.222 | 181 | 65.82% |
-| Fixed Top-5 graph-local score | 275/275 | 4.920 | 214 | **77.82%** |
+| MIRAGE Top-5 | 275/275 | 5.000 | 205 | **74.55%** |
+
+Against threshold-constrained contribution flow on the common 275-query
+denominator, both methods flip 126 queries, MIRAGE alone flips 79, flow alone
+flips 26, and neither flips 44. Against the all-available flow result, the
+corresponding counts are 152, 53, 29, and 41.
 
 ### All-query comparison
 
@@ -134,21 +153,19 @@ exactly five tokens, and the mean is 4.92 edits.
 |---|---:|---:|---:|---:|
 | Contribution flow, flow `<=0.2` | 847/1,000 | 2.259 | 603 | 60.30% |
 | Contribution flow, all available | 970/1,000 | 2.275 | 676 | 67.60% |
-| Fixed Top-5 graph-local score | 997/1,000 | 4.881 | 753 | **75.30%** |
+| MIRAGE Top-5 | 999/1,000 | 5.000 | 741 | **74.10%** |
 
-Top-5 obtains more flips, but it uses about 2.2 times as many edited tokens as
-contribution flow and almost always forces five edits. This is not an
-equal-edit-cost comparison. On the common clean-exact denominator, Top-5 has
-68 baseline-only flips versus six flow-only flips against the strict flow
-result. Against the all-available flow result, it has 41 baseline-only versus
-eight flow-only flips.
+For MIRAGE, the conditional rate among actually edited queries is
+741/999 = 74.17%; its end-to-end rate counts the frozen abstention as a
+non-flip. Against threshold-constrained contribution flow, both methods flip
+517 queries, MIRAGE alone 224, flow alone 86, and neither 173. Against the
+all-available flow result, the corresponding counts are 578, 163, 98, and
+161.
 
-If both methods are filtered to candidates whose graph remaining-flow
-fraction is at most 0.2, Top-5 has 152/275 clean-exact flips and 598/1,000
-all-query flips; contribution flow has 152/275 and 603/1,000 respectively.
-Thus Top-5's raw success advantage comes primarily from spending more edits
-and accepting 89 clean-exact / 252 all-query candidates above the flow
-threshold.
+MIRAGE has the higher raw flip rate, but it always spends five edits while
+contribution flow averages about 2.2 edits. This is the requested fixed Top-5
+paper baseline, not an equal-cardinality comparison and not evidence that its
+token ranking is more efficient per edit.
 
 ## No-candidate breakdown
 
@@ -202,7 +219,8 @@ fractions were 0.198789 and 0.199448 respectively, both below 0.2.
     clean_exact_all_available.summary.json
     all_queries_all_available.jsonl
     all_queries_all_available.summary.json
-  07_baselines/top5_graph_local/
+  07_baselines/mirage_top5/
+    scores/final.jsonl
     selection/final.jsonl
     selection/final.summary.json
     registry/final.jsonl

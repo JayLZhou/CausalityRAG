@@ -605,8 +605,8 @@ All independent edited-context requests are submitted concurrently to vLLM.
 The stored stage-2 clean answer remains the baseline, so clean inference is not
 repeated here.
 
-The only evaluated selection is the contribution-flow candidate. In each
-summary, `flip_rate` is conditional on a valid flow candidate and
+The main stage-6 evaluation evaluates only the contribution-flow candidate.
+In each summary, `flip_rate` is conditional on a valid flow candidate and
 `overall_flip_rate` uses every query in that reporting scope as its
 denominator. The all-query value is an answer-change rate, not a formal attack
 success rate, because it includes clean-incorrect queries.
@@ -626,7 +626,82 @@ reader intervention, but it must not be reported as satisfying the configured
 flow bound. Queries with no registry-valid editable unit or no nonempty flow
 candidate still cannot be edited under the frozen intervention contract.
 
-### 7. Freeze an artifact manifest
+### 7. Optional MIRAGE Top-K paper baseline
+
+MIRAGE is an external comparison and is not an input to the proposed graph or
+solver. Score the same frozen reader trajectory with HF SDPA on the GPU
+server:
+
+```bash
+export MIRAGE_DIR="$RUN_DIR/07_baselines/mirage_top5"
+mkdir -p \
+  "$MIRAGE_DIR/scores" \
+  "$MIRAGE_DIR/selection" \
+  "$MIRAGE_DIR/registry" \
+  "$MIRAGE_DIR/evaluation"
+
+python exp/score_mirage_tokens.py \
+  --input "$DATA" \
+  --clean-reference "$CLEAN_TARGETS" \
+  --context-units "$CONTEXT_UNITS" \
+  --model-path "$MODEL" \
+  --out "$MIRAGE_DIR/scores/final.jsonl" \
+  --summary-out "$MIRAGE_DIR/scores/final.summary.json" \
+  --cti-std-threshold 1 \
+  --top-tokens 5 \
+  --attn-implementation sdpa \
+  --n "$N" \
+  --k "$K"
+```
+
+Build a baseline-specific strict registry, using the final contribution-flow
+registry only as an answer-blind replacement cache:
+
+```bash
+python scripts/build_replacement_registry.py \
+  --input "$DATA" \
+  --gates "$MIRAGE_DIR/scores/final.jsonl" \
+  --existing-registry "$REGISTRY" \
+  --candidate-source mirage_top5 \
+  --context-units "$CONTEXT_UNITS" \
+  --cf-pools "$CF_POOLS" \
+  --type-rules "$TYPE_RULES" \
+  --out "$MIRAGE_DIR/registry/iteration_01.jsonl" \
+  --summary-out "$MIRAGE_DIR/registry/iteration_01.summary.json" \
+  --backend service \
+  --workers 16 \
+  --n "$N" \
+  --k "$K"
+
+python exp/select_cached_mirage_topk.py \
+  --input "$DATA" \
+  --scores "$MIRAGE_DIR/scores/final.jsonl" \
+  --context-units "$CONTEXT_UNITS" \
+  --replacement-registry "$MIRAGE_DIR/registry/iteration_01.jsonl" \
+  --replacement-registry-policy exclude-known-invalid \
+  --out "$MIRAGE_DIR/selection/iteration_01.jsonl" \
+  --summary-out "$MIRAGE_DIR/selection/iteration_01.summary.json" \
+  --top-tokens 5 \
+  --n "$N" \
+  --k "$K"
+```
+
+If `evaluated_candidate_registry_misses` is nonzero, use that numbered
+selection as the next `--gates`, the numbered registry as
+`--existing-registry`, and repeat the two commands with the next iteration
+number. Once misses reach zero, copy that registry to `registry/final.jsonl`
+and rerun selection with `--replacement-registry-policy allow-only` to create
+`selection/final.jsonl`.
+
+Restart vLLM and evaluate `selection/final.jsonl` twice with the stage-6
+command: add `--ignore-remaining-flow-threshold --method-name mirage_top5`,
+write under `07_baselines/mirage_top5/evaluation/`, and add
+`--include-clean-incorrect` only for the all-query scope. The flow threshold is
+deliberately inapplicable to MIRAGE; fixed Top-5 and contribution flow must
+also report their mean edit counts because this is not a size-matched
+comparison.
+
+### 8. Freeze an artifact manifest
 
 ```bash
 python scripts/build_artifact_manifest.py \
@@ -645,6 +720,10 @@ python scripts/build_artifact_manifest.py \
 
 The manifest records SHA-256 hashes, byte and line counts, the current commit,
 branch, and dirty-worktree state.
+
+When the optional MIRAGE baseline is run, also list its final score, selection,
+registry, clean-exact evaluation, and all-query evaluation files under
+`--artifacts`.
 
 ## Expected final artifacts
 
@@ -682,6 +761,18 @@ runs/<dataset>/<run-id>/
     clean_exact_all_available.summary.json
     all_queries_all_available.jsonl
     all_queries_all_available.summary.json
+  07_baselines/
+    mirage_top5/
+      scores/final.jsonl
+      scores/final.summary.json
+      selection/final.jsonl
+      selection/final.summary.json
+      registry/final.jsonl
+      registry/final.summary.json
+      evaluation/clean_exact.jsonl
+      evaluation/clean_exact.summary.json
+      evaluation/all_queries.jsonl
+      evaluation/all_queries.summary.json
   manifest.json
 ```
 
@@ -760,8 +851,12 @@ Historical dataset-specific baselines, ablations, plotting scripts, and
 protocols are retained under `exp/` for provenance. They are not stable final
 entry points and may use historical terminology or artifact schemas.
 
-The explicitly requested fixed Top-K graph-token baseline is implemented by
-`exp/select_topk_graph_tokens.py`. It ranks tokens by graph-local outgoing
-contribution in the same projected graph, uses its own strict answer-blind
-replacement closure, and must be reported with its fixed edit count. It is
-not part of the proposed contribution-flow selector.
+The fixed Top-K comparison uses
+[MIRAGE](https://aclanthology.org/2024.emnlp-main.347/)
+(Qi et al., EMNLP 2024).
+`exp/score_mirage_tokens.py` first applies MIRAGE's context-sensitive
+output-token filter and then ranks editable context words by contrastive
+embedding-gradient saliency.
+`exp/select_cached_mirage_topk.py` takes the highest-scoring valid words from
+the shared strict replacement domain. This is an external fixed-cardinality
+baseline; it neither solves contribution flow nor applies the flow threshold.

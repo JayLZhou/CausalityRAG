@@ -1,4 +1,4 @@
-"""Evaluate contribution-flow selections with matched token replacements."""
+"""Evaluate saved token selections with matched token replacements."""
 
 from __future__ import annotations
 
@@ -67,6 +67,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--ignore-remaining-flow-threshold",
+        action="store_true",
+        help=(
+            "evaluate the saved nonempty candidate without applying the "
+            "contribution-flow threshold; intended for external baselines"
+        ),
+    )
+    parser.add_argument(
         "--clean-correct-policy",
         choices=("exact", "lenient", "stored"),
         default="exact",
@@ -84,6 +92,14 @@ def main() -> None:
         raise ValueError("remaining flow threshold must be in [0, 1)")
     if args.reader_workers <= 0:
         raise ValueError("reader workers must be positive")
+    if (
+        args.fallback_to_minimum_flow_candidate
+        and args.ignore_remaining_flow_threshold
+    ):
+        raise ValueError(
+            "flow fallback and threshold-free baseline evaluation "
+            "are mutually exclusive"
+        )
 
     records_by_id = {record_id(record): record for record in load_records(args.input)}
     reference_by_id = {
@@ -136,6 +152,9 @@ def main() -> None:
             gate_row.get("candidates", []),
             args.remaining_flow_threshold,
             fallback_to_minimum_flow=args.fallback_to_minimum_flow_candidate,
+            ignore_remaining_flow_threshold=(
+                args.ignore_remaining_flow_threshold
+            ),
         )
         if candidate is None:
             no_candidate = {
@@ -158,9 +177,13 @@ def main() -> None:
                 "clean_correct_stored": clean_correct_stored,
                 "include_clean_incorrect": args.include_clean_incorrect,
                 "selection_rule": (
-                    "threshold_then_minimum_flow_fallback"
-                    if args.fallback_to_minimum_flow_candidate
-                    else "threshold_only"
+                    "fixed_candidate_ignore_flow_threshold"
+                    if args.ignore_remaining_flow_threshold
+                    else (
+                        "threshold_then_minimum_flow_fallback"
+                        if args.fallback_to_minimum_flow_candidate
+                        else "threshold_only"
+                    )
                 ),
                 "candidate_selection": candidate_selection,
                 "candidate_meets_remaining_flow_threshold": None,
@@ -280,18 +303,24 @@ def main() -> None:
             "clean_correct_stored": clean_correct_stored,
             "include_clean_incorrect": args.include_clean_incorrect,
             "selection_rule": (
-                "threshold_then_minimum_flow_fallback"
-                if args.fallback_to_minimum_flow_candidate
-                else "threshold_only"
+                "fixed_candidate_ignore_flow_threshold"
+                if args.ignore_remaining_flow_threshold
+                else (
+                    "threshold_then_minimum_flow_fallback"
+                    if args.fallback_to_minimum_flow_candidate
+                    else "threshold_only"
+                )
             ),
             "candidate_selection": candidate_selection,
             "candidate_meets_remaining_flow_threshold": (
-                candidate_selection == "within_threshold"
+                None
+                if candidate_selection == "not_applicable"
+                else candidate_selection == "within_threshold"
             ),
             "remaining_flow_threshold": args.remaining_flow_threshold,
-            "candidate_remaining_support_fraction": candidate[
+            "candidate_remaining_support_fraction": candidate.get(
                 "remaining_support_fraction"
-            ],
+            ),
             "replacement_contract": (
                 "strict_contextual_pos_morphology"
                 if args.strict_replacements
@@ -414,9 +443,29 @@ def evaluation_candidate(
     remaining_flow_threshold: float,
     *,
     fallback_to_minimum_flow: bool,
+    ignore_remaining_flow_threshold: bool = False,
 ) -> tuple[dict | None, str]:
     """Select the threshold candidate, optionally falling back by residual flow."""
 
+    if ignore_remaining_flow_threshold:
+        nonempty = [
+            candidate
+            for candidate in candidates
+            if int(candidate.get("n_selected", 0)) > 0
+        ]
+        candidate = min(
+            nonempty,
+            key=lambda row: (
+                int(row["n_selected"]),
+                row["selected_ids"],
+            ),
+            default=None,
+        )
+        return (
+            (candidate, "not_applicable")
+            if candidate is not None
+            else (None, "none")
+        )
     candidate = threshold_candidate(candidates, remaining_flow_threshold)
     if candidate is not None:
         return candidate, "within_threshold"
@@ -512,7 +561,11 @@ def summarize(rows: list[dict]) -> dict:
         ),
     }
     summary["candidate_threshold_strata"] = {}
-    for stratum in ("within_threshold", "above_threshold_fallback"):
+    for stratum in (
+        "within_threshold",
+        "above_threshold_fallback",
+        "not_applicable",
+    ):
         stratum_results = [
             row["methods"][method]
             for row in rows

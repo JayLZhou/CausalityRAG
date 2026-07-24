@@ -68,6 +68,23 @@ def test_evaluation_candidate_can_use_minimum_flow_fallback():
     assert selection == "above_threshold_fallback"
 
 
+def test_evaluation_candidate_can_ignore_flow_for_external_baseline():
+    candidate = {
+        "n_selected": 5,
+        "selected_ids": ["a", "b", "c", "d", "e"],
+    }
+
+    selected, selection = evaluation_candidate(
+        [candidate],
+        0.2,
+        fallback_to_minimum_flow=False,
+        ignore_remaining_flow_threshold=True,
+    )
+
+    assert selected is candidate
+    assert selection == "not_applicable"
+
+
 def test_summary_counts_no_candidate_as_failure_in_overall_rate():
     rows = [
         {
