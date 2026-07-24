@@ -141,6 +141,7 @@ def main() -> None:
                 "clean_correct_exact": clean_correct_exact,
                 "clean_correct_lenient": clean_correct_lenient,
                 "clean_correct_stored": clean_correct_stored,
+                "include_clean_incorrect": args.include_clean_incorrect,
                 "remaining_flow_threshold": args.remaining_flow_threshold,
                 "candidate_remaining_support_fraction": None,
                 "replacement_contract": (
@@ -254,6 +255,7 @@ def main() -> None:
             "clean_correct_exact": clean_correct_exact,
             "clean_correct_lenient": clean_correct_lenient,
             "clean_correct_stored": clean_correct_stored,
+            "include_clean_incorrect": args.include_clean_incorrect,
             "remaining_flow_threshold": args.remaining_flow_threshold,
             "candidate_remaining_support_fraction": candidate[
                 "remaining_support_fraction"
@@ -377,6 +379,19 @@ def threshold_candidate(
 def summarize(rows: list[dict]) -> dict:
     summary = {
         "queries": len(rows),
+        "query_scope": (
+            "all_queries"
+            if rows and rows[0].get("include_clean_incorrect")
+            else "clean_correct_only"
+        ),
+        "clean_correct_queries": sum(
+            bool(row.get("clean_correct"))
+            for row in rows
+        ),
+        "clean_incorrect_queries": sum(
+            not bool(row.get("clean_correct"))
+            for row in rows
+        ),
         "remaining_flow_threshold": (
             rows[0]["remaining_flow_threshold"] if rows else None
         ),

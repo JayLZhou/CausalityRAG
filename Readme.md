@@ -553,10 +553,13 @@ path while preserving all numbered closure iterations.
 
 ### 6. Evaluate saved selections with vLLM
 
-Run only the native graph-threshold evaluation. With `BETA=0.1` and `ETA=1`,
-the solver accepts candidates up to the relaxed residual-flow fraction
-`(1 + ETA) * BETA = 0.20`. Restart the same vLLM endpoint used in stage 2
-before running:
+Run the native graph-threshold evaluation under two reporting scopes. With
+`BETA=0.1` and `ETA=1`, the solver accepts candidates up to the relaxed
+residual-flow fraction `(1 + ETA) * BETA = 0.20`. Restart the same vLLM
+endpoint used in stage 2 before running.
+
+First report the formal attack metric over queries whose saved clean answer is
+an exact match to gold:
 
 ```bash
 python scripts/evaluate_reader.py \
@@ -567,10 +570,32 @@ python scripts/evaluate_reader.py \
   --context-units "$CONTEXT_UNITS" \
   --cf-pools "$CF_POOLS" \
   --type-rules "$TYPE_RULES" \
-  --out "$EVALUATION_DIR/native.jsonl" \
-  --summary-out "$EVALUATION_DIR/native.summary.json" \
+  --out "$EVALUATION_DIR/clean_exact.jsonl" \
+  --summary-out "$EVALUATION_DIR/clean_exact.summary.json" \
   --remaining-flow-threshold "$RELAXED_FLOW_THRESHOLD" \
   --clean-correct-policy exact \
+  --reader-workers 16 \
+  --strict-replacements \
+  --k "$K"
+```
+
+Then report answer-change behavior over every input query, including queries
+whose clean answer is not exact:
+
+```bash
+python scripts/evaluate_reader.py \
+  --input "$DATA" \
+  --gate "$FLOW" \
+  --clean-reference "$CLEAN_TARGETS" \
+  --replacement-registry "$REGISTRY" \
+  --context-units "$CONTEXT_UNITS" \
+  --cf-pools "$CF_POOLS" \
+  --type-rules "$TYPE_RULES" \
+  --out "$EVALUATION_DIR/all_queries.jsonl" \
+  --summary-out "$EVALUATION_DIR/all_queries.summary.json" \
+  --remaining-flow-threshold "$RELAXED_FLOW_THRESHOLD" \
+  --clean-correct-policy exact \
+  --include-clean-incorrect \
   --reader-workers 16 \
   --strict-replacements \
   --k "$K"
@@ -580,7 +605,11 @@ All independent edited-context requests are submitted concurrently to vLLM.
 The stored stage-2 clean answer remains the baseline, so clean inference is not
 repeated here.
 
-The only evaluated selection is the contribution-flow candidate.
+The only evaluated selection is the contribution-flow candidate. In each
+summary, `flip_rate` is conditional on a valid flow candidate and
+`overall_flip_rate` uses every query in that reporting scope as its
+denominator. The all-query value is an answer-change rate, not a formal attack
+success rate, because it includes clean-incorrect queries.
 
 ### 7. Freeze an artifact manifest
 
@@ -593,7 +622,8 @@ python scripts/build_artifact_manifest.py \
     "$GRAPH" \
     "$FLOW" \
     "$REGISTRY" \
-    "$EVALUATION_DIR/native.jsonl" \
+    "$EVALUATION_DIR/clean_exact.jsonl" \
+    "$EVALUATION_DIR/all_queries.jsonl" \
   --metadata-json "{\"dataset\":\"$DATASET\",\"run_id\":\"$RUN_ID\",\"n\":$N,\"k\":$K}" \
   --out "$RUN_DIR/manifest.json"
 ```
@@ -629,8 +659,10 @@ runs/<dataset>/<run-id>/
     ... additional closure iterations ...
     final.jsonl
   06_evaluation/
-    native.jsonl
-    native.summary.json
+    clean_exact.jsonl
+    clean_exact.summary.json
+    all_queries.jsonl
+    all_queries.summary.json
   manifest.json
 ```
 

@@ -47,6 +47,7 @@ def test_summary_counts_no_candidate_as_failure_in_overall_rate():
     rows = [
         {
             "remaining_flow_threshold": 0.25,
+            "clean_correct": True,
             "methods": {
                 "residual_flow": {
                     "status": "ok",
@@ -58,6 +59,7 @@ def test_summary_counts_no_candidate_as_failure_in_overall_rate():
         },
         {
             "remaining_flow_threshold": 0.25,
+            "clean_correct": True,
             "methods": {
                 "residual_flow": {
                     "status": "no_candidate_under_selection_rule",
@@ -73,6 +75,9 @@ def test_summary_counts_no_candidate_as_failure_in_overall_rate():
     assert result["residual_flow"]["flip_rate"] == 1.0
     assert result["residual_flow"]["overall_flip_rate"] == 0.5
     assert result["residual_flow"]["candidate_coverage"] == 0.5
+    assert result["query_scope"] == "clean_correct_only"
+    assert result["clean_correct_queries"] == 2
+    assert result["clean_incorrect_queries"] == 0
 
 
 def test_reader_requests_preserve_input_order_under_concurrency():

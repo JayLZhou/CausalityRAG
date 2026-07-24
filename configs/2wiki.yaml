@@ -60,13 +60,14 @@ evaluation:
 
 artifacts:
   root: /data1/yujia/CausalityRAG/runs
-  run_id: all1000-final-v2
-  directory: /data1/yujia/CausalityRAG/runs/2wiki/all1000-final-v2
+  run_id: all1000-final-v3
+  directory: /data1/yujia/CausalityRAG/runs/2wiki/all1000-final-v3
   context_units: 01_context/context_units.jsonl
   clean_targets: 02_reader/clean_targets.jsonl
   contribution_graph: 03_graph/contribution_graph.jsonl
   contribution_flow_initial: 04_flow/initial.jsonl
   contribution_flow_final: 04_flow/final.jsonl
   replacement_registry: 05_registry/final.jsonl
-  evaluation: 06_evaluation/native.jsonl
+  evaluation_clean_exact: 06_evaluation/clean_exact.jsonl
+  evaluation_all_queries: 06_evaluation/all_queries.jsonl
   manifest: manifest.json
