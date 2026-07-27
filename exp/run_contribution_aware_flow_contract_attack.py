@@ -6,7 +6,6 @@ import argparse
 import json
 import math
 import os
-import statistics
 import sys
 import time
 
@@ -17,6 +16,10 @@ from causalityrag.io import record_id, retrieved_contexts
 from causalityrag.linguistics import SpacyAnnotationClient
 from causalityrag.max_flow import Dinic
 from causalityrag.reader import ReaderClient, answers_match
+from causalityrag.reflow_results import (
+    canonicalize_reflow_row,
+    summarize_reflow_rows,
+)
 from causalityrag.replacement import (
     GenericReplacementClient,
     build_executable_replacements_batched,
@@ -796,7 +799,7 @@ def main() -> None:
                         verified = attempt
                     if not args.evaluate_all_frontier:
                         break
-            row = {
+            row = canonicalize_reflow_row({
                 "index": index,
                 "id": identifier,
                 "method": "contribution_aware_flow_contract_frontier",
@@ -814,17 +817,12 @@ def main() -> None:
                 "initial_support_flow": initial_support_flow,
                 "frontier_candidates": frontier_candidates,
                 "attempts": attempts,
-                "verified_flip": verified is not None,
-                "selected_ids": verified["selected_ids"] if verified else [],
-                "selected_tokens": verified["selected_tokens"] if verified else [],
-                "n_selected": len(verified["selected_ids"]) if verified else 0,
-                "edited_answer": verified["edited_answer"] if verified else clean_answer,
                 "reader_calls": sum(
                     bool(attempt.get("reader_called")) for attempt in attempts
                 ),
                 "editor_llm_calls": editor.calls - editor_calls_before,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
-            }
+            })
             rows.append(row)
             output.write(json.dumps(row, ensure_ascii=False) + "\n")
             output.flush()
@@ -836,31 +834,13 @@ def main() -> None:
                 flush=True,
             )
 
-    flips = [row for row in rows if row["verified_flip"]]
-    terminal_sizes = []
-    cumulative_sizes = []
-    for row in rows:
-        sizes = [len(item.get("selected_ids", [])) for item in row["attempts"]]
-        cumulative_sizes.append(sum(sizes))
-        terminal_sizes.append(row["n_selected"] if row["verified_flip"] else (max(sizes) if sizes else 0))
     summary = {
-        "queries": len(rows),
-        "flips": len(flips),
-        "overall_flip_rate": len(flips) / max(1, len(rows)),
-        "success_mean_tokens": (
-            statistics.fmean(row["n_selected"] for row in flips) if flips else 0.0
-        ),
-        "terminal_mean_tokens": (
-            statistics.fmean(terminal_sizes) if terminal_sizes else 0.0
-        ),
-        "cumulative_attempted_tokens_mean": (
-            statistics.fmean(cumulative_sizes) if cumulative_sizes else 0.0
-        ),
+        **summarize_reflow_rows(rows),
         "mean_reader_calls": (
-            statistics.fmean(row["reader_calls"] for row in rows) if rows else 0.0
+            sum(row["reader_calls"] for row in rows) / len(rows) if rows else 0.0
         ),
         "mean_frontier": (
-            statistics.fmean(row["n_frontier"] for row in rows) if rows else 0.0
+            sum(row["n_frontier"] for row in rows) / len(rows) if rows else 0.0
         ),
         "edge_capacity_mode": args.edge_capacity_mode,
         "graph_type": "answer_conditioned_token_contribution_graph",

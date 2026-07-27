@@ -11,14 +11,26 @@ after selection, validated with spaCy, and persisted in a shared pool.
 | Metric | Value |
 |---|---:|
 | Queries | 1,000 |
+| Reader-evaluated queries | 999 |
 | Verified flips | 906 |
+| Verified no-flip interventions | 93 |
+| Unsupported queries | 1 |
 | Overall flip rate | 90.6% |
+| Flip rate among reader-evaluated queries | 90.69% |
 | Mean modified tokens on successful queries | 2.21 |
-| Mean terminal token count over all queries | 3.46 |
+| Mean modified tokens over all queries, including failures | 3.46 |
+| Mean modified tokens over reader-evaluated queries | 3.46 |
+| Mean modified tokens on verified no-flip queries | 15.69 |
 | Mean reader calls | 4.26 |
 | Total reader calls | 4,264 |
 | Mean supported frontier size | 30.51 |
 | Queries without a graph frontier | 1 |
+
+A query is counted as a verified failure only when ReFlow applies a nonempty
+counterfactual token intervention, invokes the reader on the revised context,
+and the answer remains unchanged. A candidate without an executable
+counterfactual replacement is not counted as a failure. The single unsupported
+query above has no graph frontier and therefore receives no reader evaluation.
 
 ## Server artifacts
 

@@ -6,6 +6,14 @@ import argparse
 import json
 import os
 import statistics
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from causalityrag.reflow_results import (
+    canonicalize_reflow_row,
+    summarize_reflow_rows,
+)
 
 
 def main() -> None:
@@ -20,6 +28,7 @@ def main() -> None:
     for path in args.inputs:
         with open(path, encoding="utf-8") as source:
             rows.extend(json.loads(line) for line in source if line.strip())
+    rows = [canonicalize_reflow_row(row) for row in rows]
     rows.sort(key=lambda row: int(row["index"]))
     indices = [int(row["index"]) for row in rows]
     if len(indices) != len(set(indices)):
@@ -41,38 +50,11 @@ def main() -> None:
         os.fsync(output.fileno())
     os.replace(temporary, args.out)
 
-    flips = [row for row in rows if row.get("verified_flip")]
-    terminal_sizes = []
-    cumulative_sizes = []
-    for row in rows:
-        sizes = [
-            len(attempt.get("selected_ids", []))
-            for attempt in row.get("attempts", [])
-        ]
-        cumulative_sizes.append(sum(sizes))
-        terminal_sizes.append(
-            int(row.get("n_selected", 0))
-            if row.get("verified_flip")
-            else (max(sizes) if sizes else 0)
-        )
     summary = {
-        "queries": len(rows),
+        **summarize_reflow_rows(rows),
         "query_index_min": min(indices) if indices else None,
         "query_index_max": max(indices) if indices else None,
         "unique_query_indices": len(set(indices)),
-        "flips": len(flips),
-        "overall_flip_rate": len(flips) / max(1, len(rows)),
-        "success_mean_tokens": (
-            statistics.fmean(int(row["n_selected"]) for row in flips)
-            if flips
-            else 0.0
-        ),
-        "terminal_mean_tokens": (
-            statistics.fmean(terminal_sizes) if terminal_sizes else 0.0
-        ),
-        "cumulative_attempted_tokens_mean": (
-            statistics.fmean(cumulative_sizes) if cumulative_sizes else 0.0
-        ),
         "mean_reader_calls": statistics.fmean(
             int(row.get("reader_calls", 0)) for row in rows
         ) if rows else 0.0,
