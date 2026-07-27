@@ -11,10 +11,15 @@ token-gated network with a fixed query source and answer target. A token gate
 is the only removable part of this network.
 
 For a contract price `t`, the inner solver computes the exact token-gated
-minimum cut. Breakpoint recursion enumerates the distinct supported cuts as
-`t` changes. Candidates are ordered by cardinality and directly verified by
-running the frozen reader after applying their fixed counterfactual token
-replacements.
+minimum cut. ReFlow analytically constructs the minimum-cardinality full-cut
+and empty-set endpoints. For two endpoint solutions, it evaluates the exact
+price at which their cardinality-flow objective lines intersect. The resulting
+min-cut either exposes a strict lower-hull vertex or certifies that the two
+solutions are adjacent. This output-sensitive recursion enumerates every
+extreme supported cardinality-flow point without a price grid, numerical price
+probe, or recursion-depth cutoff. Candidates are ordered by cardinality and
+directly verified by running the frozen reader after applying their fixed
+counterfactual token replacements.
 
 ```text
 retrieved chunks

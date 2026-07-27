@@ -1,5 +1,8 @@
 from causalityrag.graph_cut import project_cached_units_source_target_graph
-from exp.run_contribution_aware_flow_contract_attack import solve_price_cut
+from exp.run_contribution_aware_flow_contract_attack import (
+    breakpoint_price_cuts,
+    solve_price_cut,
+)
 
 
 def test_projection_preserves_source_interaction_and_target_contributions():
@@ -55,3 +58,19 @@ def test_fixed_price_flow_contract_returns_a_token_gated_cut():
     assert result["status"] == "optimal"
     assert result["selected_ids"]
     assert result["n_selected"] == len(result["selected_ids"])
+
+
+def test_breakpoint_frontier_recovers_every_extreme_cardinality():
+    units = [{"unit_id": "high"}, {"unit_id": "low"}]
+    result = breakpoint_price_cuts(
+        units,
+        {"high": 3.0, "low": 1.0},
+        {},
+        {"high": 3.0, "low": 1.0},
+        edge_capacity_mode="unit-plus-normalized",
+    )
+
+    assert result["status"] == "ok"
+    assert [candidate["n_selected"] for candidate in result["candidates"]] == [1, 2]
+    assert result["diagnostics"]["frontier_complete"]
+    assert result["diagnostics"]["supported_extreme_points_including_empty"] == 3

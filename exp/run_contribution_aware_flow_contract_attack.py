@@ -306,8 +306,20 @@ def breakpoint_price_cuts(
     *,
     edge_capacity_mode: str,
     tolerance: float = 1e-9,
-    max_depth: int = 256,
 ) -> dict:
+    """Enumerate every extreme supported cardinality-flow point.
+
+    The two analytic endpoints are the minimum-cardinality full token cut and
+    the empty intervention. For endpoint solutions A and B, their objective
+    lines intersect at exactly
+
+        (Phi(B) - Phi(A)) / (|A| - |B|).
+
+    An exact min-cut at this price either exposes a strict lower-hull vertex or
+    certifies that A and B are adjacent extreme points. Collinear interior
+    points are deliberately omitted because they are not frontier vertices.
+    """
+
     weights = [
         *[float(value) for value in source.values() if float(value) > 0],
         *[float(value) for value in target.values() if float(value) > 0],
@@ -315,18 +327,54 @@ def breakpoint_price_cuts(
     ]
     if not weights:
         return {"status": "no_positive_contribution", "candidates": [], "diagnostics": {}}
-    mean_weight = sum(weights) / len(weights)
-    capacities = [
-        contribution_capacity(weight, mean_weight, edge_capacity_mode)
-        for weight in weights
-    ]
-    high = max(sum(capacities), 1e-9)
+
+    initial_flow = remaining_contribution_flow(
+        units,
+        source,
+        interactions,
+        target,
+        removed_ids=frozenset(),
+        edge_capacity_mode=edge_capacity_mode,
+    )
+    if initial_flow <= tolerance:
+        return {"status": "no_source_target_path", "candidates": [], "diagnostics": {}}
+
+    full_cut = _minimum_token_full_cut(
+        units,
+        source,
+        interactions,
+        target,
+    )
+    if full_cut.get("status") != "optimal" or not full_cut.get("selected_ids"):
+        return {"status": full_cut.get("status", "no_full_token_cut"), "candidates": [], "diagnostics": {}}
+
+    left = {
+        **full_cut,
+        "lambda": 0.0,
+        "objective_value": 0.0,
+        "token_cost": 0.0,
+        "residual_edge_cost": 0.0,
+        "cut_value": 0.0,
+        "edge_capacity_mode": edge_capacity_mode,
+    }
+    right = {
+        "status": "optimal",
+        "selected_ids": [],
+        "n_selected": 0,
+        "lambda": math.inf,
+        "objective_value": initial_flow,
+        "token_cost": 0.0,
+        "residual_edge_cost": initial_flow,
+        "cut_value": initial_flow,
+        "edge_capacity_mode": edge_capacity_mode,
+    }
+
     cache: dict[float, dict] = {}
     demand_calls = 0
 
     def demand(price: float) -> dict:
         nonlocal demand_calls
-        key = round(float(price), 12)
+        key = float(price)
         if key not in cache:
             demand_calls += 1
             cache[key] = solve_price_cut(
@@ -339,99 +387,66 @@ def breakpoint_price_cuts(
             )
         return cache[key]
 
-    def selection(result: dict) -> tuple[str, ...]:
-        return tuple(result.get("selected_ids", []))
-
-    # At very high token price the supported set is normally empty.  Increase
-    # the endpoint until it is, because this endpoint anchors the contract
-    # frontier from the zero-edit side.
-    right_price = high
-    right = demand(right_price)
-    expansions = 0
-    while selection(right) and expansions < 64:
-        right_price *= 2.0
-        right = demand(right_price)
-        expansions += 1
-
-    left_price = max(high / 1e6, 1e-9)
-    left = demand(left_price)
-    left_endpoint_expansions = 0
-    while not selection(left) and left_price < right_price and left_endpoint_expansions < 64:
-        left_price *= 10.0
-        left = demand(left_price)
-        left_endpoint_expansions += 1
-    if not selection(left):
-        return {
-            "status": "no_nonempty_supported_set",
-            "candidates": [],
-            "diagnostics": {
-                "frontier_mode": "breakpoint_recursion",
-                "lambda_min": left_price,
-                "lambda_max": right_price,
-                "endpoint_expansions": expansions,
-                "left_endpoint_expansions": left_endpoint_expansions,
-                "distinct_candidate_sets": 0,
-                "demand_calls": demand_calls,
-                "edge_capacity_mode": edge_capacity_mode,
-            },
-        }
-    by_selection: dict[tuple[str, ...], dict] = {}
-    seen_intervals: set[tuple[tuple[str, ...], tuple[str, ...]]] = set()
-
-    def cost(result: dict) -> float:
-        return float(result.get("n_selected", len(result.get("selected_ids", []))))
+    def cardinality(result: dict) -> int:
+        return int(result.get("n_selected", len(result.get("selected_ids", []))))
 
     def residual(result: dict) -> float:
-        return float(result.get("residual_edge_cost", 0.0))
+        return float(result["residual_edge_cost"])
 
-    def add(result: dict, price: float) -> None:
-        chosen = selection(result)
-        if not chosen:
-            return
-        previous = by_selection.get(chosen)
-        if previous is None:
-            by_selection[chosen] = {
-                **result,
-                "lambda_min": price,
-                "lambda_max": price,
-            }
-        else:
-            previous["lambda_min"] = min(previous["lambda_min"], price)
-            previous["lambda_max"] = max(previous["lambda_max"], price)
+    def point_key(result: dict) -> tuple[int, float]:
+        return cardinality(result), residual(result)
 
-    add(left, left_price)
-
-    def recurse(low_result: dict, high_result: dict, depth: int) -> None:
-        if depth > max_depth:
-            return
-        low_set = selection(low_result)
-        high_set = selection(high_result)
-        if low_set == high_set:
-            return
-        interval_key = (low_set, high_set)
-        if interval_key in seen_intervals:
-            return
-        seen_intervals.add(interval_key)
-        cost_gap = cost(low_result) - cost(high_result)
+    hull: dict[tuple[int, float], dict] = {
+        point_key(left): left,
+        point_key(right): right,
+    }
+    pending = [(left, right)]
+    certified_intervals = 0
+    while pending:
+        low_result, high_result = pending.pop()
+        cost_gap = cardinality(low_result) - cardinality(high_result)
         residual_gap = residual(high_result) - residual(low_result)
-        if residual_gap <= tolerance or cost_gap <= tolerance:
-            add(high_result, float(high_result.get("lambda", 0.0)))
-            return
+        if cost_gap <= 0 or residual_gap <= tolerance:
+            certified_intervals += 1
+            continue
         boundary = residual_gap / cost_gap
-        if boundary <= tolerance or not math.isfinite(boundary):
-            return
-        probe = boundary * (1.0 + 1e-8) + 1e-12
-        middle = demand(probe)
-        mid_set = selection(middle)
-        if mid_set == low_set or mid_set == high_set:
-            add(high_result, boundary)
-            return
-        add(middle, probe)
-        recurse(low_result, middle, depth + 1)
-        recurse(middle, high_result, depth + 1)
+        if boundary <= 0.0 or not math.isfinite(boundary):
+            certified_intervals += 1
+            continue
+        middle = demand(boundary)
+        middle_cost = cardinality(middle)
+        middle_residual = residual(middle)
+        middle_value = middle_residual + boundary * middle_cost
+        endpoint_value = residual(low_result) + boundary * cardinality(low_result)
+        strictly_below_chord = middle_value < endpoint_value - tolerance
+        strictly_between = (
+            cardinality(high_result) < middle_cost < cardinality(low_result)
+            and residual(low_result) < middle_residual < residual(high_result)
+        )
+        if strictly_below_chord and strictly_between:
+            key = point_key(middle)
+            hull[key] = middle
+            pending.append((low_result, middle))
+            pending.append((middle, high_result))
+        else:
+            certified_intervals += 1
 
-    recurse(left, right, 0)
-    candidates = list(by_selection.values())
+    frontier = sorted(
+        hull.values(),
+        key=lambda row: (-cardinality(row), residual(row), tuple(row.get("selected_ids", []))),
+    )
+    breakpoints = []
+    for current, following in zip(frontier, frontier[1:]):
+        breakpoints.append(
+            (residual(following) - residual(current))
+            / (cardinality(current) - cardinality(following))
+        )
+    for index, item in enumerate(frontier):
+        item["lambda_min"] = 0.0 if index == 0 else breakpoints[index - 1]
+        item["lambda_max"] = math.inf if index == len(frontier) - 1 else breakpoints[index]
+        item["frontier_extreme"] = True
+
+    candidates = [item for item in frontier if item.get("selected_ids")]
     candidates.sort(
         key=lambda row: (
             int(row["n_selected"]),
@@ -443,15 +458,65 @@ def breakpoint_price_cuts(
         "status": "ok",
         "candidates": candidates,
         "diagnostics": {
-            "frontier_mode": "breakpoint_recursion",
-            "lambda_min": left_price,
-            "lambda_max": right_price,
-            "endpoint_expansions": expansions,
-            "left_endpoint_expansions": left_endpoint_expansions,
+            "frontier_mode": "exact_breakpoint_hull",
+            "frontier_complete": True,
+            "analytic_endpoints": True,
+            "lambda_min": 0.0,
+            "lambda_max": None,
+            "supported_extreme_points_including_empty": len(frontier),
             "distinct_candidate_sets": len(candidates),
             "demand_calls": demand_calls,
+            "total_maxflow_calls": demand_calls + 2,
+            "certified_adjacent_intervals": certified_intervals,
             "edge_capacity_mode": edge_capacity_mode,
         },
+    }
+
+
+def _minimum_token_full_cut(
+    units: list[dict],
+    source_edges: dict[str, float],
+    interactions: dict[tuple[str, str], float],
+    target_edges: dict[str, float],
+) -> dict:
+    """Return a minimum-cardinality token set that removes all support flow."""
+
+    unit_ids = {str(unit["unit_id"]) for unit in units}
+    valid_source = {str(unit_id) for unit_id, weight in source_edges.items() if str(unit_id) in unit_ids and float(weight) > 0.0}
+    valid_target = {str(unit_id) for unit_id, weight in target_edges.items() if str(unit_id) in unit_ids and float(weight) > 0.0}
+    valid_interactions = {
+        (str(left), str(right))
+        for (left, right), weight in interactions.items()
+        if str(left) in unit_ids and str(right) in unit_ids and str(left) != str(right) and float(weight) > 0.0
+    }
+    if not valid_source or not valid_target:
+        return {"status": "no_source_target_support", "selected_ids": [], "n_selected": 0}
+
+    uncuttable = float(len(unit_ids) + 1)
+    dinic = Dinic()
+    source = dinic.node()
+    target = dinic.node()
+    split = {unit_id: (dinic.node(), dinic.node()) for unit_id in sorted(unit_ids)}
+    for node_in, node_out in split.values():
+        dinic.add_edge(node_in, node_out, 1.0)
+    for unit_id in valid_source:
+        dinic.add_edge(source, split[unit_id][0], uncuttable)
+    for left, right in valid_interactions:
+        dinic.add_edge(split[left][1], split[right][0], uncuttable)
+    for unit_id in valid_target:
+        dinic.add_edge(split[unit_id][1], target, uncuttable)
+    cut_value = dinic.max_flow(source, target)
+    reachable = dinic.reachable(source)
+    selected_ids = sorted(
+        unit_id
+        for unit_id, (node_in, node_out) in split.items()
+        if node_in in reachable and node_out not in reachable
+    )
+    return {
+        "status": "optimal" if selected_ids else "no_full_token_cut",
+        "selected_ids": selected_ids,
+        "n_selected": len(selected_ids),
+        "minimum_full_cut_size": int(round(cut_value)),
     }
 
 
