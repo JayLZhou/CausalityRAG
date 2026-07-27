@@ -196,7 +196,7 @@ def _contract_token_labels(
         retained_kinds[edge_kind] += 1
 
     if not source_edges or not target_edges:
-        shortcut = _context_support_shortcut(graph_row, position_to_unit)
+        shortcut = _context_support_shortcut(message_flow, position_to_unit)
         for unit_id, weight in shortcut.items():
             if not source_edges:
                 source_edges[unit_id] += weight

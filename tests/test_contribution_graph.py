@@ -1,5 +1,6 @@
 from causalityrag.contribution_graph import (
     ContributionGraphBuilder,
+    _contract_token_labels,
     contribution_graph_edges,
 )
 
@@ -115,3 +116,36 @@ def test_builds_contribution_graph_from_closed_message_flow() -> None:
         "contracted_internal": 1,
     }
     assert diagnostics["raw_edge_mass"]["contracted_internal"] == 0.8
+
+
+def test_support_shortcut_handles_a_flow_without_direct_source_or_target_edges() -> None:
+    message_flow = {
+        "context_token_supports": [{
+            "position": 10,
+            "chunk_id": "c1",
+            "chunk_char_start": 0,
+            "chunk_char_end": 5,
+            "support": 0.7,
+        }],
+        "graph": {
+            "token_partitions": {"query": []},
+            "target_positions": [],
+            "edges": [],
+        },
+    }
+    units = [{
+        "unit_id": "token:c1:0:5",
+        "chunk_id": "c1",
+        "chunk_char_start": 0,
+        "chunk_char_end": 5,
+    }]
+
+    source, interactions, target, diagnostics = _contract_token_labels(
+        message_flow,
+        units,
+    )
+
+    assert source == {"token:c1:0:5": 0.7}
+    assert interactions == {}
+    assert target == {"token:c1:0:5": 0.7}
+    assert diagnostics["path_shortcut_fallback"]
