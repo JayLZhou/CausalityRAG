@@ -30,6 +30,32 @@ from causalityrag.rules import TypedRuleLibrary
 from causalityrag.token_units import units_from_cache_row
 
 
+_SEMANTIC_POS = {"NOUN", "PROPN", "VERB", "ADJ", "ADV", "NUM"}
+_NON_SEMANTIC_TYPES = {"", "PUNCT", "STOPWORD"}
+
+
+def is_ignorable_nonsemantic_skip(item: dict) -> bool:
+    """Treat function words as unchanged context, not failed replacements."""
+
+    failure = item.get("replacement_failure", {})
+    validation = failure.get("validation", {})
+    reason = str(validation.get("reason", ""))
+    if reason not in {
+        "no_semantic_counterfactual",
+        "no_supported_semantic_type",
+    }:
+        return False
+    unit_type = str(item.get("type", "")).upper()
+    pos = str(item.get("pos", "")).upper()
+    token = str(item.get("text", "")).strip()
+    return (
+        not token
+        or not any(character.isalnum() for character in token)
+        or unit_type in _NON_SEMANTIC_TYPES
+        or pos not in _SEMANTIC_POS
+    )
+
+
 def take_jsonl(path: str, start: int, count: int) -> list[dict]:
     rows: list[dict] = []
     with open(path, encoding="utf-8") as source:
@@ -748,7 +774,12 @@ def main() -> None:
                         replacement_cache,
                         source="reflow",
                     )
-                if skipped:
+                hard_skips = [
+                    item
+                    for item in skipped
+                    if not is_ignorable_nonsemantic_skip(item)
+                ]
+                if hard_skips:
                     attempts.append({
                         **candidate,
                         "proposed_ids": proposed_ids,
@@ -760,7 +791,7 @@ def main() -> None:
                         "edited_answer": clean_answer,
                         "answer_changed": False,
                         "n_edits": 0,
-                        "replacement_skips": skipped,
+                        "replacement_skips": hard_skips,
                         "reader_called": False,
                         "candidate_status": "rejected_incomplete_replacement",
                     })
@@ -783,8 +814,14 @@ def main() -> None:
                         "n_edits": 0,
                         "replacement_skips": skipped,
                         "reader_called": False,
+                        "candidate_status": "no_semantic_tokens",
                     })
                     continue
+                candidate_status = (
+                    "accepted_after_ignoring_nonsemantic_tokens"
+                    if skipped
+                    else "accepted_complete_replacement"
+                )
                 revision = apply_token_replacements(
                     record,
                     selected,
@@ -809,6 +846,7 @@ def main() -> None:
                     "n_edits": revision["n_edits"],
                     "replacement_skips": skipped,
                     "reader_called": True,
+                    "candidate_status": candidate_status,
                 }
                 attempts.append(attempt)
                 if changed:

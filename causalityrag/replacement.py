@@ -639,17 +639,16 @@ def build_executable_replacements_batched(
             if trust_cached_generic or policy not in _UNTRUSTED_GENERIC_POLICIES:
                 replacements[unit_id] = cached
                 continue
-        if (
-            cached
-            and not cached.get("ok")
-            and str(cached.get("policy", "")) == "skip_after_selection"
-        ):
-            skipped.append({**unit, "replacement_failure": cached})
-            continue
-
         token = str(unit.get("text", "")).strip()
         unit_type = str(unit.get("type", "")).upper()
         pos = str(unit.get("pos", "")).upper()
+        if cached and not cached.get("ok"):
+            cached_validation = cached.get("validation", {})
+            rejected_values[unit_id] = [
+                str(value)
+                for value in cached_validation.get("rejected", [])
+                if value
+            ]
         inferred_type = library.infer_type(token, unit_type, context)
         if (
             not token

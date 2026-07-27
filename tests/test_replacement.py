@@ -170,3 +170,62 @@ def test_on_demand_replacement_is_validated_cached_and_reused():
     assert skipped == []
     assert replacements["c0:0:5"]["new"] == "London"
     assert editor.calls == 1
+
+
+def test_cached_invalid_replacement_is_regenerated_with_new_forbidden_value():
+    class EmptyLibrary:
+        def infer_type(self, token, unit_type, context):
+            return "CITY"
+
+        def replacement_for_unit(self, unit, context):
+            return {"ok": False}
+
+    class Editor:
+        def __init__(self):
+            self.calls = 0
+
+        def replace_many(self, targets):
+            self.calls += 1
+            new = "invalid" if self.calls <= 2 else "London"
+            return {
+                target["unit_id"]: {
+                    "ok": True,
+                    "old": target["token"],
+                    "new": new,
+                    "policy": "generic_llm_contextual_batched",
+                }
+                for target in targets
+            }
+
+    class Validator:
+        def validate_many(self, items):
+            return [
+                {"valid": item["replacement"]["new"] == "London"}
+                for item in items
+            ]
+
+    selected = [{
+        "unit_id": "c0:0:5",
+        "chunk_id": "c0",
+        "text": "Paris",
+        "type": "CONTENT",
+        "pos": "PROPN",
+        "tag": "NNP",
+    }]
+    contexts = [{"chunk_id": "c0", "text": "Paris is in France."}]
+    cache = {}
+    editor = Editor()
+
+    replacements, skipped = build_executable_replacements_batched(
+        selected, contexts, EmptyLibrary(), editor, Validator(), cache
+    )
+    assert replacements == {}
+    assert len(skipped) == 1
+    assert editor.calls == 2
+
+    replacements, skipped = build_executable_replacements_batched(
+        selected, contexts, EmptyLibrary(), editor, Validator(), cache
+    )
+    assert skipped == []
+    assert replacements["c0:0:5"]["new"] == "London"
+    assert editor.calls == 3
