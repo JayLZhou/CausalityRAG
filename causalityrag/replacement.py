@@ -323,7 +323,7 @@ class GenericReplacementClient:
             # The model may return fewer candidates; reserve tokens for JSON only.
             # A large completion cap makes batched requests spend time on prose or
             # repeated candidates even though the parser keeps only a short list.
-            "max_tokens": max(256, min(2048, 32 * len(targets) * max_candidates)),
+            "max_tokens": max(256, min(4096, 32 * len(targets) * max_candidates)),
         }
         request = urllib.request.Request(
             self.base_url + "/chat/completions",
