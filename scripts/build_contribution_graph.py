@@ -41,10 +41,26 @@ def main() -> None:
     parser.add_argument("--target-results", nargs="+", default=[])
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", default="bfloat16")
-    parser.add_argument("--edge-topk", type=int, default=6)
+    parser.add_argument(
+        "--edge-topk",
+        type=int,
+        default=0,
+        help="Positive source edges kept per receiver; 0 keeps all positive edges.",
+    )
     parser.add_argument("--max-receivers-per-layer", type=int, default=48)
-    parser.add_argument("--max-edges", type=int, default=5000)
+    parser.add_argument(
+        "--max-edges",
+        type=int,
+        default=0,
+        help="Global direct-edge cap; 0 disables the cap.",
+    )
     parser.add_argument("--top-tokens", type=int, default=50)
+    parser.add_argument(
+        "--target-objective",
+        choices=["mean-answer-logit"],
+        default="mean-answer-logit",
+        help="Backward target for edge attribution.",
+    )
     parser.add_argument("--closed-flow", action="store_true")
     parser.add_argument("--absorbing-flow", action="store_true")
     args = parser.parse_args()
@@ -89,26 +105,30 @@ def main() -> None:
         max_edges=args.max_edges,
         closed_flow=args.closed_flow,
         absorbing_flow=args.absorbing_flow,
+        target_objective=args.target_objective,
     )
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     rows = []
     with open(args.out, "w", encoding="utf-8") as output:
         for index, (record, target) in enumerate(zip(records, targets), 1):
             started = time.monotonic()
-            if target.strip():
-                row = builder.build(
-                    record,
-                    target,
-                    k=args.k,
-                    top_tokens=args.top_tokens,
-                )
+            if target.strip() and any(character.isalnum() for character in target):
+                try:
+                    row = builder.build(
+                        record,
+                        target,
+                        k=args.k,
+                        top_tokens=args.top_tokens,
+                    )
+                except RuntimeError:
+                    raise
             else:
-                row = builder._empty(
-                    record,
-                    target,
-                    "reader_abstention_empty_answer",
-                    0,
+                status = (
+                    "reader_abstention_empty_answer"
+                    if not target.strip()
+                    else "reader_abstention_nonsemantic_answer"
                 )
+                row = builder._empty(record, target, status, 0)
             row["clean_answer"] = target
             row["target_source"] = (
                 "frozen_vllm_results" if args.target == "results" else "gold_diagnostic"
@@ -132,7 +152,7 @@ def main() -> None:
     excluded = [
         row
         for row in rows
-        if row["status"] == "reader_abstention_empty_answer"
+        if str(row["status"]).startswith("reader_abstention_")
     ]
     failed = len(rows) - len(ok) - len(excluded)
     status_histogram = dict(sorted(Counter(str(row["status"]) for row in rows).items()))
@@ -146,6 +166,7 @@ def main() -> None:
             sum(row["elapsed_seconds"] for row in ok) / max(1, len(ok)), 3
         ),
         "method": builder.method,
+        "target_objective": args.target_objective,
         "target_source": (
             "frozen_vllm_results" if args.target == "results" else "gold_diagnostic"
         ),

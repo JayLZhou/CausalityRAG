@@ -24,6 +24,15 @@ class RawContributionNetwork:
     diagnostics: dict
 
 
+def _has_signed_local_contribution_semantics(semantics: str) -> bool:
+    """Recognize raw attribution graphs for either supported answer objective."""
+
+    return (
+        "signed local target-logit contribution" in semantics
+        or "signed local objective contribution" in semantics
+    )
+
+
 def build_raw_contribution_network(
     graph_row: dict,
     units: list[dict],
@@ -46,7 +55,7 @@ def build_raw_contribution_network(
     graph = graph_row.get("graph", {})
     semantics = str(graph.get("edge_weight_semantics", ""))
     target_objective = str(graph.get("target_objective", ""))
-    if "signed local target-logit contribution" not in semantics:
+    if not _has_signed_local_contribution_semantics(semantics):
         return _empty_network(
             "not_raw_direct_activation_graph",
             {
@@ -197,7 +206,7 @@ def build_projected_token_contribution_network(
     graph = graph_row.get("graph", {})
     semantics = str(graph.get("edge_weight_semantics", ""))
     target_objective = str(graph.get("target_objective", ""))
-    if "signed local target-logit contribution" not in semantics:
+    if not _has_signed_local_contribution_semantics(semantics):
         return _empty_network(
             "not_raw_direct_activation_graph",
             {
@@ -375,7 +384,7 @@ def build_layered_copy_contribution_network(
     graph = graph_row.get("graph", {})
     semantics = str(graph.get("edge_weight_semantics", ""))
     target_objective = str(graph.get("target_objective", ""))
-    if "signed local target-logit contribution" not in semantics:
+    if not _has_signed_local_contribution_semantics(semantics):
         return _empty_network(
             "not_raw_direct_activation_graph",
             {
@@ -1034,6 +1043,143 @@ def remaining_support_flow(
         },
     )
     return float(state["flow"])
+
+
+def solve_flow_reduction_density(
+    network: RawContributionNetwork,
+    *,
+    max_iterations: int = 100,
+    tolerance: float = 1e-10,
+) -> dict:
+    """Exactly maximize contribution-flow reduction per edited token.
+
+    Let ``Phi(S)`` be the remaining maximum flow after removing token gates
+    ``S`` and let ``F(S) = Phi(empty) - Phi(S)``. The objective is
+
+        max_{nonempty S} F(S) / |S|.
+
+    For a fixed density ``lambda``, maximizing ``F(S) - lambda * |S|`` is
+    equivalent to minimizing ``Phi(S) + lambda * |S|``. ``solve_mixed_cut``
+    solves the latter problem exactly, so Dinkelbach iterations recover the
+    exact ratio optimum over the finite family of token sets.
+    """
+
+    if max_iterations <= 0:
+        raise ValueError("max_iterations must be positive")
+    if tolerance < 0 or not isfinite(tolerance):
+        raise ValueError("tolerance must be finite and non-negative")
+    if network.status != "ok":
+        return {
+            "status": network.status,
+            "selected_ids": [],
+            "n_selected": 0,
+            "initial_flow": 0.0,
+            "remaining_support_flow": 0.0,
+            "flow_reduction": 0.0,
+            "density": 0.0,
+            "iterations": 0,
+            "mincut_calls": 0,
+            "history": [],
+            "solver": "none",
+        }
+
+    initial_flow = remaining_support_flow(network, frozenset())
+    mixed_cut_calls = 0
+    flow_evaluation_calls = 1
+    if initial_flow <= tolerance:
+        return {
+            "status": "no_positive_initial_flow",
+            "selected_ids": [],
+            "n_selected": 0,
+            "initial_flow": initial_flow,
+            "remaining_support_flow": initial_flow,
+            "flow_reduction": 0.0,
+            "density": 0.0,
+            "iterations": 0,
+            "mincut_calls": 0,
+            "history": [],
+            "solver": "dinkelbach_mixed_mincut",
+        }
+
+    density = 0.0
+    best: dict | None = None
+    history = []
+    for iteration in range(1, max_iterations + 1):
+        cut = solve_mixed_cut(network, density)
+        mixed_cut_calls += 1
+        selected_ids = [str(unit_id) for unit_id in cut["selected_ids"]]
+        if not selected_ids:
+            break
+        remaining_flow = remaining_support_flow(network, set(selected_ids))
+        flow_evaluation_calls += 1
+        flow_reduction = max(0.0, initial_flow - remaining_flow)
+        if flow_reduction <= tolerance:
+            break
+        next_density = flow_reduction / len(selected_ids)
+        residual = flow_reduction - density * len(selected_ids)
+        candidate = {
+            "selected_ids": selected_ids,
+            "n_selected": len(selected_ids),
+            "initial_flow": initial_flow,
+            "remaining_support_flow": remaining_flow,
+            "flow_reduction": flow_reduction,
+            "density": next_density,
+        }
+        if best is None or (
+            next_density,
+            -len(selected_ids),
+            tuple(selected_ids),
+        ) > (
+            best["density"],
+            -best["n_selected"],
+            tuple(best["selected_ids"]),
+        ):
+            best = candidate
+        history.append({
+            "iteration": iteration,
+            "lambda": density,
+            "selected_ids": selected_ids,
+            "n_selected": len(selected_ids),
+            "remaining_support_flow": remaining_flow,
+            "flow_reduction": flow_reduction,
+            "density": next_density,
+            "dinkelbach_residual": residual,
+            "mixed_cut_objective": float(cut["objective_value"]),
+        })
+        if residual <= tolerance * max(1.0, initial_flow):
+            break
+        density = next_density
+
+    if best is None:
+        return {
+            "status": "no_positive_flow_reduction",
+            "selected_ids": [],
+            "n_selected": 0,
+            "initial_flow": initial_flow,
+            "remaining_support_flow": initial_flow,
+            "flow_reduction": 0.0,
+            "density": 0.0,
+            "iterations": len(history),
+            "mixed_cut_calls": mixed_cut_calls,
+            "flow_evaluation_calls": flow_evaluation_calls,
+            "maxflow_calls": mixed_cut_calls + flow_evaluation_calls,
+            "history": history,
+            "solver": "dinkelbach_mixed_mincut",
+        }
+    return {
+        "status": "optimal",
+        **best,
+        "remaining_support_fraction": (
+            best["remaining_support_flow"] / initial_flow
+        ),
+        "flow_reduction_fraction": best["flow_reduction"] / initial_flow,
+        "iterations": len(history),
+        "mixed_cut_calls": mixed_cut_calls,
+        "flow_evaluation_calls": flow_evaluation_calls,
+        "maxflow_calls": mixed_cut_calls + flow_evaluation_calls,
+        "history": history,
+        "solver": "dinkelbach_mixed_mincut",
+    }
 
 
 def sweep_mixed_cuts(

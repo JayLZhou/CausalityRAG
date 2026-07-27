@@ -924,6 +924,24 @@ class ArcJsdModel:
         reference = self._log_probs_for_prompt_ids([prompt_ids], response_ids)[0].cpu()
         return CleanTrajectory(response_text, response_ids, reference)
 
+    def trajectory_for_response(
+        self,
+        question: str,
+        contexts: Sequence[dict],
+        response_text: str,
+    ) -> CleanTrajectory:
+        """Construct a teacher-forced trajectory for a frozen reader response."""
+
+        prompt_ids = self._prompt_ids(question, contexts)
+        response_ids = self.tokenizer(
+            response_text,
+            add_special_tokens=False,
+        )["input_ids"]
+        if not response_ids:
+            raise ValueError("response_text must produce at least one token")
+        reference = self._log_probs_for_prompt_ids([prompt_ids], response_ids)[0].cpu()
+        return CleanTrajectory(response_text, list(response_ids), reference)
+
     def generate_responses_batch(
         self,
         question: str,

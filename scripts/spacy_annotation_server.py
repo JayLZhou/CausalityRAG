@@ -7,12 +7,16 @@ import json
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import spacy
 
-from causalityrag.replacement import validate_contextual_replacement
+from causalityrag.replacement import (
+    validate_contextual_replacement,
+    validate_contextual_replacements_batch,
+)
 
 
 def main() -> None:
@@ -22,6 +26,7 @@ def main() -> None:
     parser.add_argument("--model", default=os.environ.get("YVETTE_SPACY_MODEL", "en_core_web_lg"))
     args = parser.parse_args()
     nlp = spacy.load(args.model)
+    nlp_lock = Lock()
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -34,15 +39,36 @@ def main() -> None:
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             if self.path == "/annotate":
-                self._json(annotate(nlp, str(payload.get("text", ""))))
+                with nlp_lock:
+                    result = annotate(nlp, str(payload.get("text", "")))
+                self._json(result)
                 return
             if self.path == "/validate":
-                self._json(validate_contextual_replacement(
-                    dict(payload.get("unit", {})),
-                    str(payload.get("context", "")),
-                    dict(payload.get("replacement", {})),
-                    nlp,
-                ))
+                with nlp_lock:
+                    result = validate_contextual_replacement(
+                        dict(payload.get("unit", {})),
+                        str(payload.get("context", "")),
+                        dict(payload.get("replacement", {})),
+                        nlp,
+                    )
+                self._json(result)
+                return
+            if self.path == "/validate_batch":
+                items = [
+                    {
+                        "unit": dict(item.get("unit", {})),
+                        "context": str(item.get("context", "")),
+                        "replacement": dict(item.get("replacement", {})),
+                    }
+                    for item in payload.get("items", [])
+                    if isinstance(item, dict)
+                ]
+                with nlp_lock:
+                    validations = validate_contextual_replacements_batch(
+                        items,
+                        nlp,
+                    )
+                self._json({"validations": validations})
                 return
             self.send_error(404)
 

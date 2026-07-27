@@ -15,6 +15,7 @@ from causalityrag.linguistics import SpacyAnnotationClient
 from causalityrag.replacement import (
     GenericReplacementClient,
     build_selected_replacements,
+    build_selected_replacements_batched,
 )
 from causalityrag.rules import TypedRuleLibrary
 from causalityrag.token_units import (
@@ -270,6 +271,7 @@ def build_registry_row(
         for unit_id in candidate_ids
         if unit_id in existing_invalid
     }
+    unresolved = []
     for unit_id in sorted(candidate_ids):
         if unit_id in cache or unit_id in invalid:
             continue
@@ -277,19 +279,23 @@ def build_registry_row(
         if unit is None:
             invalid[unit_id] = {"reason": "unit_not_found"}
             continue
-        replacements, rejected = build_selected_replacements(
-            [unit],
+        unresolved.append(unit)
+    if unresolved:
+        replacements, rejected = build_selected_replacements_batched(
+            unresolved,
             contexts,
             library,
             editor,
             nlp,
             cache,
-            allow_relaxed_fallback=False,
         )
-        if rejected:
-            invalid[unit_id] = rejected[0]["replacement_failure"]
-        elif unit_id not in replacements:
-            invalid[unit_id] = {"reason": "replacement_not_returned"}
+        cache.update(replacements)
+        invalid.update(
+            {
+                str(unit["unit_id"]): unit["replacement_failure"]
+                for unit in rejected
+            }
+        )
 
     valid = {
         unit_id: replacement

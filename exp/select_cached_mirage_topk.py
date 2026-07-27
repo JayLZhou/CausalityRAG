@@ -11,7 +11,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from causalityrag.io import iter_records, load_records, record_id
-from causalityrag.token_units import units_from_context_row
+try:
+    from causalityrag.token_units import units_from_context_row
+except ImportError:
+    from causalityrag.token_units import units_from_cache_row as units_from_context_row
 from exp.score_mirage_tokens import ranked_candidate
 
 

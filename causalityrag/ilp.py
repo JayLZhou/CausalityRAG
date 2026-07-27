@@ -128,6 +128,310 @@ def solve_budgeted_support(
     return _solve_budgeted_branch(items, budget)
 
 
+def solve_min_cost_path_hitting(
+    units: Iterable[Unit],
+    paths: Iterable[Iterable[str]],
+    *,
+    no_good_sets: Iterable[Iterable[str]] = (),
+) -> dict:
+    """Solve the minimum-cost token set hitting every supplied flow path."""
+
+    items = list(units)
+    unit_index = {unit.unit_id: index for index, unit in enumerate(items)}
+    clean_paths = []
+    seen_paths = set()
+    for path in paths:
+        normalized = tuple(sorted({unit_id for unit_id in path if unit_id in unit_index}))
+        if normalized and normalized not in seen_paths:
+            seen_paths.add(normalized)
+            clean_paths.append(normalized)
+    if not clean_paths:
+        return {
+            "status": "optimal",
+            "solver": "trivial",
+            "selected_ids": [],
+            "objective": 0.0,
+            "n_paths": 0,
+        }
+
+    try:
+        import numpy as np
+        from scipy.optimize import Bounds, LinearConstraint, milp
+        from scipy.sparse import csr_matrix
+    except Exception:
+        return {
+            "status": "solver_unavailable",
+            "solver": "scipy",
+            "selected_ids": [],
+            "objective": 0.0,
+            "n_paths": len(clean_paths),
+        }
+
+    row_indices = []
+    column_indices = []
+    values = []
+    lower_bounds = []
+    upper_bounds = []
+    row = 0
+    for path in clean_paths:
+        for unit_id in path:
+            row_indices.append(row)
+            column_indices.append(unit_index[unit_id])
+            values.append(1.0)
+        lower_bounds.append(1.0)
+        upper_bounds.append(np.inf)
+        row += 1
+
+    unit_ids = set(unit_index)
+    for excluded in no_good_sets:
+        excluded_ids = set(excluded) & unit_ids
+        for unit_id, column in unit_index.items():
+            row_indices.append(row)
+            column_indices.append(column)
+            values.append(-1.0 if unit_id in excluded_ids else 1.0)
+        lower_bounds.append(1.0 - len(excluded_ids))
+        upper_bounds.append(np.inf)
+        row += 1
+
+    matrix = csr_matrix(
+        (values, (row_indices, column_indices)),
+        shape=(row, len(items)),
+        dtype=float,
+    )
+    constraints = LinearConstraint(
+        matrix,
+        lb=np.asarray(lower_bounds, dtype=float),
+        ub=np.asarray(upper_bounds, dtype=float),
+    )
+    result = milp(
+        c=np.asarray([unit.cost for unit in items], dtype=float),
+        integrality=np.ones(len(items), dtype=int),
+        bounds=Bounds(0, 1),
+        constraints=constraints,
+        options={"disp": False},
+    )
+    if not result.success:
+        return {
+            "status": "infeasible" if result.status == 2 else "solver_failed",
+            "solver": "scipy_highs",
+            "selected_ids": [],
+            "objective": 0.0,
+            "n_paths": len(clean_paths),
+            "message": str(result.message),
+        }
+    selected_ids = [
+        items[index].unit_id
+        for index, value in enumerate(result.x)
+        if value >= 0.5
+    ]
+    return {
+        "status": "optimal",
+        "solver": "scipy_highs",
+        "selected_ids": sorted(selected_ids),
+        "objective": sum(items[unit_index[unit_id]].cost for unit_id in selected_ids),
+        "n_paths": len(clean_paths),
+        "mip_gap": float(getattr(result, "mip_gap", 0.0) or 0.0),
+    }
+
+
+def solve_flow_interdiction_threshold(
+    units: Iterable[Unit],
+    source_edges: dict[str, float],
+    interactions: dict[tuple[str, str], float],
+    target_edges: dict[str, float],
+    *,
+    threshold: float,
+) -> dict:
+    """Minimize edited tokens subject to a residual maximum-flow threshold.
+
+    By max-flow/min-cut duality, the residual flow is at most ``threshold`` iff
+    the token-split network has a cut with at most that fixed-edge capacity.
+    A selected token makes its ``in -> out`` gate free to cross; an unselected
+    token gate cannot cross. This gives one exact MILP without enumerating
+    token budgets or flow paths.
+    """
+
+    items = list(units)
+    item_by_id = {str(item.unit_id): item for item in items}
+    threshold = float(threshold)
+    if threshold < -EPS:
+        return {
+            "status": "infeasible_negative_threshold",
+            "solver": "trivial",
+            "selected_ids": [],
+            "objective": 0.0,
+            "threshold": threshold,
+        }
+    if not item_by_id:
+        return {
+            "status": "no_editable_units",
+            "solver": "trivial",
+            "selected_ids": [],
+            "objective": 0.0,
+            "threshold": threshold,
+        }
+
+    valid_source = {
+        str(unit_id): float(capacity)
+        for unit_id, capacity in source_edges.items()
+        if str(unit_id) in item_by_id and float(capacity) > EPS
+    }
+    valid_target = {
+        str(unit_id): float(capacity)
+        for unit_id, capacity in target_edges.items()
+        if str(unit_id) in item_by_id and float(capacity) > EPS
+    }
+    valid_interactions = {
+        (str(left), str(right)): float(capacity)
+        for (left, right), capacity in interactions.items()
+        if str(left) in item_by_id
+        and str(right) in item_by_id
+        and str(left) != str(right)
+        and float(capacity) > EPS
+    }
+    if not valid_source or not valid_target:
+        return {
+            "status": "no_source_target_support",
+            "solver": "trivial",
+            "selected_ids": [],
+            "objective": 0.0,
+            "threshold": threshold,
+        }
+
+    try:
+        import numpy as np
+        from scipy.optimize import Bounds, LinearConstraint, milp
+        from scipy.sparse import csr_matrix
+    except Exception:
+        return {
+            "status": "solver_unavailable",
+            "solver": "scipy",
+            "selected_ids": [],
+            "objective": 0.0,
+            "threshold": threshold,
+        }
+
+    unit_ids = sorted(item_by_id)
+    fixed_edges = [
+        ("source", f"{unit_id}:in", capacity)
+        for unit_id, capacity in sorted(valid_source.items())
+    ]
+    fixed_edges.extend(
+        (f"{left}:out", f"{right}:in", capacity)
+        for (left, right), capacity in sorted(valid_interactions.items())
+    )
+    fixed_edges.extend(
+        (f"{unit_id}:out", "target", capacity)
+        for unit_id, capacity in sorted(valid_target.items())
+    )
+    node_ids = ["source", "target"]
+    for unit_id in unit_ids:
+        node_ids.extend((f"{unit_id}:in", f"{unit_id}:out"))
+
+    x_offset = 0
+    z_offset = len(unit_ids)
+    y_offset = z_offset + len(node_ids)
+    n_variables = y_offset + len(fixed_edges)
+    x_index = {unit_id: x_offset + index for index, unit_id in enumerate(unit_ids)}
+    z_index = {node_id: z_offset + index for index, node_id in enumerate(node_ids)}
+
+    row_indices = []
+    column_indices = []
+    values = []
+    lower_bounds = []
+    upper_bounds = []
+    row = 0
+
+    # y_e >= z_u - z_v for every fixed-capacity edge.
+    for edge_index, (left, right, _capacity) in enumerate(fixed_edges):
+        row_indices.extend((row, row, row))
+        column_indices.extend(
+            (y_offset + edge_index, z_index[left], z_index[right])
+        )
+        values.extend((1.0, -1.0, 1.0))
+        lower_bounds.append(0.0)
+        upper_bounds.append(np.inf)
+        row += 1
+
+    # A token gate may cross the cut only when that token is selected.
+    for unit_id in unit_ids:
+        row_indices.extend((row, row, row))
+        column_indices.extend(
+            (
+                x_index[unit_id],
+                z_index[f"{unit_id}:in"],
+                z_index[f"{unit_id}:out"],
+            )
+        )
+        values.extend((1.0, -1.0, 1.0))
+        lower_bounds.append(0.0)
+        upper_bounds.append(np.inf)
+        row += 1
+
+    # The fixed-capacity part of the chosen cut is the residual flow bound.
+    for edge_index, (_left, _right, capacity) in enumerate(fixed_edges):
+        row_indices.append(row)
+        column_indices.append(y_offset + edge_index)
+        values.append(capacity)
+    lower_bounds.append(-np.inf)
+    upper_bounds.append(threshold)
+    row += 1
+
+    matrix = csr_matrix(
+        (values, (row_indices, column_indices)),
+        shape=(row, n_variables),
+        dtype=float,
+    )
+    lower = np.zeros(n_variables, dtype=float)
+    upper = np.ones(n_variables, dtype=float)
+    lower[z_index["source"]] = upper[z_index["source"]] = 1.0
+    lower[z_index["target"]] = upper[z_index["target"]] = 0.0
+    objective = np.zeros(n_variables, dtype=float)
+    for unit_id in unit_ids:
+        objective[x_index[unit_id]] = float(item_by_id[unit_id].cost)
+
+    result = milp(
+        c=objective,
+        integrality=np.ones(n_variables, dtype=int),
+        bounds=Bounds(lower, upper),
+        constraints=LinearConstraint(
+            matrix,
+            lb=np.asarray(lower_bounds, dtype=float),
+            ub=np.asarray(upper_bounds, dtype=float),
+        ),
+        options={"disp": False},
+    )
+    if not result.success:
+        return {
+            "status": "infeasible" if result.status == 2 else "solver_failed",
+            "solver": "scipy_highs",
+            "selected_ids": [],
+            "objective": 0.0,
+            "threshold": threshold,
+            "message": str(result.message),
+        }
+
+    selected_ids = [
+        unit_id for unit_id in unit_ids if result.x[x_index[unit_id]] >= 0.5
+    ]
+    cut_capacity = sum(
+        capacity
+        for edge_index, (_left, _right, capacity) in enumerate(fixed_edges)
+        if result.x[y_offset + edge_index] >= 0.5
+    )
+    return {
+        "status": "optimal",
+        "solver": "scipy_highs_cut_dual",
+        "selected_ids": selected_ids,
+        "objective": sum(item_by_id[unit_id].cost for unit_id in selected_ids),
+        "threshold": threshold,
+        "cut_capacity": cut_capacity,
+        "n_units": len(unit_ids),
+        "n_fixed_edges": len(fixed_edges),
+        "mip_gap": float(getattr(result, "mip_gap", 0.0) or 0.0),
+    }
+
+
 def _clean(units: Iterable[Unit]) -> list[Unit]:
     out = []
     for unit in units:
@@ -369,3 +673,5 @@ def _solve_budgeted_branch(units: list[Unit], budget: float) -> ILPResult:
         solver="branch",
         metadata={"budget": round(budget, 6)},
     )
+
+

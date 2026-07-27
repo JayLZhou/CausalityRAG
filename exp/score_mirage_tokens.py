@@ -13,8 +13,14 @@ from itertools import islice
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from causalityrag.io import iter_records, load_records, record_id, retrieved_contexts
-from causalityrag.token_units import units_from_context_row
-from exp.arc_jsd import ArcJsdModel, CleanTrajectory
+try:
+    from causalityrag.token_units import units_from_context_row
+except ImportError:  # Compatibility with the frozen HotpotQA artifact snapshot.
+    from causalityrag.token_units import units_from_cache_row as units_from_context_row
+try:
+    from causalityrag.arc_jsd import ArcJsdModel, CleanTrajectory
+except ImportError:
+    from exp.arc_jsd import ArcJsdModel, CleanTrajectory
 from exp.mirage import MirageScorer
 
 

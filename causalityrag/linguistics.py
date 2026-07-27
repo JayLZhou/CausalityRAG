@@ -25,6 +25,13 @@ class SpacyAnnotationClient:
             {"unit": unit, "context": context, "replacement": replacement},
         )
 
+    def validate_many(self, items: list[dict]) -> list[dict]:
+        result = self._post("/validate_batch", {"items": items})
+        validations = result.get("validations", [])
+        if not isinstance(validations, list) or len(validations) != len(items):
+            raise RuntimeError("invalid response from spaCy batch validator")
+        return validations
+
     def health(self) -> dict:
         with urllib.request.urlopen(self.base_url + "/health", timeout=self.timeout) as response:
             return json.loads(response.read().decode("utf-8"))

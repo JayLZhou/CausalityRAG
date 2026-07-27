@@ -237,3 +237,4 @@ def test_empty_contribution_graph_never_reports_ok() -> None:
 
 def test_empty_frozen_reader_answer_is_preserved_as_abstention_target() -> None:
     assert answer_from_result_row({"clean_answer": ""}) == ""
+

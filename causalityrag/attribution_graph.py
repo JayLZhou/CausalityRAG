@@ -39,7 +39,7 @@ class AttentionAttributionGraphBuilder:
         dtype: str = "bfloat16",
         max_context_tokens: int = 0,
         max_length: int = 0,
-        edge_topk: int = 6,
+        edge_topk: int = 0,
         max_receivers_per_layer: int = 48,
         max_edges: int = 5000,
         residual_mix: float = 0.5,
@@ -53,14 +53,19 @@ class AttentionAttributionGraphBuilder:
         self.device = device
         self.max_context_tokens = max_context_tokens
         self.max_length = max_length
+        # ``0`` means no per-receiver source truncation.  A contribution graph
+        # used for token intervention must not make a context token disappear
+        # merely because it falls outside a local top-k attention shortlist.
         self.edge_topk = edge_topk
         self.max_receivers_per_layer = max_receivers_per_layer
         self.max_edges = max_edges
         self.residual_mix = residual_mix
         self.closed_flow = closed_flow
         self.absorbing_flow = absorbing_flow
-        if self.max_context_tokens < 0 or self.max_length < 0:
-            raise ValueError("max_context_tokens and max_length must be non-negative")
+        if self.max_context_tokens < 0 or self.max_length < 0 or self.edge_topk < 0:
+            raise ValueError(
+                "max_context_tokens, max_length, and edge_topk must be non-negative"
+            )
         if self.closed_flow and self.absorbing_flow:
             raise ValueError("closed_flow and absorbing_flow are mutually exclusive")
 
@@ -405,10 +410,13 @@ class AttentionAttributionGraphBuilder:
             if receiver_count:
                 receivers = torch.topk(score, receiver_count).indices.tolist()
                 for receiver in receivers:
-                    source_count = min(self.edge_topk, receiver + 1)
-                    values, sources = torch.topk(
-                        attention[receiver, : receiver + 1], source_count
-                    )
+                    source_values = attention[receiver, : receiver + 1]
+                    if self.edge_topk == 0:
+                        sources = (source_values > 0).nonzero(as_tuple=False).flatten()
+                        values = source_values[sources]
+                    else:
+                        source_count = min(self.edge_topk, receiver + 1)
+                        values, sources = torch.topk(source_values, source_count)
                     for value, source in zip(values.tolist(), sources.tolist()):
                         contribution = (
                             (1.0 - self.residual_mix)
@@ -720,10 +728,13 @@ class NativeMLPAttributionGraphBuilder(AttentionAttributionGraphBuilder):
             if receiver_count:
                 receivers = torch.topk(score, receiver_count).indices.tolist()
                 for receiver in receivers:
-                    source_count = min(self.edge_topk, receiver + 1)
-                    values, sources = torch.topk(
-                        normalized[receiver, : receiver + 1], source_count
-                    )
+                    source_values = normalized[receiver, : receiver + 1]
+                    if self.edge_topk == 0:
+                        sources = (source_values > 0).nonzero(as_tuple=False).flatten()
+                        values = source_values[sources]
+                    else:
+                        source_count = min(self.edge_topk, receiver + 1)
+                        values, sources = torch.topk(source_values, source_count)
                     for value, source in zip(values.tolist(), sources.tolist()):
                         contribution = float(score[receiver]) * float(value)
                         if contribution <= 0:
@@ -822,8 +833,24 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
 
     method = "qwen_direct_activation_target_logit_attribution"
 
+    def __init__(
+        self,
+        *args: Any,
+        target_objective: str = "mean-answer-logit",
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        if target_objective != "mean-answer-logit":
+            raise ValueError("target_objective must be 'mean-answer-logit'")
+        self.target_objective = target_objective
+
     def build(
-        self, record: dict, target_answer: str, *, k: int = 5, top_tokens: int = 50
+        self,
+        record: dict,
+        target_answer: str,
+        *,
+        k: int = 5,
+        top_tokens: int = 50,
     ) -> dict:
         torch = self.torch
         contexts = self._truncate_contexts(retrieved_contexts(record)[:k])
@@ -847,8 +874,10 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
         answer_positions = [
             item["position"] for item in token_meta if item["region"] == "answer"
         ]
-        target_positions = [position for position in answer_positions if position > 0]
-        if not target_positions:
+        all_target_positions = [
+            position for position in answer_positions if position > 0
+        ]
+        if not all_target_positions:
             return self._empty(
                 record,
                 target_answer,
@@ -869,12 +898,17 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                     output_attentions=False,
                     use_cache=False,
                 )
-                target_logits = [
-                    output.logits[0, position - 1, input_ids[0, position]].float()
-                    for position in target_positions
-                ]
-                target_logit_tensor = torch.stack(target_logits).mean()
-                target_logit_tensor.backward()
+                (
+                    target_tensor,
+                    target_positions,
+                    target_outputs,
+                ) = self._build_target_objective(
+                    output.logits,
+                    input_ids,
+                    all_target_positions,
+                    token_meta,
+                )
+                target_tensor.backward()
 
             layer_count = len(self.model.model.layers)
             position_ids = torch.arange(
@@ -933,18 +967,6 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
         nodes = self._direct_nodes(
             kept_edges, token_meta, layer_count, target_positions
         )
-        target_outputs = [
-            {
-                "answer_position": position,
-                "predictor_position": position - 1,
-                "token_id": int(input_ids[0, position]),
-                "token": token_meta[position]["token"],
-                "text": token_meta[position]["text"],
-                "logit": round(float(value.detach()), 8),
-            }
-            for position, value in zip(target_positions, target_logits)
-        ]
-
         return {
             "id": record_id(record),
             "question": str(record.get("question", "")),
@@ -952,15 +974,15 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             "target_answer": target_answer,
             "status": graph_status,
             "method": (
-                f"{self.method}_closed_flow"
+                f"{self.method}_{self.target_objective}_closed_flow"
                 if self.closed_flow
                 else (
-                    f"{self.method}_absorbing_flow"
+                    f"{self.method}_{self.target_objective}_absorbing_flow"
                     if self.absorbing_flow
-                    else self.method
+                    else f"{self.method}_{self.target_objective}"
                 )
             ),
-            "target_logit": round(float(target_logit_tensor.detach()), 8),
+            "target_objective_value": round(float(target_tensor.detach()), 8),
             "target_outputs": target_outputs,
             "top_context_tokens": context_tokens[:top_tokens],
             "context_token_supports": context_tokens,
@@ -980,13 +1002,12 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 "edge_weight_semantics": (
                     (
                         "backward-conserved positive flow allocated in proportion to signed "
-                        "local target-logit contribution from the actual residual, attention "
-                        "OV, or MLP output write; the mean-logit answer objective is seeded "
-                        "uniformly across its answer-token predictors"
+                        "local objective contribution from the actual residual, attention "
+                        "OV, or MLP output write"
                     )
                     if self.closed_flow or self.absorbing_flow
                     else (
-                        "signed local target-logit contribution: target gradient dotted with "
+                        "signed local objective contribution: target gradient dotted with "
                         "the actual residual, attention OV, or MLP output write"
                     )
                 ),
@@ -997,7 +1018,13 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                     else "signed_contribution"
                 ),
                 "negative_weight_field": "negative_contribution",
-                "target_objective": "mean raw logit over clean-answer tokens",
+                "target_objective": self.target_objective,
+                "target_objective_semantics": "mean raw logit over clean-answer tokens",
+                "target_is_locally_greedy": all(
+                    bool(item.get("target_is_argmax", True))
+                    for item in target_outputs
+                    if item.get("selected_for_objective")
+                ),
                 "context_support_semantics": (
                     (
                         "closed conserved flow terminating at context input tokens"
@@ -1023,6 +1050,34 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 "uses_transcoder": False,
             },
         }
+
+    def _build_target_objective(
+        self,
+        logits: Any,
+        input_ids: Any,
+        target_positions: list[int],
+        token_meta: list[dict],
+    ) -> tuple[Any, list[int], list[dict]]:
+        """Return the scalar backward target and its answer-position metadata."""
+
+        target_logits = [
+            logits[0, position - 1, input_ids[0, position]].float()
+            for position in target_positions
+        ]
+        target_tensor = self.torch.stack(target_logits).mean()
+        outputs = [
+            {
+                "answer_position": position,
+                "predictor_position": position - 1,
+                "token_id": int(input_ids[0, position]),
+                "token": token_meta[position]["token"],
+                "text": token_meta[position]["text"],
+                "logit": round(float(value.detach()), 8),
+                "selected_for_objective": True,
+            }
+            for position, value in zip(target_positions, target_logits)
+        ]
+        return target_tensor, list(target_positions), outputs
 
     def _closed_flow_edges(
         self,
@@ -1104,7 +1159,7 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             if not active_mid:
                 active_post = {}
                 continue
-            attention_matrix = self._direct_attention_matrix(
+            attention_matrix, _ = self._direct_attention_matrix(
                 layer_index,
                 position_embeddings,
                 trace.attn_outputs[layer_index].grad,
@@ -1126,9 +1181,14 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                     continue
 
                 retained_mass = 0.0
-                source_count = min(max(0, self.edge_topk), positive_row.numel())
                 candidate_sources: set[int] = set()
-                if source_count:
+                if self.edge_topk == 0:
+                    candidate_sources.update(
+                        int(source)
+                        for source in (positive_row > 0).nonzero(as_tuple=False).flatten().tolist()
+                    )
+                else:
+                    source_count = min(self.edge_topk, positive_row.numel())
                     _, sources = self.torch.topk(positive_row, source_count)
                     candidate_sources.update(int(source) for source in sources.tolist())
                 if layer_index == 0:
@@ -1571,7 +1631,15 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
 
     @staticmethod
     def _prune_direct_edges(edges: list[dict], max_edges: int) -> list[dict]:
-        """Keep the answer sink connected while globally pruning by relevance."""
+        """Optionally cap direct edges while preserving answer-terminal edges.
+
+        A non-positive cap disables global pruning.  This is the intervention
+        default: a global top-edge cap must not make legal context tokens
+        disappear from the graph merely because their individual edges are
+        small.
+        """
+        if max_edges <= 0:
+            return edges
 
         mandatory = [
             edge
@@ -1584,8 +1652,6 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             if edge["kind"] not in {"answer_logit", "answer_objective"}
         ]
         optional.sort(key=lambda edge: -float(edge["relevance"]))
-        if max_edges <= 0:
-            return mandatory
         return mandatory + optional[: max(0, max_edges - len(mandatory))]
 
     def _direct_edges(
@@ -1598,7 +1664,7 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
         edges = []
         layer_count = len(self.model.model.layers)
         for layer_index in range(layer_count):
-            attention_matrix = self._direct_attention_matrix(
+            attention_matrix, transport_matrix = self._direct_attention_matrix(
                 layer_index,
                 position_embeddings,
                 trace.attn_outputs[layer_index].grad,
@@ -1631,12 +1697,22 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             post_stage = pre_stage + 2
             for receiver in receivers:
                 source_values = attention_matrix[receiver, : receiver + 1]
-                source_count = min(self.edge_topk, source_values.numel())
-                if source_count:
-                    _, sources = self.torch.topk(source_values.abs(), source_count)
+                source_transport = transport_matrix[receiver, : receiver + 1]
+                if self.edge_topk == 0:
+                    sources = (
+                        (source_values.abs() > 1e-12)
+                        & (source_transport > 1e-12)
+                    ).nonzero(as_tuple=False).flatten()
+                else:
+                    source_count = min(self.edge_topk, source_values.numel())
+                    sources = self.torch.topk(
+                        source_values.abs(), source_count
+                    ).indices
+                if sources.numel():
                     for source in sources.tolist():
                         value = float(source_values[source])
-                        if abs(value) <= 1e-12:
+                        transport = float(source_transport[source])
+                        if abs(value) <= 1e-12 or transport <= 1e-12:
                             continue
                         edges.append(
                             self._direct_edge(
@@ -1647,14 +1723,27 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                                 "attention_ov_write",
                                 value,
                                 layer_index,
+                                transport_capacity=transport,
                             )
                         )
-                for kind, value in (
-                    ("attention_residual", float(attention_residual[receiver])),
-                    ("mlp_residual", float(mlp_residual[receiver])),
-                    ("mlp_output_write", float(mlp_write[receiver])),
+                for kind, value, transport in (
+                    (
+                        "attention_residual",
+                        float(attention_residual[receiver]),
+                        float(layer_input[receiver].norm()),
+                    ),
+                    (
+                        "mlp_residual",
+                        float(mlp_residual[receiver]),
+                        float(mid_residual[receiver].norm()),
+                    ),
+                    (
+                        "mlp_output_write",
+                        float(mlp_write[receiver]),
+                        float(mlp_output[receiver].norm()),
+                    ),
                 ):
-                    if abs(value) <= 1e-12:
+                    if abs(value) <= 1e-12 or transport <= 1e-12:
                         continue
                     src_stage = pre_stage if kind == "attention_residual" else mid_stage
                     dst_stage = (
@@ -1669,6 +1758,7 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                             kind,
                             value,
                             layer_index,
+                            transport_capacity=transport,
                         )
                     )
 
@@ -1692,7 +1782,7 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
         position_embeddings: tuple[Any, Any],
         attention_output_grad: Any,
         attention_input: Any,
-    ) -> Any:
+    ) -> tuple[Any, Any]:
         torch = self.torch
         layer = self.model.model.layers[layer_index]
         module = layer.self_attn
@@ -1762,7 +1852,15 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 module.o_proj.weight.detach().float(),
             ).view(-1, n_heads, head_dim)
             dot_products = torch.einsum("thd,shd->hts", output_grads, values)
-            return (dot_products * attn_weights).sum(dim=0)
+            contribution = (dot_products * attn_weights).sum(dim=0)
+            value_norms = values.norm(dim=-1).transpose(0, 1)
+            transport = torch.sqrt(
+                (
+                    attn_weights
+                    * value_norms.unsqueeze(1)
+                ).square().sum(dim=0)
+            )
+            return contribution, transport
 
     def _rotate_half(self, hidden_states: Any) -> Any:
         midpoint = hidden_states.shape[-1] // 2
@@ -1783,6 +1881,8 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
         kind: str,
         value: float,
         model_layer: int,
+        *,
+        transport_capacity: float | None = None,
     ) -> dict:
         return {
             "src": f"s{src_stage}:t{src_position}",
@@ -1798,6 +1898,12 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             "contribution": round(max(0.0, value), 10),
             "negative_contribution": round(max(0.0, -value), 10),
             "relevance": round(abs(value), 10),
+            "transport_capacity": round(
+                max(0.0, float(transport_capacity))
+                if transport_capacity is not None
+                else abs(value),
+                10,
+            ),
         }
 
     @staticmethod

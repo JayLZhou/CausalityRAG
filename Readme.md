@@ -13,9 +13,9 @@ retrieval records
   -> frozen clean answers generated concurrently by vLLM
   -> direct-activation absorbing contribution DAG
   -> projected token contribution network
-  -> geometric weighted min-cuts
-  -> fixed-point strict replacement registry
-  -> concurrent vLLM reader intervention evaluation
+  -> contribution-aware flow contract frontier
+  -> fixed legal replacement registry
+  -> vLLM reader intervention verification
 ```
 
 Query tokens, generated answer tokens, retrieval results, and model weights are
@@ -30,36 +30,34 @@ writes, residual writes, and MLP output writes, contracted with the
 clean-answer target-logit gradient. Sparse path mass is absorbed with
 `--absorbing-flow`.
 
-Let `Phi(S)` be the residual source-to-answer flow after closing the shared
-token gates in set `S`. For an internal threshold `B`, the graph problem is
+The active optimizer is a contribution-aware flow contract frontier. The
+projected contribution graph contains finite contribution edges and editable
+token gates. For a token set `T`, let `R_q(T)` denote the residual
+clean-answer support cut after buying the token gates in `T`. For a fixed
+price `lambda`, the demand oracle solves
 
 ```text
-min |S|  subject to  Phi(S) <= B.
+argmin_T R_q(T) + lambda |T|
 ```
 
-For each internal geometric scale `K_r`, the implementation solves the supported
-objective
+with an exact token-gated min-cut. A single `lambda` is brittle: it may over-cut
+easy queries and under-cut hard queries. The contract module therefore
+enumerates supported intervention sets by breakpoint recursion. If two sets
+`A` and `B` exchange optimality, their breakpoint is
 
 ```text
-lambda_r |S| + Phi(S),  where lambda_r = eta B / K_r,
+lambda* = (R_q(B) - R_q(A)) / (|A| - |B|).
 ```
 
-with one exact weighted min-cut. With scale ratio `1 + gamma`, the number of
-min-cuts is logarithmic in the editable token count. If the strict graph
-optimum has size `k`, the returned graph candidate satisfies
+The implementation probes these breakpoints, obtains the supported frontier,
+orders candidate sets by cardinality, and verifies them with the frozen reader.
+The returned intervention is reader-verified; the graph objective is a
+surrogate and is not claimed to solve the original black-box problem exactly.
 
-```text
-|S| < (1 + (1 + gamma) / eta) k
-Phi(S) <= (1 + eta) B.
-```
-
-For `gamma = eta = 1`, this is a `(3, 2)` bicriteria guarantee for the graph
-surrogate, not a reader-level 2-approximation. The complete statement,
-assumptions, calibration argument, and limitations are in
-[METHOD_CONTRIBUTION_FLOW.md](METHOD_CONTRIBUTION_FLOW.md).
-
-`K_r` is internal solver notation. It is unrelated to the command-line
-variable `K` used below for the number of retrieved contexts.
+The current main runner is
+`exp/run_contribution_aware_flow_contract_attack.py` with
+`--frontier-mode breakpoint`. The fixed contribution-aware weighted cut
+baseline is `exp/run_contribution_weighted_cut_attack.py`.
 
 ## Repository layout
 
@@ -78,6 +76,10 @@ Use [configs/dataset_template.yaml](configs/dataset_template.yaml) as the
 per-dataset configuration checklist. Dataset-specific configuration files may
 coexist under `configs/`.
 
+Exploratory attempts that are not part of the current code path should be kept
+outside this repository, e.g. in a sibling local backup directory, rather than
+being committed to Git.
+
 ## Stable entry points
 
 | Stage | Command | Output |
@@ -86,7 +88,8 @@ coexist under `configs/`.
 | Context units | `scripts/build_context_units.py` | frozen context-unit JSONL |
 | Clean reader targets | `scripts/generate_reader_targets.py` | vLLM answer JSONL |
 | Contribution graph | `scripts/build_contribution_graph.py` | graph JSONL |
-| Flow optimization | `scripts/solve_contribution_flow.py` | candidate JSONL |
+| Flow optimization | `exp/run_contribution_aware_flow_contract_attack.py --frontier-mode breakpoint` | verified frontier JSONL |
+| Fixed flow-cut baseline | `exp/run_contribution_weighted_cut_attack.py` | one-shot baseline JSONL |
 | Replacement registry | `scripts/build_replacement_registry.py` | registry JSONL |
 | Reader evaluation | `scripts/evaluate_reader.py` | intervention JSONL |
 | Artifact manifest | `scripts/build_artifact_manifest.py` | manifest JSON |
@@ -375,10 +378,11 @@ python scripts/build_contribution_graph.py \
   --target-results "$CLEAN_TARGETS" \
   --device cuda \
   --dtype bfloat16 \
-  --edge-topk 6 \
+  --edge-topk 0 \
   --max-receivers-per-layer 48 \
-  --max-edges 5000 \
+  --max-edges 0 \
   --absorbing-flow \
+  --target-objective mean-answer-logit \
   --n "$N" \
   --k "$K"
 ```
@@ -390,11 +394,10 @@ rendered and tokenized exactly. The only applicable sequence boundary is the
 checkpoint's real model context window; exceeding it is reported as
 `sequence_exceeds_model_context` instead of silently clipping evidence.
 
-The answer-objective sink is seeded uniformly across the predictors of the
-mean clean-answer-token logit. A non-abstention graph is accepted only when it
-has positive answer-terminal flow and a positive context-to-answer path. Empty
-or unusable graphs receive an explicit failure status. Reader abstentions are
-counted separately; any actual graph failure makes the command exit nonzero.
+A non-abstention graph is accepted only when it has positive answer-terminal
+flow and a positive context-to-answer path. Empty or unusable graphs receive
+an explicit failure status. Empty or non-semantic reader outputs are counted
+separately; any actual graph failure makes the command exit nonzero.
 
 ### 4. Produce an initial contribution-flow solution
 
