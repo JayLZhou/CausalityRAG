@@ -68,3 +68,5 @@ configs/       dataset configuration
 ```
 
 Exploratory implementations are intentionally not versioned in this repository.
+The ARC-JSD sentence-to-token lift is retained as an external baseline in
+`exp/run_arc_jsd_sentence_lift_attack.py`; it is not part of ReFlow.
