@@ -74,6 +74,24 @@ scripts/build_contribution_graph.py
 from the retrieved chunks and therefore does not accept a replacement registry
 or a filtered token-unit file.
 
+If a compatible closed message-flow artifact already exists, its expensive
+model forward/backward pass can be reused. The following command contracts it
+into the final all-token Contribution Graph without loading the model:
+
+```bash
+python scripts/contract_contribution_graph.py \
+  --input DATA.jsonl \
+  --raw-graphs CLOSED_MESSAGE_FLOW.jsonl \
+  --units-cache CONTEXT_UNITS.jsonl \
+  --out CONTRIBUTION_GRAPH.jsonl \
+  --summary-out CONTRIBUTION_GRAPH.summary.json
+```
+
+The converter never overwrites `--raw-graphs`, validates aligned query IDs and
+the complete token domain, and atomically publishes the new graph only after
+all rows succeed. Sharded ReFlow outputs can be validated and merged with
+`scripts/merge_reflow_shards.py`.
+
 The default reader endpoint is configured with `YVETTE_LLM_BASE_URL` and
 `YVETTE_LLM_MODEL`. Graph construction requires a local Hugging Face model
 because it records activations and gradients; reader verification is performed

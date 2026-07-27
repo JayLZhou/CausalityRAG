@@ -44,63 +44,86 @@ class ContributionGraphBuilder:
             target_answer,
             k=k,
         )
-        status = str(message_flow.get("status", "invalid_message_flow"))
-        if status != "ok":
-            return _empty_graph_row(
-                record,
-                target_answer,
-                status,
-                message_flow,
-                token_units,
-            )
+        return contract_message_flow_row(
+            record,
+            target_answer,
+            message_flow,
+            token_units=token_units,
+            k=k,
+        )
 
-        source, interactions, target, diagnostics = _contract_token_labels(
+
+def contract_message_flow_row(
+    record: dict,
+    target_answer: str,
+    message_flow: dict,
+    *,
+    token_units: list[dict] | None = None,
+    k: int = 5,
+) -> dict:
+    """Contract one saved closed message-flow graph into the final token graph."""
+
+    if token_units is None:
+        token_units = all_context_word_units(record, k=k)
+        status = str(message_flow.get("status", "invalid_message_flow"))
+    else:
+        status = str(message_flow.get("status", "invalid_message_flow"))
+    if status != "ok":
+        return _empty_graph_row(
+            record,
+            target_answer,
+            status,
             message_flow,
             token_units,
         )
-        if not source:
-            status = "no_source_support"
-        elif not target:
-            status = "no_answer_support"
-        else:
-            status = "ok"
 
-        raw_graph = message_flow.get("graph", {})
-        return {
-            "id": record_id(record),
-            "question": str(record.get("question", "")),
-            "gold_answer": str(record.get("answer", "")),
-            "target_answer": target_answer,
-            "status": status,
-            "method": "closed_flow_token_contribution_graph",
-            "contribution_graph": {
-                "source": "query_context_source",
-                "target": "answer_target",
-                "token_nodes": sorted(
-                    str(unit["unit_id"]) for unit in token_units
-                ),
-                "source_edges": [
-                    {"token_id": unit_id, "capacity": weight}
-                    for unit_id, weight in sorted(source.items())
-                ],
-                "interaction_edges": [
-                    {"source": left, "target": right, "capacity": weight}
-                    for (left, right), weight in sorted(interactions.items())
-                ],
-                "target_edges": [
-                    {"token_id": unit_id, "capacity": weight}
-                    for unit_id, weight in sorted(target.items())
-                ],
-                "diagnostics": diagnostics,
-            },
-            "message_flow_diagnostics": {
-                "sequence_tokens": raw_graph.get("sequence_tokens", 0),
-                "layers": raw_graph.get("layers", 0),
-                "stages": raw_graph.get("stages", 0),
-                "receiver_beam": raw_graph.get("receiver_beam", 0),
-                "flow": raw_graph.get("flow_diagnostics", {}),
-            },
-        }
+    source, interactions, target, diagnostics = _contract_token_labels(
+        message_flow,
+        token_units,
+    )
+    if not source:
+        status = "no_source_support"
+    elif not target:
+        status = "no_answer_support"
+    else:
+        status = "ok"
+
+    raw_graph = message_flow.get("graph", {})
+    return {
+        "id": record_id(record),
+        "question": str(record.get("question", "")),
+        "gold_answer": str(record.get("answer", "")),
+        "target_answer": target_answer,
+        "status": status,
+        "method": "closed_flow_token_contribution_graph",
+        "contribution_graph": {
+            "source": "query_context_source",
+            "target": "answer_target",
+            "token_nodes": sorted(
+                str(unit["unit_id"]) for unit in token_units
+            ),
+            "source_edges": [
+                {"token_id": unit_id, "capacity": weight}
+                for unit_id, weight in sorted(source.items())
+            ],
+            "interaction_edges": [
+                {"source": left, "target": right, "capacity": weight}
+                for (left, right), weight in sorted(interactions.items())
+            ],
+            "target_edges": [
+                {"token_id": unit_id, "capacity": weight}
+                for unit_id, weight in sorted(target.items())
+            ],
+            "diagnostics": diagnostics,
+        },
+        "message_flow_diagnostics": {
+            "sequence_tokens": raw_graph.get("sequence_tokens", 0),
+            "layers": raw_graph.get("layers", 0),
+            "stages": raw_graph.get("stages", 0),
+            "receiver_beam": raw_graph.get("receiver_beam", 0),
+            "flow": raw_graph.get("flow_diagnostics", {}),
+        },
+    }
 
 
 def contribution_graph_edges(

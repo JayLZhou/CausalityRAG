@@ -721,6 +721,7 @@ def main() -> None:
             clean_answer = str(graph.get("clean_answer", graph.get("target_answer", "")))
             attempts: list[dict] = []
             verified = None
+            cache_before_query = dict(replacement_cache)
             for candidate in frontier_candidates[: args.max_verify]:
                 proposed_ids = [
                     str(unit_id)
@@ -730,7 +731,6 @@ def main() -> None:
                 if not proposed_ids:
                     continue
                 proposed = [by_id[unit_id] for unit_id in proposed_ids]
-                cache_before = dict(replacement_cache)
                 replacements, skipped = build_executable_replacements_batched(
                     proposed,
                     contexts,
@@ -739,12 +739,6 @@ def main() -> None:
                     nlp,
                     replacement_cache,
                 )
-                if replacement_cache != cache_before:
-                    replacement_pool.persist(
-                        identifier,
-                        replacement_cache,
-                        source="reflow",
-                    )
                 selected_ids = [
                     unit_id for unit_id in proposed_ids if unit_id in replacements
                 ]
@@ -796,6 +790,12 @@ def main() -> None:
                         verified = attempt
                     if not args.evaluate_all_frontier:
                         break
+            if replacement_cache != cache_before_query:
+                replacement_pool.persist(
+                    identifier,
+                    replacement_cache,
+                    source="reflow",
+                )
             row = {
                 "index": index,
                 "id": identifier,
