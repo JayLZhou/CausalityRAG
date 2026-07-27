@@ -157,6 +157,75 @@ def solve_price_cut(
     }
 
 
+def remaining_contribution_flow(
+    units: list[dict],
+    source_edges: dict[str, float],
+    interactions: dict[tuple[str, str], float],
+    target_edges: dict[str, float],
+    *,
+    removed_ids: set[str] | frozenset[str],
+    edge_capacity_mode: str,
+) -> float:
+    """Return the residual source-to-answer max flow after closing token gates.
+
+    This is deliberately separate from ``residual_edge_cost`` in a priced
+    cut.  The latter is the finite-edge portion of one mixed cut, whereas this
+    function computes the quantity used by the paper's flow-to-flip analysis:
+    the maximum contribution flow left after a fixed token intervention.
+    """
+
+    unit_ids = {str(unit["unit_id"]) for unit in units}
+    source = {
+        str(unit_id): float(weight)
+        for unit_id, weight in source_edges.items()
+        if str(unit_id) in unit_ids and float(weight) > 0
+    }
+    target = {
+        str(unit_id): float(weight)
+        for unit_id, weight in target_edges.items()
+        if str(unit_id) in unit_ids and float(weight) > 0
+    }
+    internal = {
+        (str(left), str(right)): float(weight)
+        for (left, right), weight in interactions.items()
+        if (
+            str(left) in unit_ids
+            and str(right) in unit_ids
+            and str(left) != str(right)
+            and float(weight) > 0
+        )
+    }
+    if not source or not target:
+        return 0.0
+    weights = [*source.values(), *target.values(), *internal.values()]
+    mean_weight = sum(weights) / len(weights)
+    if mean_weight <= 1e-12:
+        return 0.0
+
+    def capacity(weight: float) -> float:
+        return contribution_capacity(weight, mean_weight, edge_capacity_mode)
+
+    total_capacity = sum(capacity(weight) for weight in weights)
+    open_gate = total_capacity + 1.0
+    removed = {str(unit_id) for unit_id in removed_ids}
+    dinic = Dinic()
+    source_node = dinic.node()
+    target_node = dinic.node()
+    split = {
+        unit_id: (dinic.node(), dinic.node())
+        for unit_id in sorted(unit_ids)
+    }
+    for unit_id, (node_in, node_out) in split.items():
+        dinic.add_edge(node_in, node_out, 0.0 if unit_id in removed else open_gate)
+    for unit_id, weight in source.items():
+        dinic.add_edge(source_node, split[unit_id][0], capacity(weight))
+    for (left, right), weight in internal.items():
+        dinic.add_edge(split[left][1], split[right][0], capacity(weight))
+    for unit_id, weight in target.items():
+        dinic.add_edge(split[unit_id][1], target_node, capacity(weight))
+    return float(dinic.max_flow(source_node, target_node))
+
+
 def sweep_price_cuts(
     units: list[dict],
     source: dict[str, float],
@@ -409,6 +478,14 @@ def main() -> None:
         default="unit-plus-normalized",
     )
     parser.add_argument("--max-verify", type=int, default=1_000_000)
+    parser.add_argument(
+        "--evaluate-all-frontier",
+        action="store_true",
+        help=(
+            "evaluate every nonempty frontier candidate instead of stopping at "
+            "the first reader flip; required for calibration experiments"
+        ),
+    )
     args = parser.parse_args()
 
     records = take_jsonl(args.input, args.start, args.n)
@@ -469,10 +546,43 @@ def main() -> None:
                     dynamic_range=args.dynamic_range,
                     edge_capacity_mode=args.edge_capacity_mode,
                 )
+            initial_support_flow = remaining_contribution_flow(
+                units,
+                source,
+                interactions,
+                target,
+                removed_ids=frozenset(),
+                edge_capacity_mode=args.edge_capacity_mode,
+            )
+            frontier_candidates = []
+            for candidate in frontier.get("candidates", []):
+                selected_ids = [
+                    str(unit_id)
+                    for unit_id in candidate.get("selected_ids", [])
+                    if str(unit_id) in by_id
+                ]
+                residual_support_flow = remaining_contribution_flow(
+                    units,
+                    source,
+                    interactions,
+                    target,
+                    removed_ids=set(selected_ids),
+                    edge_capacity_mode=args.edge_capacity_mode,
+                )
+                frontier_candidates.append({
+                    **candidate,
+                    "selected_ids": selected_ids,
+                    "remaining_support_flow": residual_support_flow,
+                    "remaining_support_fraction": (
+                        residual_support_flow / initial_support_flow
+                        if initial_support_flow > 1e-12
+                        else None
+                    ),
+                })
             clean_answer = str(graph.get("clean_answer", graph.get("target_answer", "")))
             attempts: list[dict] = []
             verified = None
-            for candidate in frontier.get("candidates", [])[: args.max_verify]:
+            for candidate in frontier_candidates[: args.max_verify]:
                 selected_ids = [
                     str(unit_id)
                     for unit_id in candidate.get("selected_ids", [])
@@ -502,18 +612,23 @@ def main() -> None:
                 }
                 attempts.append(attempt)
                 if changed:
-                    verified = attempt
-                    break
+                    if verified is None:
+                        verified = attempt
+                    if not args.evaluate_all_frontier:
+                        break
             row = {
                 "index": index,
                 "id": identifier,
                 "method": "contribution_aware_flow_contract_frontier",
                 "frontier_mode": args.frontier_mode,
                 "edge_capacity_mode": args.edge_capacity_mode,
+                "evaluate_all_frontier": args.evaluate_all_frontier,
                 "clean_answer": clean_answer,
                 "projection": projection,
-                "n_frontier": len(frontier.get("candidates", [])),
+                "n_frontier": len(frontier_candidates),
                 "frontier_diagnostics": frontier.get("diagnostics", {}),
+                "initial_support_flow": initial_support_flow,
+                "frontier_candidates": frontier_candidates,
                 "attempts": attempts,
                 "verified_flip": verified is not None,
                 "selected_ids": verified["selected_ids"] if verified else [],
@@ -562,6 +677,7 @@ def main() -> None:
         ),
         "edge_capacity_mode": args.edge_capacity_mode,
         "frontier_mode": args.frontier_mode,
+        "evaluate_all_frontier": args.evaluate_all_frontier,
         "lambda_points": args.lambda_points,
         "out": args.out,
     }

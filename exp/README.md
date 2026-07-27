@@ -26,6 +26,10 @@ python exp/run_mirage_topk_attack.py --help
 - `RESULTS_HOTPOTQA_1000.md`: the earlier hybrid HotpotQA result report.
 - `verify_hf_results.py`: historical local-HF cross-check from the earlier
   dual-reader workflow; final metrics now come directly from vLLM.
+- `analyze_flow_calibration.py`: held-out Hoeffding calibration and residual
+  flow reliability analysis over fully reader-labelled frontiers.
+- `run_flow_supportedness_oracle.py`: exhaustive small-graph audit of whether
+  supported frontier sets recover threshold-optimal graph interventions.
 
 Experimental tests live beside the corresponding implementation:
 

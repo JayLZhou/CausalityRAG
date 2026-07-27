@@ -95,6 +95,48 @@ being committed to Git.
 | Artifact manifest | `scripts/build_artifact_manifest.py` | manifest JSON |
 | Tests | `scripts/run_tests.py` | lightweight test report |
 
+### Calibration and surrogate validation
+
+The paper's flow-to-flip analysis has two separate experiments. First, generate
+and label every supported candidate, then calibrate a residual-flow threshold
+on a query-level held-out split:
+
+```bash
+python exp/run_contribution_aware_flow_contract_attack.py \
+  --input DATA.jsonl --graphs GRAPH.jsonl --units-cache UNITS.jsonl \
+  --replacement-registry REGISTRY.jsonl --out frontier_all.jsonl \
+  --n 1000 --frontier-mode breakpoint --evaluate-all-frontier
+
+python exp/analyze_flow_calibration.py \
+  --frontier-results frontier_all.jsonl --out calibration.json \
+  --epsilon 0.10 --delta 0.05
+```
+
+The first command stores the true residual maximum flow for every candidate,
+not merely the finite-edge cost of its priced cut. The second chooses the
+largest residual threshold whose family-wise Hoeffding upper bound on the
+calibration non-flip rate is at most `epsilon`, then reports held-out coverage,
+flip rate, and a descriptive reliability curve. The certificate assumes
+exchangeable calibration and test queries; final per-query claims still use
+direct reader verification.
+
+For the default 11 threshold values, `epsilon=0.10`, and `delta=0.05`, even a
+zero-nonflip calibration cohort needs 270 eligible candidates. The default
+calibration split is therefore 35% rather than 20% for a 1,000-query run.
+
+Second, evaluate the supported-frontier assumption on small induced graphs:
+
+```bash
+python exp/run_flow_supportedness_oracle.py \
+  --input DATA.jsonl --graphs GRAPH.jsonl --units-cache UNITS.jsonl \
+  --replacement-registry REGISTRY.jsonl --out oracle.jsonl \
+  --summary-out oracle_summary.json --n 50 --max-units 12
+```
+
+This graph-only oracle exhaustively evaluates at most `2^12` token subsets per
+instance and reports whether the breakpoint frontier contains a
+minimum-cardinality set for each residual-flow threshold.
+
 ## Final pipeline contract
 
 The final proposal is pure contribution graph. No ARC-JSD unary score,
