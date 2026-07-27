@@ -8,7 +8,6 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 
-from causalityrag.ilp import Unit, solve_budgeted_support, solve_min_cost_cover
 from causalityrag.io import record_id, retrieved_contexts
 
 
@@ -50,9 +49,6 @@ class TokenUnit:
     support: float
     cost: float = 1.0
     sources: list[str] = field(default_factory=list)
-
-    def to_unit(self) -> Unit:
-        return Unit(self.unit_id, self.support, self.cost, self.to_dict(include_support=False))
 
     def to_dict(self, include_support: bool = True) -> dict:
         out = {
@@ -423,50 +419,6 @@ def token_cost(token: str, mode: str) -> float:
     if mode == "chars":
         return max(1.0, len(token) / 4.0)
     raise ValueError(f"unknown cost mode: {mode}")
-
-
-def run_token_ilp_record(
-    record: dict,
-    *,
-    k: int = 5,
-    objective: str = "min-cost",
-    tau_graph: float = 0.2,
-    target_support: float | None = None,
-    budget: float = 5.0,
-    solver: str = "auto",
-    include_units: bool = False,
-    top_candidates: int = 20,
-    **unit_kwargs,
-) -> dict:
-    units = build_token_units(record, k=k, **unit_kwargs)
-    ilp_units = [u.to_unit() for u in units]
-    if objective == "min-cost":
-        result = solve_min_cost_cover(ilp_units, target_support=target_support, tau_graph=tau_graph, solver=solver)
-    elif objective == "budgeted":
-        result = solve_budgeted_support(ilp_units, budget=budget, solver=solver)
-    else:
-        raise ValueError(f"unknown objective: {objective}")
-
-    selected = set(result.selected_ids)
-    selected_units = [u.to_dict() for u in units if u.unit_id in selected]
-    top = sorted(units, key=lambda u: (-u.support / max(u.cost, 1e-9), -u.support, u.unit_id))
-    contexts = retrieved_contexts(record)
-    if k:
-        contexts = contexts[:k]
-    row = {
-        "id": record_id(record),
-        "question": str(record.get("question", "")),
-        "clean_answer": str(record.get("clean_answer") or record.get("answer") or record.get("gold") or ""),
-        "context_ids": [ctx["chunk_id"] for ctx in contexts],
-        "objective": objective,
-        "n_units": len(units),
-        **result.to_dict(),
-        "selected_units": selected_units,
-        "top_candidates": [u.to_dict() for u in top[:top_candidates]],
-    }
-    if include_units:
-        row["units"] = [u.to_dict() for u in units]
-    return row
 
 
 def _terms(text: str) -> Counter:
