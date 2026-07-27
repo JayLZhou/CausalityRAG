@@ -748,6 +748,23 @@ def main() -> None:
                         replacement_cache,
                         source="reflow",
                     )
+                if skipped:
+                    attempts.append({
+                        **candidate,
+                        "proposed_ids": proposed_ids,
+                        "proposed_tokens": [
+                            str(unit.get("text", "")) for unit in proposed
+                        ],
+                        "selected_ids": [],
+                        "selected_tokens": [],
+                        "edited_answer": clean_answer,
+                        "answer_changed": False,
+                        "n_edits": 0,
+                        "replacement_skips": skipped,
+                        "reader_called": False,
+                        "candidate_status": "rejected_incomplete_replacement",
+                    })
+                    continue
                 selected_ids = [
                     unit_id for unit_id in proposed_ids if unit_id in replacements
                 ]
