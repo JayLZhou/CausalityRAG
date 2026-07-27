@@ -72,6 +72,9 @@ tests/         shared pipeline tests
 configs/       dataset configuration
 ```
 
-Exploratory implementations are intentionally not versioned in this repository.
-The ARC-JSD sentence-to-token lift is retained as an external baseline in
-`exp/run_arc_jsd_sentence_lift_attack.py`; it is not part of ReFlow.
+The retained external baselines live under `exp/`. The ARC-JSD
+sentence-to-token lift is implemented in `exp/run_arc_jsd_sentence_lift_attack.py`.
+The gradient attribution runner in
+`exp/run_gradient_attribution_baselines.py` provides Gradient×Input-Top5 and
+Integrated-Gradients-Top5; both rank tokens independently of the ReFlow
+contribution graph and use the same replacement registry during evaluation.
