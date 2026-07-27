@@ -265,6 +265,125 @@ class GenericReplacementClient:
                 }
         return results
 
+    def replace_many_candidate_lists(
+        self,
+        targets: list[dict],
+        *,
+        max_candidates: int = 5,
+    ) -> dict[str, list[dict]]:
+        """Generate a variable-length candidate list for every target in one call."""
+
+        if not targets:
+            return {}
+        if max_candidates <= 0:
+            raise ValueError("max_candidates must be positive")
+        with self._calls_lock:
+            self._calls += 1
+
+        target_rows = [
+            {
+                "id": str(target["unit_id"]),
+                "token": str(target["token"]),
+                "type": str(target.get("unit_type", "")) or "unknown",
+                "pos": str(target.get("pos_hint", "")) or "unknown",
+                "tag": str(target.get("tag_hint", "")) or "unknown",
+                "forbidden": list(target.get("forbidden", ())),
+                "context": str(target.get("context", ""))[:400],
+            }
+            for target in targets
+        ]
+        prompt = (
+            "For every target token, generate as many distinct factual "
+            "counterfactual alternatives as you can, up to the requested limit. "
+            "The alternatives must preserve the same semantic type and grammatical "
+            "role but express different information. Never return synonyms, "
+            "paraphrases, hypernyms, spelling variants, inflections, or multi-word "
+            "phrases. It is acceptable to return fewer alternatives when appropriate, "
+            "but return at least one whenever a valid alternative exists. Return only "
+            "this JSON shape: {\"replacements\":[{\"id\":\"TARGET_ID\", "
+            "\"candidates\":[\"WORD1\",\"WORD2\"]}]}. Return one row per target. "
+            f"The maximum candidate count per target is {max_candidates}.\n\n"
+            "Targets (each context is only a local hint; validation is done on the full chunk):\n"
+            + json.dumps(target_rows, ensure_ascii=False)
+        )
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You generate meaningful counterfactual token alternatives. "
+                        "Preserve semantic type and grammar while changing the fact. "
+                        "Do not use synonyms. Return strict JSON only."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0,
+            # The model may return fewer candidates; reserve tokens for JSON only.
+            # A large completion cap makes batched requests spend time on prose or
+            # repeated candidates even though the parser keeps only a short list.
+            "max_tokens": max(256, min(2048, 32 * len(targets) * max_candidates)),
+        }
+        request = urllib.request.Request(
+            self.base_url + "/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            parsed = parse_json_object(data["choices"][0]["message"]["content"])
+        except Exception:
+            parsed = {}
+
+        generated = {}
+        if isinstance(parsed, dict) and isinstance(parsed.get("replacements"), list):
+            for row in parsed["replacements"]:
+                if not isinstance(row, dict):
+                    continue
+                unit_id = str(row.get("id", ""))
+                raw_candidates = row.get("candidates", [])
+                if isinstance(raw_candidates, str):
+                    raw_candidates = [raw_candidates]
+                if not isinstance(raw_candidates, list):
+                    raw_candidates = []
+                generated[unit_id] = [
+                    str(candidate.get("replacement", "")).strip()
+                    if isinstance(candidate, dict)
+                    else str(candidate).strip()
+                    for candidate in raw_candidates[:max_candidates]
+                ]
+
+        results = {}
+        for target in targets:
+            unit_id = str(target["unit_id"])
+            token = str(target["token"])
+            forbidden = {
+                str(item).lower() for item in target.get("forbidden", ())
+            }
+            forbidden.add(token.lower())
+            values = []
+            for candidate in generated.get(unit_id, []):
+                lowered = candidate.lower()
+                if (
+                    candidate
+                    and lowered not in forbidden
+                    and not any(char.isspace() for char in candidate)
+                    and lowered not in {item["new"].lower() for item in values}
+                ):
+                    values.append(
+                        {
+                            "ok": True,
+                            "old": token,
+                            "new": candidate,
+                            "policy": "generic_llm_candidate_pool",
+                        }
+                    )
+            results[unit_id] = values
+        return results
+
     def replace_many_candidates(
         self,
         targets: list[dict],
