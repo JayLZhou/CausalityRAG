@@ -2,7 +2,7 @@
 
 This document is the normative theory specification for the current method.
 It supersedes the earlier hazard, hypergraph, witness, tuple-lineage,
-densest-subgraph, and layer-copy group-rounding attempts. Those routes may be
+densest-subgraph, and archived projection-rounding attempts. Those routes may be
 used only as historical baselines and are not part of the proposed algorithm.
 
 ## 1. True Token Resilience

@@ -24,7 +24,7 @@ from causalityrag.token_units import units_from_cache_row  # noqa: E402
 VARIANTS = {
     "raw_r": ("input-roots", "raw"),
     "conserved_f": ("input-roots", "backward-conserved"),
-    "aggregated_c": ("layer-copy-token", "backward-conserved"),
+    "aggregated_c": ("projected-token", "backward-conserved"),
 }
 
 
@@ -126,7 +126,7 @@ def main() -> None:
                 raise ValueError(f"missing cache/registry row for {identifier}")
             units = units_from_cache_row(record, units_row, k=args.k)
             by_id = {str(unit["unit_id"]): unit for unit in units}
-            if projection == "layer-copy-token":
+            if projection == "projected-token":
                 network = build_projected_token_contribution_network(
                     graph_row,
                     units,

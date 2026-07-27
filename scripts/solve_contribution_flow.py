@@ -15,14 +15,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from causalityrag.io import iter_records, load_records, record_id
 from causalityrag.linguistics import SpacyAnnotationClient
 from causalityrag.mixed_cut import (
-    build_layered_copy_contribution_network,
     build_projected_token_contribution_network,
     build_raw_contribution_network,
     restrict_group_editable_units,
     search_mixed_cut_threshold,
     solve_bicriteria_flow_interdiction,
     solve_fixed_mixed_cut,
-    solve_group_bicriteria_flow_interdiction,
     sweep_mixed_cuts,
 )
 from causalityrag.token_units import (
@@ -55,7 +53,6 @@ def main() -> None:
             "binary-lambda",
             "k-guessing",
             "geometric-k-guessing",
-            "group-k-guessing",
         ),
         default="geometric-k-guessing",
     )
@@ -64,7 +61,6 @@ def main() -> None:
     parser.add_argument("--binary-iterations", type=int, default=32)
     parser.add_argument("--eta", type=float, default=1.0)
     parser.add_argument("--gamma", type=float, default=1.0)
-    parser.add_argument("--max-copies-per-unit", type=int, default=0)
     parser.add_argument(
         "--context-units",
         "--units-cache",
@@ -79,8 +75,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--projection",
-        choices=("input-roots", "layer-copy-token", "layer-copy-rounding"),
-        default="layer-copy-token",
+        choices=("input-roots", "projected-token"),
+        default="projected-token",
     )
     parser.add_argument(
         "--capacity-mode",
@@ -186,20 +182,11 @@ def main() -> None:
             else:
                 units, _ = context_sentence_units(record, k=args.k, nlp=nlp)
             by_id = {str(unit["unit_id"]): unit for unit in units}
-            if args.projection == "layer-copy-token":
+            if args.projection == "projected-token":
                 network = build_projected_token_contribution_network(
                     graph_row,
                     units,
                     capacity_mode=args.capacity_mode,
-                )
-            elif args.projection == "layer-copy-rounding":
-                network = build_layered_copy_contribution_network(
-                    graph_row,
-                    units,
-                    capacity_mode=args.capacity_mode,
-                    max_copies_per_unit=(
-                        args.max_copies_per_unit or None
-                    ),
                 )
             else:
                 network = build_raw_contribution_network(
@@ -237,33 +224,12 @@ def main() -> None:
                     network,
                     allowed_ids,
                 )
-            if (
-                args.solver == "group-k-guessing"
-                and args.projection != "layer-copy-rounding"
-            ):
-                raise ValueError(
-                    "group-k-guessing requires layer-copy-rounding projection"
-                )
-            if (
-                args.projection == "layer-copy-rounding"
-                and args.solver != "group-k-guessing"
-            ):
-                raise ValueError(
-                    "layer-copy-rounding requires group-k-guessing solver"
-                )
             sweep = (
                 solve_fixed_mixed_cut(
                     network,
                     token_cost=args.lambda_value,
                 )
                 if args.solver == "fixed-lambda"
-                else solve_group_bicriteria_flow_interdiction(
-                    network,
-                    beta=args.beta,
-                    eta=args.eta,
-                    max_k_guess=None,
-                )
-                if args.solver == "group-k-guessing"
                 else search_mixed_cut_threshold(
                     network,
                     beta=args.beta,

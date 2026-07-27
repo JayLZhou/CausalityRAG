@@ -409,7 +409,7 @@ python scripts/solve_contribution_flow.py \
   --out "$FLOW_INITIAL" \
   --summary-out "$FLOW_DIR/initial.summary.json" \
   --solver geometric-k-guessing \
-  --projection layer-copy-token \
+  --projection projected-token \
   --capacity-mode raw \
   --beta "$BETA" \
   --eta "$ETA" \
@@ -483,7 +483,7 @@ python scripts/solve_contribution_flow.py \
   --out "$FLOW_DIR/iteration_01.jsonl" \
   --summary-out "$FLOW_DIR/iteration_01.summary.json" \
   --solver geometric-k-guessing \
-  --projection layer-copy-token \
+  --projection projected-token \
   --capacity-mode raw \
   --beta "$BETA" \
   --eta "$ETA" \
@@ -539,7 +539,7 @@ python scripts/solve_contribution_flow.py \
   --out "$FLOW_DIR/final.jsonl" \
   --summary-out "$FLOW_DIR/final.summary.json" \
   --solver geometric-k-guessing \
-  --projection layer-copy-token \
+  --projection projected-token \
   --capacity-mode raw \
   --beta "$BETA" \
   --eta "$ETA" \
@@ -786,9 +786,9 @@ runs/<dataset>/<run-id>/
 - The graph method is `direct-activation` with `--absorbing-flow`.
 - The query, answer, and retrieval ranking remain fixed; only retrieved
   context-token gates are purchasable.
-- `layer-copy-token` is the current CLI name for projecting all transformer
-  layer copies of one context token into one token node. It is not the old
-  grouped layer-copy rounding method.
+- `projected-token` projects all transformer-layer contributions of one
+  context token into one token node. Archived projection-rounding variants have
+  been removed from the stable code path.
 - The final solver is `geometric-k-guessing` with explicit `BETA`, `ETA`, and
   `GAMMA`; it always covers the full editable-token domain and uses no edit
   budget.

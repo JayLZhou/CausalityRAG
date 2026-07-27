@@ -16,7 +16,7 @@ Repository branch: `main`; the exact clean commit is recorded in `manifest.json`
 - Contribution graph: HF SDPA direct-activation target-logit attribution
 - Context/prompt truncation: none; only the model context window applies
 - Solver: `geometric-k-guessing`
-- Projection: `layer-copy-token`
+- Projection: `projected-token`
 - Capacity mode: `raw`
 - `beta=0.1`, `eta=1`, `gamma=1`
 - Final selection rule: remaining contribution-flow fraction `<=0.2`

@@ -20,8 +20,6 @@ python exp/run_mirage_topk_attack.py --help
 - `collect_*.py`: diagnostic data collection.
 - `augment_*.py`: post-processing for staged diagnostics.
 - `plot_*.py`: figure generation.
-- `analyze_group_flow_oracle.py` and `group_flow_oracle.py`: historical
-  grouped layer-copy MILP audit.
 - `mirage.py` and `run_mirage_topk_attack.py`: MIRAGE baseline.
 - `run_token_ilp.py` and `run_token_attack.py`: original token-ILP pipeline.
 - `EXPERIMENTS_HOTPOTQA.md`: the earlier broad experimental protocol.

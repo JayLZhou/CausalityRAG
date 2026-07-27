@@ -175,7 +175,7 @@ Run all ablations on the same 1,000-query manifest:
 - `alpha in {0.25, 0.5, 0.75}` fixed globally on development data;
 - absorbing flow versus closed flow with synthetic background mass;
 - path-preserving DAG versus global edge pruning;
-- layer-preserving groups versus layer-copy contraction;
+- archived projection-rounding variants versus projected-token contraction;
 - active-copy cap in `{4, 8, 16, all}`;
 - K-guess threshold output versus heuristic reverse-delete budget chains;
 - rounded K-guess output versus feasibility-preserving threshold pruning;

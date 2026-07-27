@@ -36,7 +36,7 @@ contribution_graph:
   max_edges: 5000
 
 optimization:
-  projection: layer-copy-token
+  projection: projected-token
   capacity_mode: raw
   solver: geometric-k-guessing
   beta: 0.1
