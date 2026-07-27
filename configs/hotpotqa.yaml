@@ -31,7 +31,8 @@ contribution_graph:
   absorbing_flow: true
   context_truncation: none
   sequence_limit: model_context_window
-  # Every positive contribution edge is retained by construction.
+  max_receivers_per_layer: 48
+  # Keep every positive incoming edge for each active receiver.
 
 optimization:
   projection: projected-token

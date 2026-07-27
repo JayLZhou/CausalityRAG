@@ -41,6 +41,7 @@ def main() -> None:
     parser.add_argument("--target-results", nargs="+", default=[])
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", default="bfloat16")
+    parser.add_argument("--max-receivers-per-layer", type=int, default=48)
     parser.add_argument("--top-tokens", type=int, default=50)
     parser.add_argument(
         "--target-objective",
@@ -87,6 +88,7 @@ def main() -> None:
         dtype=args.dtype,
         max_context_tokens=0,
         max_length=0,
+        max_receivers_per_layer=args.max_receivers_per_layer,
         closed_flow=args.closed_flow,
         absorbing_flow=args.absorbing_flow,
         target_objective=args.target_objective,

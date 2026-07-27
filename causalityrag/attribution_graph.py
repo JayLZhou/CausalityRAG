@@ -39,6 +39,7 @@ class AttentionAttributionGraphBuilder:
         dtype: str = "bfloat16",
         max_context_tokens: int = 0,
         max_length: int = 0,
+        max_receivers_per_layer: int = 48,
         residual_mix: float = 0.5,
         closed_flow: bool = False,
         absorbing_flow: bool = False,
@@ -50,11 +51,19 @@ class AttentionAttributionGraphBuilder:
         self.device = device
         self.max_context_tokens = max_context_tokens
         self.max_length = max_length
+        self.max_receivers_per_layer = max_receivers_per_layer
         self.residual_mix = residual_mix
         self.closed_flow = closed_flow
         self.absorbing_flow = absorbing_flow
-        if self.max_context_tokens < 0 or self.max_length < 0:
-            raise ValueError("max_context_tokens and max_length must be non-negative")
+        if (
+            self.max_context_tokens < 0
+            or self.max_length < 0
+            or self.max_receivers_per_layer <= 0
+        ):
+            raise ValueError(
+                "max_context_tokens and max_length must be non-negative; "
+                "max_receivers_per_layer must be positive"
+            )
         if self.closed_flow and self.absorbing_flow:
             raise ValueError("closed_flow and absorbing_flow are mutually exclusive")
 
@@ -189,7 +198,8 @@ class AttentionAttributionGraphBuilder:
                 "edges": kept_edges,
                 "edge_count": len(edges),
                 "edge_weight_semantics": "positive target-logprob gradient times attention, row-normalized",
-                "positive_edge_policy": "retain_all",
+                "positive_edge_policy": "retain_all_for_active_receivers",
+                "receiver_beam": self.max_receivers_per_layer,
                 "residual_mix": self.residual_mix,
             },
         }
@@ -392,7 +402,14 @@ class AttentionAttributionGraphBuilder:
                 attention = torch.where(
                     row_sums > 1e-12, attention / row_sums.clamp_min(1e-12), fallback
                 )
-            receivers = (score > 0).nonzero(as_tuple=False).flatten().tolist()
+            receiver_count = min(
+                self.max_receivers_per_layer, int((score > 0).sum().item())
+            )
+            receivers = (
+                torch.topk(score, receiver_count).indices.tolist()
+                if receiver_count
+                else []
+            )
             if receivers:
                 for receiver in receivers:
                     source_values = attention[receiver, : receiver + 1]
@@ -617,7 +634,8 @@ class NativeMLPAttributionGraphBuilder(AttentionAttributionGraphBuilder):
                     "positive target-logit contribution in a fixed-forward local linearization; "
                     "native Qwen MLP channels are exact local feature units"
                 ),
-                "positive_edge_policy": "retain_all",
+                "positive_edge_policy": "retain_all_for_active_receivers",
+                "receiver_beam": self.max_receivers_per_layer,
                 "residual_mix": None,
             },
         }
@@ -699,7 +717,14 @@ class NativeMLPAttributionGraphBuilder(AttentionAttributionGraphBuilder):
                 matrix / row_sums.clamp_min(1e-12),
                 identity,
             )
-            receivers = (score > 0).nonzero(as_tuple=False).flatten().tolist()
+            receiver_count = min(
+                self.max_receivers_per_layer, int((score > 0).sum().item())
+            )
+            receivers = (
+                torch.topk(score, receiver_count).indices.tolist()
+                if receiver_count
+                else []
+            )
             if receivers:
                 for receiver in receivers:
                     source_values = normalized[receiver, : receiver + 1]
@@ -960,7 +985,8 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 "nodes": nodes,
                 "edges": kept_edges,
                 "edge_count": len(edges),
-                "positive_edge_policy": "retain_all",
+                "positive_edge_policy": "retain_all_for_active_receivers",
+                "receiver_beam": self.max_receivers_per_layer,
                 "edge_weight_semantics": (
                     (
                         "backward-conserved positive flow allocated in proportion to signed "
@@ -999,10 +1025,10 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                     )
                 ),
                 "flow_construction": (
-                    "closed_backward_all_positive_with_explicit_background"
+                    "closed_backward_receiver_beam_all_positive_incoming_with_background"
                     if self.closed_flow
                     else (
-                        "absorbing_backward_all_positive_without_background_edges"
+                        "absorbing_backward_receiver_beam_all_positive_incoming"
                         if self.absorbing_flow
                         else "none"
                     )
@@ -1184,7 +1210,30 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                     retained_mass += flow
                 dropped_by_receiver[receiver] += max(0.0, mass - retained_mass)
 
-            selected_sources = set(source_mass)
+            selected_sources = {
+                source
+                for source, _ in sorted(
+                    source_mass.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )[: self.max_receivers_per_layer]
+            }
+            if layer_index == 0:
+                input_context_sources = [
+                    source
+                    for source in source_mass
+                    if token_meta[source]["region"] == "context"
+                    and any(
+                        character.isalnum()
+                        for character in str(token_meta[source].get("text", ""))
+                    )
+                ]
+                if input_context_sources:
+                    selected_sources.add(
+                        max(
+                            input_context_sources,
+                            key=lambda source: (source_mass[source], -source),
+                        )
+                    )
             active_pre: dict[int, float] = defaultdict(float)
             for allocation in allocations:
                 receiver = int(allocation["receiver"])
@@ -1228,7 +1277,8 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
                 "answer_seed_mass": sum(
                     float(edge["contribution"]) for edge in answer_edges
                 ),
-                "positive_edge_policy": "retain_all",
+                "positive_edge_policy": "retain_all_for_active_receivers",
+                "receiver_beam": self.max_receivers_per_layer,
                 "flow_edges": len(edges),
             }
         )
@@ -1574,10 +1624,20 @@ class DirectActivationAttributionGraphBuilder(NativeMLPAttributionGraphBuilder):
             )
             mlp_residual = (mlp_grad * mid_residual).sum(dim=-1)
 
+            receiver_relevance = (
+                attention_matrix.abs().sum(dim=-1)
+                + attention_residual.abs()
+                + mlp_write.abs()
+                + mlp_residual.abs()
+            )
+            receiver_count = min(self.max_receivers_per_layer, len(token_meta))
+            receivers = self.torch.topk(
+                receiver_relevance, receiver_count
+            ).indices.tolist()
             pre_stage = 2 * layer_index
             mid_stage = pre_stage + 1
             post_stage = pre_stage + 2
-            for receiver in range(len(token_meta)):
+            for receiver in receivers:
                 source_values = attention_matrix[receiver, : receiver + 1]
                 source_transport = transport_matrix[receiver, : receiver + 1]
                 sources = (
