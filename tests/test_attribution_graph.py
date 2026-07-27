@@ -78,26 +78,6 @@ def test_direct_nodes_preserve_layer_token_stages_and_answer_sink() -> None:
     )
 
 
-def test_direct_pruning_always_keeps_answer_logit_edges() -> None:
-    weak_sink = DirectActivationAttributionGraphBuilder._direct_edge(
-        4, 0, 5, 1, "answer_logit", 0.01, 1
-    )
-    strong_edges = [
-        DirectActivationAttributionGraphBuilder._direct_edge(
-            0, index, 1, index, "attention_ov_write", float(index + 1), 0
-        )
-        for index in range(4)
-    ]
-
-    kept = DirectActivationAttributionGraphBuilder._prune_direct_edges(
-        strong_edges + [weak_sink], max_edges=3
-    )
-
-    assert len(kept) == 3
-    assert weak_sink in kept
-    assert sum(edge["kind"] == "answer_logit" for edge in kept) == 1
-
-
 def test_closed_flow_diagnostics_preserve_mass_and_expose_background() -> None:
     token_meta = [
         {"position": 0, "region": "context"},
@@ -237,4 +217,3 @@ def test_empty_contribution_graph_never_reports_ok() -> None:
 
 def test_empty_frozen_reader_answer_is_preserved_as_abstention_target() -> None:
     assert answer_from_result_row({"clean_answer": ""}) == ""
-

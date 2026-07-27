@@ -29,10 +29,7 @@ contribution_graph:
   absorbing_flow: true
   context_truncation: none
   sequence_limit: model_context_window
-  # Keep every positive answer-conditioned message at each receiver.
-  edge_topk: 0
-  max_receivers_per_layer: 48
-  max_edges: 0
+  # Every positive contribution edge is retained by construction.
 
 optimization:
   projection: projected-token
