@@ -1,47 +1,8 @@
-from causalityrag.graph_cut import project_cached_units_source_target_graph
 from exp.run_contribution_aware_flow_contract_attack import (
     breakpoint_price_cuts,
+    require_complete_graph_domain,
     solve_price_cut,
 )
-
-
-def test_projection_preserves_source_interaction_and_target_contributions():
-    units = [
-        {
-            "unit_id": "u1",
-            "chunk_id": "c1",
-            "chunk_char_start": 0,
-            "chunk_char_end": 5,
-        },
-        {
-            "unit_id": "u2",
-            "chunk_id": "c1",
-            "chunk_char_start": 6,
-            "chunk_char_end": 10,
-        },
-    ]
-    graph = {
-        "context_token_supports": [
-            {"position": 3, "chunk_id": "c1", "chunk_char_start": 0, "chunk_char_end": 5},
-            {"position": 4, "chunk_id": "c1", "chunk_char_start": 6, "chunk_char_end": 10},
-        ],
-        "graph": {
-            "token_partitions": {"query": [1]},
-            "target_positions": [8],
-            "edges": [
-                {"kind": "attention_ov_write", "src_position": 3, "dst_position": 1, "contribution": 2.0},
-                {"kind": "attention_ov_write", "src_position": 3, "dst_position": 4, "contribution": 1.0},
-                {"kind": "attention_ov_write", "src_position": 4, "dst_position": 7, "contribution": 3.0},
-            ],
-        },
-    }
-
-    source, interactions, target, metadata = project_cached_units_source_target_graph(graph, units)
-
-    assert source == {"u1": 2.0}
-    assert interactions == {("u1", "u2"): 1.0}
-    assert target == {"u2": 3.0}
-    assert not metadata["path_shortcut_fallback"]
 
 
 def test_fixed_price_flow_contract_returns_a_token_gated_cut():
@@ -58,6 +19,42 @@ def test_fixed_price_flow_contract_returns_a_token_gated_cut():
     assert result["status"] == "optimal"
     assert result["selected_ids"]
     assert result["n_selected"] == len(result["selected_ids"])
+
+
+def test_selection_is_independent_of_replacement_pool_availability():
+    units = [{"unit_id": "first"}, {"unit_id": "second"}]
+    result = solve_price_cut(
+        units,
+        {"first": 2.0},
+        {("first", "second"): 2.0},
+        {"second": 2.0},
+        token_price=0.5,
+        edge_capacity_mode="unit-plus-normalized",
+    )
+
+    assert result["status"] == "optimal"
+    assert result["selected_ids"]
+    assert set(result["selected_ids"]).issubset({"first", "second"})
+    assert result["token_units"] == 2
+    assert result["selectable_units"] == 2
+
+
+def test_graph_domain_cannot_be_pre_filtered_by_replacement_availability():
+    graph = {
+        "contribution_graph": {
+            "token_nodes": ["fixed", "editable"],
+        }
+    }
+    units = [{"unit_id": "fixed"}, {"unit_id": "editable"}]
+    require_complete_graph_domain(graph, units)
+
+    graph["contribution_graph"]["token_nodes"] = ["editable"]
+    try:
+        require_complete_graph_domain(graph, units)
+    except ValueError as error:
+        assert "every non-punctuation context token" in str(error)
+    else:
+        raise AssertionError("replacement-filtered graph domain was accepted")
 
 
 def test_breakpoint_frontier_recovers_every_extreme_cardinality():

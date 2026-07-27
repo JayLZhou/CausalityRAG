@@ -12,11 +12,18 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.graph_cut import project_cached_units_source_target_graph
-from causalityrag.io import record_id
+from causalityrag.contribution_graph import contribution_graph_edges
+from causalityrag.io import record_id, retrieved_contexts
+from causalityrag.linguistics import SpacyAnnotationClient
 from causalityrag.max_flow import Dinic
 from causalityrag.reader import ReaderClient, answers_match
+from causalityrag.replacement import (
+    GenericReplacementClient,
+    build_executable_replacements_batched,
+)
+from causalityrag.replacement_pool import ReplacementPool
 from causalityrag.revision import apply_token_replacements
+from causalityrag.rules import TypedRuleLibrary
 from causalityrag.token_units import units_from_cache_row
 
 
@@ -42,6 +49,26 @@ def contribution_capacity(weight: float, mean_weight: float, mode: str) -> float
     raise ValueError(f"unknown edge capacity mode: {mode}")
 
 
+def require_complete_graph_domain(graph_row: dict, units: list[dict]) -> None:
+    """Require the graph and context cache to contain the same token domain."""
+
+    graph_ids = {
+        str(unit_id)
+        for unit_id in graph_row.get("contribution_graph", {}).get(
+            "token_nodes",
+            [],
+        )
+    }
+    context_ids = {str(unit["unit_id"]) for unit in units}
+    if graph_ids == context_ids:
+        return
+    raise ValueError(
+        "contribution graph must contain every non-punctuation context token; "
+        f"missing={sorted(context_ids - graph_ids)[:5]}, "
+        f"unexpected={sorted(graph_ids - context_ids)[:5]}"
+    )
+
+
 def solve_price_cut(
     units: list[dict],
     source_edges: dict[str, float],
@@ -53,8 +80,7 @@ def solve_price_cut(
 ) -> dict:
     unit_by_id = {str(unit["unit_id"]): unit for unit in units}
     if not unit_by_id:
-        return {"status": "no_editable_units", "selected_ids": [], "n_selected": 0}
-
+        return {"status": "no_token_units", "selected_ids": [], "n_selected": 0}
     valid_source = {
         str(unit_id): float(weight)
         for unit_id, weight in source_edges.items()
@@ -132,7 +158,10 @@ def solve_price_cut(
     selected_ids = sorted(
         unit_id
         for unit_id, (node_in, node_out) in split.items()
-        if node_in in reachable and node_out not in reachable
+        if (
+            node_in in reachable
+            and node_out not in reachable
+        )
     )
     residual_edge_cost = sum(
         capacity
@@ -154,6 +183,8 @@ def solve_price_cut(
         "source_units": len(valid_source),
         "target_units": len(valid_target),
         "interaction_edges": len(valid_interactions),
+        "token_units": len(unit_by_id),
+        "selectable_units": len(unit_by_id),
     }
 
 
@@ -345,18 +376,31 @@ def breakpoint_price_cuts(
         interactions,
         target,
     )
-    if full_cut.get("status") != "optimal" or not full_cut.get("selected_ids"):
-        return {"status": full_cut.get("status", "no_full_token_cut"), "candidates": [], "diagnostics": {}}
-
-    left = {
-        **full_cut,
-        "lambda": 0.0,
-        "objective_value": 0.0,
-        "token_cost": 0.0,
-        "residual_edge_cost": 0.0,
-        "cut_value": 0.0,
-        "edge_capacity_mode": edge_capacity_mode,
-    }
+    if full_cut.get("status") == "optimal" and full_cut.get("selected_ids"):
+        left = {
+            **full_cut,
+            "lambda": 0.0,
+            "objective_value": 0.0,
+            "token_cost": 0.0,
+            "residual_edge_cost": 0.0,
+            "cut_value": 0.0,
+            "edge_capacity_mode": edge_capacity_mode,
+        }
+    else:
+        left = solve_price_cut(
+            units,
+            source,
+            interactions,
+            target,
+            token_price=0.0,
+            edge_capacity_mode=edge_capacity_mode,
+        )
+        if left.get("status") != "optimal" or not left.get("selected_ids"):
+            return {
+                "status": full_cut.get("status", "no_supported_intervention"),
+                "candidates": [],
+                "diagnostics": {},
+            }
     right = {
         "status": "optimal",
         "selected_ids": [],
@@ -492,26 +536,36 @@ def _minimum_token_full_cut(
     if not valid_source or not valid_target:
         return {"status": "no_source_target_support", "selected_ids": [], "n_selected": 0}
 
-    uncuttable = float(len(unit_ids) + 1)
+    fixed_arc_capacity = float(len(unit_ids) + 1)
     dinic = Dinic()
     source = dinic.node()
     target = dinic.node()
     split = {unit_id: (dinic.node(), dinic.node()) for unit_id in sorted(unit_ids)}
-    for node_in, node_out in split.values():
+    for unit_id, (node_in, node_out) in split.items():
         dinic.add_edge(node_in, node_out, 1.0)
     for unit_id in valid_source:
-        dinic.add_edge(source, split[unit_id][0], uncuttable)
+        dinic.add_edge(source, split[unit_id][0], fixed_arc_capacity)
     for left, right in valid_interactions:
-        dinic.add_edge(split[left][1], split[right][0], uncuttable)
+        dinic.add_edge(split[left][1], split[right][0], fixed_arc_capacity)
     for unit_id in valid_target:
-        dinic.add_edge(split[unit_id][1], target, uncuttable)
+        dinic.add_edge(split[unit_id][1], target, fixed_arc_capacity)
     cut_value = dinic.max_flow(source, target)
     reachable = dinic.reachable(source)
     selected_ids = sorted(
         unit_id
         for unit_id, (node_in, node_out) in split.items()
-        if node_in in reachable and node_out not in reachable
+        if (
+            node_in in reachable
+            and node_out not in reachable
+        )
     )
+    if cut_value > len(selected_ids) + 1e-9:
+        return {
+            "status": "no_full_selectable_cut",
+            "selected_ids": [],
+            "n_selected": 0,
+            "minimum_full_cut_value": float(cut_value),
+        }
     return {
         "status": "optimal" if selected_ids else "no_full_token_cut",
         "selected_ids": selected_ids,
@@ -525,7 +579,25 @@ def main() -> None:
     parser.add_argument("--input", required=True)
     parser.add_argument("--graphs", required=True)
     parser.add_argument("--units-cache", required=True)
-    parser.add_argument("--replacement-registry", required=True)
+    parser.add_argument(
+        "--replacement-pool",
+        "--replacement-registry",
+        dest="replacement_pool",
+        required=True,
+        help=(
+            "shared JSONL pool; missing replacements are generated after "
+            "selection, validated, and persisted here"
+        ),
+    )
+    parser.add_argument("--cf-pools", required=True)
+    parser.add_argument("--type-rules", default="")
+    parser.add_argument(
+        "--spacy-base-url",
+        default=os.environ.get(
+            "CAUSALITYRAG_SPACY_BASE_URL",
+            "http://127.0.0.1:8021",
+        ),
+    )
     parser.add_argument("--out", required=True)
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--n", type=int, default=100)
@@ -556,35 +628,37 @@ def main() -> None:
     records = take_jsonl(args.input, args.start, args.n)
     graphs = take_jsonl(args.graphs, args.start, len(records))
     units_rows = take_jsonl(args.units_cache, args.start, len(records))
-    registries = take_jsonl(args.replacement_registry, args.start, len(records))
-    if len({len(records), len(graphs), len(units_rows), len(registries)}) != 1:
-        raise ValueError("input, graph, units, and registry rows are misaligned")
+    if len({len(records), len(graphs), len(units_rows)}) != 1:
+        raise ValueError("input, graph, and units rows are misaligned")
 
     reader = ReaderClient()
+    nlp = SpacyAnnotationClient(args.spacy_base_url)
+    if not nlp.health().get("ok"):
+        raise RuntimeError("spaCy annotation service is unhealthy")
+    library = TypedRuleLibrary.from_files(args.cf_pools, args.type_rules or None)
+    editor = GenericReplacementClient()
+    replacement_pool = ReplacementPool(args.replacement_pool)
     rows: list[dict] = []
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as output:
-        for offset, (record, graph, units_row, registry) in enumerate(
-            zip(records, graphs, units_rows, registries)
+        for offset, (record, graph, units_row) in enumerate(
+            zip(records, graphs, units_rows)
         ):
             index = args.start + offset
             started = time.monotonic()
+            editor_calls_before = editor.calls
             identifier = record_id(record)
             if str(graph.get("id", "")) != identifier:
                 raise ValueError(f"unaligned graph at row {index}: {identifier}")
-            replacements = {
-                str(unit_id): value
-                for unit_id, value in registry.get("replacements", {}).items()
-                if isinstance(value, dict) and value.get("ok")
-            }
-            units = [
-                unit
-                for unit in units_from_cache_row(record, units_row, k=args.k)
-                if str(unit["unit_id"]) in replacements
-            ]
+            units = units_from_cache_row(record, units_row, k=args.k)
+            require_complete_graph_domain(graph, units)
             by_id = {str(unit["unit_id"]): unit for unit in units}
-            source, interactions, target, projection = project_cached_units_source_target_graph(
-                graph, units
+            replacement_cache = replacement_pool.cache_for(identifier)
+            contexts = retrieved_contexts(record)[: args.k]
+            source, interactions, target = contribution_graph_edges(graph)
+            graph_diagnostics = graph.get("contribution_graph", {}).get(
+                "diagnostics",
+                {},
             )
             source = {unit_id: weight for unit_id, weight in source.items() if unit_id in by_id}
             target = {unit_id: weight for unit_id, weight in target.items() if unit_id in by_id}
@@ -648,18 +722,53 @@ def main() -> None:
             attempts: list[dict] = []
             verified = None
             for candidate in frontier_candidates[: args.max_verify]:
-                selected_ids = [
+                proposed_ids = [
                     str(unit_id)
                     for unit_id in candidate.get("selected_ids", [])
                     if str(unit_id) in by_id
                 ]
-                if not selected_ids:
+                if not proposed_ids:
                     continue
+                proposed = [by_id[unit_id] for unit_id in proposed_ids]
+                cache_before = dict(replacement_cache)
+                replacements, skipped = build_executable_replacements_batched(
+                    proposed,
+                    contexts,
+                    library,
+                    editor,
+                    nlp,
+                    replacement_cache,
+                )
+                if replacement_cache != cache_before:
+                    replacement_pool.persist(
+                        identifier,
+                        replacement_cache,
+                        source="reflow",
+                    )
+                selected_ids = [
+                    unit_id for unit_id in proposed_ids if unit_id in replacements
+                ]
                 selected = [by_id[unit_id] for unit_id in selected_ids]
+                if not selected_ids:
+                    attempts.append({
+                        **candidate,
+                        "proposed_ids": proposed_ids,
+                        "proposed_tokens": [
+                            str(unit.get("text", "")) for unit in proposed
+                        ],
+                        "selected_ids": [],
+                        "selected_tokens": [],
+                        "edited_answer": clean_answer,
+                        "answer_changed": False,
+                        "n_edits": 0,
+                        "replacement_skips": skipped,
+                        "reader_called": False,
+                    })
+                    continue
                 revision = apply_token_replacements(
                     record,
                     selected,
-                    {unit_id: replacements[unit_id] for unit_id in selected_ids},
+                    replacements,
                     k=args.k,
                 )
                 edited_answer = reader.answer(
@@ -669,11 +778,17 @@ def main() -> None:
                 changed = not answers_match(clean_answer, edited_answer)
                 attempt = {
                     **candidate,
+                    "proposed_ids": proposed_ids,
+                    "proposed_tokens": [
+                        str(unit.get("text", "")) for unit in proposed
+                    ],
                     "selected_ids": selected_ids,
                     "selected_tokens": [str(unit.get("text", "")) for unit in selected],
                     "edited_answer": edited_answer,
                     "answer_changed": changed,
                     "n_edits": revision["n_edits"],
+                    "replacement_skips": skipped,
+                    "reader_called": True,
                 }
                 attempts.append(attempt)
                 if changed:
@@ -689,7 +804,11 @@ def main() -> None:
                 "edge_capacity_mode": args.edge_capacity_mode,
                 "evaluate_all_frontier": args.evaluate_all_frontier,
                 "clean_answer": clean_answer,
-                "projection": projection,
+                "contribution_graph": graph_diagnostics,
+                "token_units": len(by_id),
+                "selector_domain": "all_non_punctuation_context_tokens",
+                "selectable_units": len(by_id),
+                "replacement_pool": args.replacement_pool,
                 "n_frontier": len(frontier_candidates),
                 "frontier_diagnostics": frontier.get("diagnostics", {}),
                 "initial_support_flow": initial_support_flow,
@@ -700,7 +819,10 @@ def main() -> None:
                 "selected_tokens": verified["selected_tokens"] if verified else [],
                 "n_selected": len(verified["selected_ids"]) if verified else 0,
                 "edited_answer": verified["edited_answer"] if verified else clean_answer,
-                "reader_calls": len(attempts),
+                "reader_calls": sum(
+                    bool(attempt.get("reader_called")) for attempt in attempts
+                ),
+                "editor_llm_calls": editor.calls - editor_calls_before,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             }
             rows.append(row)
@@ -741,6 +863,7 @@ def main() -> None:
             statistics.fmean(row["n_frontier"] for row in rows) if rows else 0.0
         ),
         "edge_capacity_mode": args.edge_capacity_mode,
+        "graph_type": "answer_conditioned_token_contribution_graph",
         "frontier_mode": args.frontier_mode,
         "evaluate_all_frontier": args.evaluate_all_frontier,
         "lambda_points": args.lambda_points,

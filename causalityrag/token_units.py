@@ -1,4 +1,4 @@
-"""Token-level editable-unit proposal and support scoring."""
+"""Retrieved-token units, linguistic annotations, and support scoring."""
 
 from __future__ import annotations
 
@@ -451,6 +451,6 @@ def units_from_context_row(record: dict, row: dict, *, k: int) -> list[dict]:
 
 
 def units_from_cache_row(record: dict, row: dict, *, k: int) -> list[dict]:
-    """Compatibility alias for historical experiment scripts."""
+    """Load the complete non-punctuation context-token domain."""
 
     return units_from_context_row(record, row, k=k)

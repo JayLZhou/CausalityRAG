@@ -1,6 +1,6 @@
-from causalityrag.attribution_graph import (
-    DirectActivationAttributionGraphBuilder,
-    NativeMLPAttributionGraphBuilder,
+from causalityrag.message_flow import (
+    _ClosedMessageFlowExtractor,
+    _MessageTraceRuntime,
     _overlaps,
 )
 from scripts.build_contribution_graph import answer_from_result_row
@@ -24,49 +24,41 @@ def test_query_context_answer_partitions_and_region_mass_are_explicit() -> None:
         {"src_position": 2, "dst_position": 3, "contribution": 0.75},
     ]
 
-    assert NativeMLPAttributionGraphBuilder._token_partitions(tokens) == {
+    assert _MessageTraceRuntime._token_partitions(tokens) == {
         "query": [2],
         "context": [1],
         "answer": [3],
         "prompt": [0],
     }
-    assert NativeMLPAttributionGraphBuilder._region_edge_mass(edges, tokens) == {
+    assert _MessageTraceRuntime._region_edge_mass(edges, tokens) == {
         "context->query": 0.25,
         "query->answer": 0.75,
     }
 
 
-def test_direct_edge_keeps_signed_and_support_weights_separate() -> None:
-    positive = DirectActivationAttributionGraphBuilder._direct_edge(
-        0, 2, 1, 5, "attention_ov_write", 0.75, 0
-    )
-    negative = DirectActivationAttributionGraphBuilder._direct_edge(
-        1, 5, 2, 5, "mlp_output_write", -0.25, 0
-    )
-
-    assert positive["signed_contribution"] == 0.75
-    assert positive["contribution"] == 0.75
-    assert positive["negative_contribution"] == 0.0
-    assert negative["signed_contribution"] == -0.25
-    assert negative["contribution"] == 0.0
-    assert negative["negative_contribution"] == 0.25
-    assert negative["relevance"] == 0.25
-
-
-def test_direct_nodes_preserve_layer_token_stages_and_answer_sink() -> None:
+def test_contribution_nodes_preserve_token_stages_and_answer_sink() -> None:
     token_meta = [
         {"position": 0, "region": "context", "text": "A"},
         {"position": 1, "region": "answer", "text": "B"},
     ]
-    edge = DirectActivationAttributionGraphBuilder._direct_edge(
-        0, 0, 1, 1, "attention_ov_write", 0.5, 0
-    )
-    output_edge = DirectActivationAttributionGraphBuilder._direct_edge(
-        4, 0, 5, 1, "answer_logit", 0.4, 1
-    )
-    output_edge["dst"] = "answer_target"
+    edge = {
+        "src": "s0:t0",
+        "dst": "s1:t1",
+        "src_layer": 0,
+        "dst_layer": 1,
+        "src_position": 0,
+        "dst_position": 1,
+    }
+    output_edge = {
+        "src": "s4:t0",
+        "dst": "answer_target",
+        "src_layer": 4,
+        "dst_layer": 5,
+        "src_position": 0,
+        "dst_position": 1,
+    }
 
-    nodes = DirectActivationAttributionGraphBuilder._direct_nodes(
+    nodes = _ClosedMessageFlowExtractor._contribution_nodes(
         [edge, output_edge], token_meta, layer_count=2, target_positions=[1]
     )
     node_ids = {node["node_id"] for node in nodes}
@@ -83,18 +75,18 @@ def test_closed_flow_diagnostics_preserve_mass_and_expose_background() -> None:
         {"position": 0, "region": "context"},
         {"position": 1, "region": "answer"},
     ]
-    context_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
+    context_edge = _ClosedMessageFlowExtractor._closed_flow_edge(
         0, 0, 1, 1, "attention_ov_write", 3.0, 0.6, 0
     )
-    background_edge = DirectActivationAttributionGraphBuilder._closed_background_edge(
+    background_edge = _ClosedMessageFlowExtractor._closed_background_edge(
         1, 1, 0.4, 0, "attention_beam"
     )
-    answer_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
+    answer_edge = _ClosedMessageFlowExtractor._closed_flow_edge(
         1, 1, 2, 1, "answer_logit", 2.0, 1.0, 0
     )
     answer_edge["dst"] = "answer_target"
 
-    diagnostics = DirectActivationAttributionGraphBuilder._closed_flow_diagnostics(
+    diagnostics = _ClosedMessageFlowExtractor._closed_flow_diagnostics(
         [context_edge, background_edge, answer_edge],
         token_meta,
     )
@@ -108,39 +100,18 @@ def test_closed_flow_diagnostics_preserve_mass_and_expose_background() -> None:
 
 def test_region_mass_labels_closed_flow_background_explicitly() -> None:
     tokens = [{"position": 0, "region": "context"}]
-    edge = DirectActivationAttributionGraphBuilder._closed_background_edge(
+    edge = _ClosedMessageFlowExtractor._closed_background_edge(
         1, 0, 0.25, 0, "attention_beam"
     )
 
-    assert DirectActivationAttributionGraphBuilder._region_edge_mass(
+    assert _ClosedMessageFlowExtractor._region_edge_mass(
         [edge], tokens
     ) == {"background->context": 0.25}
 
 
-def test_absorbing_flow_removes_background_edges_and_records_mass() -> None:
-    context_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
-        0, 0, 1, 1, "attention_ov_write", 3.0, 0.6, 0
-    )
-    background_edge = DirectActivationAttributionGraphBuilder._closed_background_edge(
-        1, 1, 0.4, 0, "attention_beam"
-    )
-
-    retained, diagnostics = (
-        DirectActivationAttributionGraphBuilder._absorbing_flow_subgraph(
-            [context_edge, background_edge],
-            {"background_flow": 0.4},
-        )
-    )
-
-    assert retained == [context_edge]
-    assert diagnostics["absorbed_background_mass"] == 0.4
-    assert diagnostics["removed_background_edges"] == 1
-    assert diagnostics["retained_background_flow"] == 0.0
-
-
 def test_default_context_handling_does_not_truncate_retrieved_text() -> None:
-    builder = DirectActivationAttributionGraphBuilder.__new__(
-        DirectActivationAttributionGraphBuilder
+    builder = _ClosedMessageFlowExtractor.__new__(
+        _ClosedMessageFlowExtractor
     )
     builder.max_context_tokens = 0
     contexts = [
@@ -156,7 +127,7 @@ def test_default_context_handling_does_not_truncate_retrieved_text() -> None:
 
 
 def test_answer_objective_seed_is_uniform_and_has_unit_mass() -> None:
-    edges = DirectActivationAttributionGraphBuilder._answer_objective_edges(
+    edges = _ClosedMessageFlowExtractor._answer_objective_edges(
         [4, 7, 9],
         final_stage=56,
         final_layer=27,
@@ -177,13 +148,13 @@ def test_contribution_graph_requires_a_context_to_answer_path() -> None:
         {"position": 1, "region": "query", "text": "?"},
         {"position": 2, "region": "answer", "text": "Paris"},
     ]
-    answer_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
+    answer_edge = _ClosedMessageFlowExtractor._closed_flow_edge(
         2, 1, 3, 2, "answer_objective", 1.0, 1.0, 0
     )
     answer_edge["dst"] = "answer_target"
 
     assert (
-        DirectActivationAttributionGraphBuilder._contribution_graph_status(
+        _ClosedMessageFlowExtractor._contribution_graph_status(
             [answer_edge],
             token_meta,
             require_context_path=True,
@@ -191,11 +162,11 @@ def test_contribution_graph_requires_a_context_to_answer_path() -> None:
         == "no_context_input_flow"
     )
 
-    context_edge = DirectActivationAttributionGraphBuilder._closed_flow_edge(
+    context_edge = _ClosedMessageFlowExtractor._closed_flow_edge(
         0, 0, 2, 1, "attention_ov_write", 0.5, 1.0, 0
     )
     assert (
-        DirectActivationAttributionGraphBuilder._contribution_graph_status(
+        _ClosedMessageFlowExtractor._contribution_graph_status(
             [context_edge, answer_edge],
             token_meta,
             require_context_path=True,
@@ -206,7 +177,7 @@ def test_contribution_graph_requires_a_context_to_answer_path() -> None:
 
 def test_empty_contribution_graph_never_reports_ok() -> None:
     assert (
-        DirectActivationAttributionGraphBuilder._contribution_graph_status(
+        _ClosedMessageFlowExtractor._contribution_graph_status(
             [],
             [],
             require_context_path=True,

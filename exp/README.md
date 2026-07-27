@@ -23,9 +23,10 @@ baselines for the same frozen reader and replacement contract:
 
 The runner writes a selection JSONL. It never calls the reader during ranking;
 use `scripts/evaluate_reader.py` with `--ignore-remaining-flow-threshold` to
-perform the matched vLLM verification. The ranking is restricted to
-replacement-registry-valid units, and all queries without a full Top-5 are
-reported rather than padded with extra candidates.
+perform the matched vLLM verification. Ranking covers all non-punctuation
+context tokens and is independent of replacement availability. During
+evaluation, missing counterfactual replacements are generated, validated, and
+persisted in the same shared pool used by ReFlow and every other baseline.
 
 Example (server-side GPU attribution):
 
@@ -34,9 +35,22 @@ python exp/run_gradient_attribution_baselines.py \
   --input RETRIEVAL.jsonl \
   --clean-reference CLEAN_TARGETS.jsonl \
   --context-units CONTEXT_UNITS.jsonl \
-  --replacement-registry REPLACEMENT_REGISTRY.jsonl \
   --method gradient_x_input \
   --model-path /data1/yujia/models/Qwen2.5-7B-Instruct \
   --top-k 5 \
   --out gradient_x_input_top5.jsonl
+```
+
+Matched evaluation:
+
+```bash
+python scripts/evaluate_reader.py \
+  --input RETRIEVAL.jsonl \
+  --gate gradient_x_input_top5.jsonl \
+  --clean-reference CLEAN_TARGETS.jsonl \
+  --context-units CONTEXT_UNITS.jsonl \
+  --replacement-pool REPLACEMENTS.jsonl \
+  --cf-pools CF_POOLS.json \
+  --ignore-remaining-flow-threshold \
+  --out gradient_x_input_top5_reader.jsonl
 ```

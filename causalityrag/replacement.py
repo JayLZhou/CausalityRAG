@@ -19,7 +19,7 @@ _UNTRUSTED_GENERIC_POLICIES = {
     "generic_deterministic_fallback",
 }
 def is_trusted_cached_replacement(replacement: dict) -> bool:
-    """Return whether a stored replacement predates the strict CF contract."""
+    """Return whether a stored replacement satisfies the strict CF contract."""
 
     return bool(
         replacement.get("ok")
@@ -639,6 +639,13 @@ def build_executable_replacements_batched(
             if trust_cached_generic or policy not in _UNTRUSTED_GENERIC_POLICIES:
                 replacements[unit_id] = cached
                 continue
+        if (
+            cached
+            and not cached.get("ok")
+            and str(cached.get("policy", "")) == "skip_after_selection"
+        ):
+            skipped.append({**unit, "replacement_failure": cached})
+            continue
 
         token = str(unit.get("text", "")).strip()
         unit_type = str(unit.get("type", "")).upper()
@@ -700,17 +707,19 @@ def build_executable_replacements_batched(
     for _ in range(max_generic_attempts):
         if not generic_pending:
             break
-        candidates = {
-            unit_id: generic_editor.replace(
-                str(unit.get("text", "")),
-                context_by_id[str(unit["chunk_id"])],
-                str(unit.get("type", "")),
-                pos_hint=str(unit.get("pos", "")),
-                tag_hint=str(unit.get("tag", "")),
-                forbidden=tuple(rejected_values.get(unit_id, [])),
-            )
+        candidates = generic_editor.replace_many([
+            {
+                "unit_id": unit_id,
+                "chunk_id": str(unit["chunk_id"]),
+                "token": str(unit.get("text", "")),
+                "context": context_by_id[str(unit["chunk_id"])],
+                "unit_type": str(unit.get("type", "")),
+                "pos_hint": str(unit.get("pos", "")),
+                "tag_hint": str(unit.get("tag", "")),
+                "forbidden": tuple(rejected_values.get(unit_id, [])),
+            }
             for unit_id, unit in generic_pending.items()
-        }
+        ])
         pending_ids = list(generic_pending)
         validations = _validate_replacement_items(
             nlp,
@@ -735,6 +744,8 @@ def build_executable_replacements_batched(
             ):
                 replacement = {
                     **candidate,
+                    "generator_policy": policy,
+                    "policy": "online_llm_counterfactual",
                     "inferred_type": (
                         str(candidate.get("inferred_type", ""))
                         or str(unit.get("type", ""))

@@ -1,4 +1,4 @@
-"""Build target-specific contribution DAGs for RAG answer resilience."""
+"""Build final token-level contribution graphs in one end-to-end pass."""
 
 from __future__ import annotations
 
@@ -12,12 +12,13 @@ from itertools import islice
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.attribution_graph import DirectActivationAttributionGraphBuilder
+from causalityrag.contribution_graph import ContributionGraphBuilder
 from causalityrag.io import iter_records, record_id
 from causalityrag.reader import (
     answers_exact_match,
     parse_json_object,
 )
+from causalityrag.token_units import all_context_word_units
 
 
 def main() -> None:
@@ -42,21 +43,9 @@ def main() -> None:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--max-receivers-per-layer", type=int, default=48)
-    parser.add_argument("--top-tokens", type=int, default=50)
-    parser.add_argument(
-        "--target-objective",
-        choices=["mean-answer-logit"],
-        default="mean-answer-logit",
-        help="Backward target for edge attribution.",
-    )
-    parser.add_argument("--closed-flow", action="store_true")
-    parser.add_argument("--absorbing-flow", action="store_true")
     args = parser.parse_args()
     if args.start < 0 or args.n <= 0 or args.k <= 0:
         parser.error("--start must be non-negative; --n and --k must be positive")
-    if args.closed_flow and args.absorbing_flow:
-        parser.error("--closed-flow and --absorbing-flow are mutually exclusive")
-
     records = list(
         islice(
             iter_records(args.input),
@@ -82,29 +71,27 @@ def main() -> None:
             for record in records
         ]
 
-    builder = DirectActivationAttributionGraphBuilder(
+    builder = ContributionGraphBuilder(
         args.model_path,
         device=args.device,
         dtype=args.dtype,
-        max_context_tokens=0,
-        max_length=0,
         max_receivers_per_layer=args.max_receivers_per_layer,
-        closed_flow=args.closed_flow,
-        absorbing_flow=args.absorbing_flow,
-        target_objective=args.target_objective,
     )
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     rows = []
     with open(args.out, "w", encoding="utf-8") as output:
-        for index, (record, target) in enumerate(zip(records, targets), 1):
+        for index, (record, target) in enumerate(
+            zip(records, targets),
+            1,
+        ):
             started = time.monotonic()
+            identifier = record_id(record)
             if target.strip() and any(character.isalnum() for character in target):
                 try:
                     row = builder.build(
                         record,
                         target,
                         k=args.k,
-                        top_tokens=args.top_tokens,
                     )
                 except RuntimeError:
                     raise
@@ -114,7 +101,27 @@ def main() -> None:
                     if not target.strip()
                     else "reader_abstention_nonsemantic_answer"
                 )
-                row = builder._empty(record, target, status, 0)
+                token_units = all_context_word_units(record, k=args.k)
+                row = {
+                    "id": identifier,
+                    "question": str(record.get("question", "")),
+                    "gold_answer": str(record.get("answer", "")),
+                    "target_answer": target,
+                    "status": status,
+                    "method": "closed_flow_token_contribution_graph",
+                    "contribution_graph": {
+                        "source": "query_context_source",
+                        "target": "answer_target",
+                        "token_nodes": sorted(
+                            str(unit["unit_id"]) for unit in token_units
+                        ),
+                        "source_edges": [],
+                        "interaction_edges": [],
+                        "target_edges": [],
+                        "diagnostics": {},
+                    },
+                    "message_flow_diagnostics": {},
+                }
             row["clean_answer"] = target
             row["target_source"] = (
                 "frozen_vllm_results" if args.target == "results" else "gold_diagnostic"
@@ -129,7 +136,7 @@ def main() -> None:
             output.flush()
             print(
                 f"[contribution-graph] {index}/{len(records)} status={row['status']} "
-                f"tokens={row['graph'].get('sequence_tokens', 0)} "
+                f"tokens={len(row['contribution_graph'].get('token_nodes', []))} "
                 f"seconds={row['elapsed_seconds']}",
                 flush=True,
             )
@@ -151,13 +158,13 @@ def main() -> None:
         "avg_seconds": round(
             sum(row["elapsed_seconds"] for row in ok) / max(1, len(ok)), 3
         ),
-        "method": builder.method,
-        "target_objective": args.target_objective,
+        "method": "closed_flow_token_contribution_graph",
+        "target_objective": "mean-answer-logit",
         "target_source": (
             "frozen_vllm_results" if args.target == "results" else "gold_diagnostic"
         ),
-        "context_truncation": "none",
-        "sequence_limit": "model_context_window",
+        "graph_api": "ContributionGraphBuilder.build",
+        "receiver_beam": args.max_receivers_per_layer,
         "out": args.out,
     }
     rendered = json.dumps(summary, ensure_ascii=False, indent=2)

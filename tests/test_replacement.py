@@ -1,6 +1,7 @@
 import spacy
 
 from causalityrag.replacement import (
+    build_executable_replacements_batched,
     build_selected_replacements,
     generate_valid_replacement,
     validate_contextual_replacement,
@@ -103,3 +104,69 @@ def test_selected_replacements_reuses_frozen_registry_entry():
 
     assert replacements == frozen
     assert rejected == []
+
+
+def test_on_demand_replacement_is_validated_cached_and_reused():
+    class EmptyLibrary:
+        def infer_type(self, token, unit_type, context):
+            return "CITY"
+
+        def replacement_for_unit(self, unit, context):
+            return {"ok": False}
+
+    class Editor:
+        def __init__(self):
+            self.calls = 0
+
+        def replace_many(self, targets):
+            self.calls += 1
+            return {
+                target["unit_id"]: {
+                    "ok": True,
+                    "old": target["token"],
+                    "new": "London",
+                    "policy": "generic_llm_contextual_batched",
+                }
+                for target in targets
+            }
+
+    class Validator:
+        def validate_many(self, items):
+            return [{"valid": True} for _ in items]
+
+    selected = [{
+        "unit_id": "c0:0:5",
+        "chunk_id": "c0",
+        "text": "Paris",
+        "type": "CONTENT",
+        "pos": "PROPN",
+        "tag": "NNP",
+    }]
+    contexts = [{"chunk_id": "c0", "text": "Paris is in France."}]
+    cache = {}
+    editor = Editor()
+
+    replacements, skipped = build_executable_replacements_batched(
+        selected,
+        contexts,
+        EmptyLibrary(),
+        editor,
+        Validator(),
+        cache,
+    )
+    assert skipped == []
+    assert replacements["c0:0:5"]["new"] == "London"
+    assert replacements["c0:0:5"]["policy"] == "online_llm_counterfactual"
+    assert editor.calls == 1
+
+    replacements, skipped = build_executable_replacements_batched(
+        selected,
+        contexts,
+        EmptyLibrary(),
+        editor,
+        Validator(),
+        cache,
+    )
+    assert skipped == []
+    assert replacements["c0:0:5"]["new"] == "London"
+    assert editor.calls == 1

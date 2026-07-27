@@ -20,8 +20,9 @@ from causalityrag.reader import (
 )
 from causalityrag.replacement import (
     GenericReplacementClient,
-    build_selected_replacements,
+    build_executable_replacements_batched,
 )
+from causalityrag.replacement_pool import ReplacementPool
 from causalityrag.revision import apply_token_replacements
 from causalityrag.rules import TypedRuleLibrary
 from causalityrag.token_units import (
@@ -39,7 +40,16 @@ def main() -> None:
     parser.add_argument("--summary-out", default="")
     parser.add_argument("--cf-pools", required=True)
     parser.add_argument("--type-rules", default="")
-    parser.add_argument("--replacement-registry", default="")
+    parser.add_argument(
+        "--replacement-pool",
+        "--replacement-registry",
+        dest="replacement_pool",
+        required=True,
+        help=(
+            "shared JSONL pool; missing replacements are generated after "
+            "selection, validated, and persisted here"
+        ),
+    )
     parser.add_argument(
         "--context-units",
         "--units-cache",
@@ -79,7 +89,6 @@ def main() -> None:
         choices=("exact", "lenient", "stored"),
         default="exact",
     )
-    parser.add_argument("--strict-replacements", action="store_true")
     parser.add_argument(
         "--spacy-base-url",
         default=os.environ.get(
@@ -106,11 +115,6 @@ def main() -> None:
         str(row.get("id")): row for row in load_records(args.clean_reference)
     }
     gate_rows = load_records(args.gate)
-    registry_by_id = (
-        {str(row.get("id")): row for row in load_records(args.replacement_registry)}
-        if args.replacement_registry
-        else {}
-    )
     units_by_id = (
         {str(row.get("id")): row for row in load_records(args.context_units)}
         if args.context_units
@@ -121,6 +125,7 @@ def main() -> None:
         raise RuntimeError("spaCy annotation service is unhealthy")
     library = TypedRuleLibrary.from_files(args.cf_pools, args.type_rules or None)
     editor = GenericReplacementClient()
+    replacement_pool = ReplacementPool(args.replacement_pool)
     reader = ReaderClient(
         base_url=args.reader_base_url or None,
         model=args.reader_model or None,
@@ -189,11 +194,8 @@ def main() -> None:
                 "candidate_meets_remaining_flow_threshold": None,
                 "remaining_flow_threshold": args.remaining_flow_threshold,
                 "candidate_remaining_support_fraction": None,
-                "replacement_contract": (
-                    "strict_contextual_pos_morphology"
-                    if args.strict_replacements
-                    else "surface_valid_non_deleting_word"
-                ),
+                "replacement_contract": "on_demand_strict_counterfactual_token",
+                "replacement_pool": args.replacement_pool,
                 "reader_backend": "vllm_openai_compatible",
                 "reader_calls": 0,
                 "evaluated_method": args.method_name,
@@ -213,49 +215,47 @@ def main() -> None:
             tuple[tuple[str, str], ...],
             int,
         ] = {}
-        replacement_cache = dict(
-            registry_by_id.get(identifier, {}).get("replacements", {})
-        )
+        replacement_cache = replacement_pool.cache_for(identifier)
         for method, selected_ids in (
             (args.method_name, candidate["selected_ids"]),
         ):
-            selected = [by_id[unit_id] for unit_id in selected_ids]
-            if registry_by_id:
-                missing = [
-                    unit_id
-                    for unit_id in selected_ids
-                    if unit_id not in replacement_cache
-                ]
-                if missing:
-                    method_rows[method] = {
-                        "status": "replacement_registry_missing",
-                        "selected_ids": selected_ids,
-                        "selected_tokens": [
-                            str(unit.get("text", "")) for unit in selected
-                        ],
-                        "n_selected": len(selected),
-                        "missing_registry_ids": missing,
-                    }
-                    continue
-            replacements, rejected = build_selected_replacements(
-                selected,
+            proposed_ids = [
+                str(unit_id) for unit_id in selected_ids if str(unit_id) in by_id
+            ]
+            proposed = [by_id[unit_id] for unit_id in proposed_ids]
+            cache_before = dict(replacement_cache)
+            replacements, rejected = build_executable_replacements_batched(
+                proposed,
                 contexts,
                 library,
                 editor,
                 nlp,
                 replacement_cache,
-                allow_relaxed_fallback=(
-                    not args.strict_replacements and not registry_by_id
-                ),
             )
+            if replacement_cache != cache_before:
+                replacement_pool.persist(
+                    identifier,
+                    replacement_cache,
+                    source=args.method_name,
+                )
+            executable_ids = [
+                unit_id for unit_id in proposed_ids if unit_id in replacements
+            ]
+            selected = [by_id[unit_id] for unit_id in executable_ids]
             result = {
-                "selected_ids": selected_ids,
+                "proposed_ids": proposed_ids,
+                "proposed_tokens": [
+                    str(unit.get("text", "")) for unit in proposed
+                ],
+                "n_proposed": len(proposed_ids),
+                "selected_ids": executable_ids,
                 "selected_tokens": [str(unit.get("text", "")) for unit in selected],
-                "n_selected": len(selected),
-                "rejected": rejected,
+                "n_selected": len(executable_ids),
+                "replacement_skips": rejected,
             }
-            if rejected:
-                result["status"] = "strict_replacement_failed"
+            if not executable_ids:
+                result["status"] = "no_executable_replacement"
+                result["flip"] = False
                 method_rows[method] = result
                 continue
             revision = apply_token_replacements(
@@ -322,10 +322,10 @@ def main() -> None:
                 "remaining_support_fraction"
             ),
             "replacement_contract": (
-                "strict_contextual_pos_morphology"
-                if args.strict_replacements
-                else "surface_valid_non_deleting_word"
+                "on_demand_strict_counterfactual_token"
             ),
+            "replacement_pool": args.replacement_pool,
+            "editor_llm_calls": editor.calls,
             "reader_backend": "vllm_openai_compatible",
             "reader_calls": len(reader_job_by_signature),
             "evaluated_method": args.method_name,

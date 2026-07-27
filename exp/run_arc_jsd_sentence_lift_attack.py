@@ -21,7 +21,11 @@ from exp.arc_jsd import (
 from causalityrag.io import iter_records, record_id, retrieved_contexts
 from causalityrag.linguistics import SpacyAnnotationClient
 from causalityrag.reader import ReaderClient, answers_match, parse_json_object
-from causalityrag.replacement import GenericReplacementClient, generate_valid_replacement
+from causalityrag.replacement import (
+    GenericReplacementClient,
+    build_executable_replacements_batched,
+)
+from causalityrag.replacement_pool import ReplacementPool
 from causalityrag.revision import apply_token_replacements
 from causalityrag.rules import TypedRuleLibrary
 
@@ -33,6 +37,12 @@ def main() -> None:
     parser.add_argument("--model-path", default="/data1/yujia/models/Qwen2.5-7B-Instruct")
     parser.add_argument("--cf-pools", required=True)
     parser.add_argument("--type-rules", default="")
+    parser.add_argument(
+        "--replacement-pool",
+        "--replacement-registry",
+        dest="replacement_pool",
+        required=True,
+    )
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--n", type=int, default=1)
     parser.add_argument("--k", type=int, default=5)
@@ -58,11 +68,13 @@ def main() -> None:
     reader = ReaderClient()
     library = TypedRuleLibrary.from_files(args.cf_pools, args.type_rules or None)
     generic_editor = GenericReplacementClient()
+    replacement_pool = ReplacementPool(args.replacement_pool)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 
     with open(args.out, "w", encoding="utf-8") as output:
         for row_index, record in enumerate(records, 1):
             started = time.monotonic()
+            editor_calls_before = generic_editor.calls
             question = str(record.get("question", ""))
             contexts = retrieved_contexts(record)[:args.k]
             units, sentences = context_sentence_units(record, k=args.k, nlp=nlp)
@@ -102,22 +114,46 @@ def main() -> None:
             )
             node_weights, interactions = vector_supermodular_graph(units, token_features)
             by_id = {str(unit["unit_id"]): unit for unit in units}
-            candidate, selected, replacements, rejected_units = solve_with_valid_replacements(
+            candidate = solve_arc_jsd_ratio(
                 units,
                 node_weights,
                 interactions,
+                {},
+            )
+            proposed_ids = [
+                str(unit_id)
+                for unit_id in candidate.get("selected_ids", [])
+                if str(unit_id) in by_id
+            ]
+            proposed = [by_id[unit_id] for unit_id in proposed_ids]
+            identifier = record_id(record)
+            replacement_cache = replacement_pool.cache_for(identifier)
+            cache_before = dict(replacement_cache)
+            replacements, rejected_units = build_executable_replacements_batched(
+                proposed,
                 contexts,
                 library,
                 generic_editor,
                 nlp,
+                replacement_cache,
             )
+            if replacement_cache != cache_before:
+                replacement_pool.persist(
+                    identifier,
+                    replacement_cache,
+                    source="arc_jsd",
+                )
+            selected_ids = [
+                unit_id for unit_id in proposed_ids if unit_id in replacements
+            ]
+            selected = [by_id[unit_id] for unit_id in selected_ids]
             revision = apply_token_replacements(record, selected, replacements, k=args.k)
             edited_answer = (
                 reader.answer(question, revision["edited_contexts"])
                 if selected else clean_answer
             )
             result = {
-                "id": record_id(record),
+                "id": identifier,
                 "question": question,
                 "gold_answer": str(record.get("answer", "")),
                 "clean_response": trajectory.response_text,
@@ -137,9 +173,13 @@ def main() -> None:
                     for sentence, score in zip(sentences, sentence_scores)
                 },
                 "candidate": candidate,
+                "proposed_units": proposed,
+                "n_proposed": len(proposed),
                 "selected_units": selected,
                 "n_selected": len(selected),
-                "rejected_uneditable_units": rejected_units,
+                "replacement_skips": rejected_units,
+                "replacement_pool": args.replacement_pool,
+                "editor_llm_calls": generic_editor.calls - editor_calls_before,
                 "edits": revision["edits"],
                 "n_edits": revision["n_edits"],
                 "elapsed_seconds": round(time.monotonic() - started, 3),
@@ -153,70 +193,6 @@ def main() -> None:
                 f"flip={result['answer_changed']} seconds={result['elapsed_seconds']}",
                 flush=True,
             )
-
-
-def solve_with_valid_replacements(
-    units: list[dict],
-    node_weights: dict[str, float],
-    interactions: dict[tuple[str, str], float],
-    contexts: list[dict],
-    library: TypedRuleLibrary,
-    generic_editor: GenericReplacementClient,
-    nlp,
-) -> tuple[dict, list[dict], dict[str, dict], list[dict]]:
-    """Remove contextually invalid units and re-solve the exact ratio."""
-
-    by_id = {str(unit["unit_id"]): unit for unit in units}
-    remaining = set(by_id)
-    rejected_units = []
-    while remaining:
-        candidate_units = [by_id[unit_id] for unit_id in remaining]
-        candidate = solve_arc_jsd_ratio(
-            candidate_units,
-            {unit_id: weight for unit_id, weight in node_weights.items() if unit_id in remaining},
-            {
-                edge: weight for edge, weight in interactions.items()
-                if edge[0] in remaining and edge[1] in remaining
-            },
-            {},
-        )
-        selected = [by_id[unit_id] for unit_id in candidate["selected_ids"]]
-        if not selected:
-            return candidate, [], {}, rejected_units
-        replacements, rejected = build_selected_replacements(
-            selected, contexts, library, generic_editor, nlp
-        )
-        if not rejected:
-            return candidate, selected, replacements, rejected_units
-        rejected_units.extend(rejected)
-        remaining -= {str(unit["unit_id"]) for unit in rejected}
-    return {"status": "no_valid_replacement_set", "selected_ids": []}, [], {}, rejected_units
-
-
-def build_selected_replacements(
-    selected: list[dict],
-    contexts: list[dict],
-    library: TypedRuleLibrary,
-    generic_editor: GenericReplacementClient,
-    nlp,
-) -> tuple[dict[str, dict], list[dict]]:
-    context_by_id = {str(context["chunk_id"]): str(context["text"]) for context in contexts}
-    replacements = {}
-    rejected = []
-    for unit in selected:
-        unit_id = str(unit["unit_id"])
-        context = context_by_id[str(unit["chunk_id"])]
-        replacement = generate_valid_replacement(
-            unit, context, library, generic_editor, nlp
-        )
-        if replacement.get("ok"):
-            replacements[unit_id] = replacement
-        else:
-            rejected.append({
-                **unit,
-                "replacement_failure": replacement,
-            })
-    return replacements, rejected
 
 
 if __name__ == "__main__":

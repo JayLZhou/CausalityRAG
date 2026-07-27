@@ -17,9 +17,11 @@ replacement registry and the same context-unit tokenization as ReFlow.
   teacher-forced answer embeddings remain fixed. The integral uses 16
   right-endpoint steps.
 
-The ranking stage never calls the reader. It filters to registry-valid,
-positive-score units, takes a deterministic Top-5, and leaves rows with fewer
-than five valid units explicit. Verification uses
+The historical ranking stage filtered to registry-valid positive-score units,
+took a deterministic Top-5, and left rows with fewer than five valid units
+explicit. These numbers are retained for provenance but must be rerun under
+the current all-token selection and on-demand replacement protocol.
+Verification used
 `scripts/evaluate_reader.py --ignore-remaining-flow-threshold` so the baseline
 comparison measures the selected token intervention rather than ReFlow's
 flow gate.

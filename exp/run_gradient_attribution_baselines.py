@@ -2,9 +2,9 @@
 
 The two supported methods are deliberately outside ReFlow's contribution
 graph: Gradient x Input and Integrated Gradients use the clean-answer
-teacher-forced log-likelihood of the matching Hugging Face reader.  The
-resulting Top-K selections are later evaluated with the shared vLLM reader
-and replacement registry.
+teacher-forced log-likelihood of the matching Hugging Face reader. The
+resulting Top-K selections are independent of replacement availability and
+are later evaluated with the shared on-demand replacement pool.
 """
 
 from __future__ import annotations
@@ -35,7 +35,6 @@ def main() -> None:
     parser.add_argument("--input", required=True)
     parser.add_argument("--clean-reference", required=True)
     parser.add_argument("--context-units", required=True)
-    parser.add_argument("--replacement-registry", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--summary-out", default="")
     parser.add_argument(
@@ -65,10 +64,6 @@ def main() -> None:
     units_by_id = {
         record_id(row): row for row in load_records(args.context_units)
     }
-    registries = {
-        record_id(row): row
-        for row in load_records(args.replacement_registry)
-    }
     end = len(records) if args.n == 0 else min(len(records), args.start + args.n)
     selected_records = list(enumerate(records))[args.start:end]
     model = ArcJsdModel(
@@ -86,18 +81,10 @@ def main() -> None:
             identifier = record_id(record)
             reference = references.get(identifier)
             units_row = units_by_id.get(identifier)
-            registry = registries.get(identifier)
-            if reference is None or units_row is None or registry is None:
+            if reference is None or units_row is None:
                 raise ValueError(f"missing frozen artifact for {identifier}")
             contexts = retrieved_contexts(record)[: args.k]
             units = units_from_context_row(record, units_row, k=args.k)
-            valid_ids = {
-                str(unit_id)
-                for unit_id, replacement in registry.get(
-                    "replacements", {}
-                ).items()
-                if isinstance(replacement, dict) and replacement.get("ok")
-            }
             clean_answer = str(reference.get("clean_answer", "")).strip()
             row = {
                 "index": index,
@@ -109,7 +96,7 @@ def main() -> None:
                 "status": "ok",
                 "objective": "mean_teacher_forced_clean_answer_log_likelihood",
                 "attribution_backend": "matching_hf_reader",
-                "replacement_registry": args.replacement_registry,
+                "selection_domain": "all_non_punctuation_context_tokens",
             }
             if not clean_answer:
                 row.update({
@@ -153,7 +140,6 @@ def main() -> None:
                 candidate = ranked_candidate(
                     units,
                     score_map,
-                    valid_ids=valid_ids,
                     top_k=args.top_k,
                 )
                 if candidate is None:
@@ -376,7 +362,6 @@ def ranked_candidate(
     units: list[dict],
     scores: dict[str, float],
     *,
-    valid_ids: set[str],
     top_k: int,
 ) -> dict | None:
     ranked = sorted(
@@ -384,8 +369,7 @@ def ranked_candidate(
             unit
             for unit in units
             if (
-                str(unit["unit_id"]) in valid_ids
-                and float(scores.get(str(unit["unit_id"]), 0.0)) > 0
+                float(scores.get(str(unit["unit_id"]), 0.0)) > 0
             )
         ),
         key=lambda unit: (
