@@ -384,6 +384,77 @@ class GenericReplacementClient:
             results[unit_id] = values
         return results
 
+    def generate_category_rules(
+        self,
+        categories: list[str],
+        *,
+        max_candidates: int = 32,
+    ) -> dict[str, dict]:
+        """Generate one executable replacement rule per token category."""
+
+        if not categories:
+            return {}
+        with self._calls_lock:
+            self._calls += 1
+        rows = [{"category": category} for category in categories]
+        prompt = (
+            "For every token category below, define a replacement policy that "
+            "changes the information while preserving the category and basic "
+            "grammar. Return strict JSON only with this shape: "
+            "{\"rules\":[{\"category\":\"...\","
+            "\"operation\":\"...\",\"candidates\":[\"...\"]}]}. "
+            f"Return at most {max_candidates} single-token candidates per category. "
+            "Candidates must not be synonyms, inflections, spelling variants, "
+            "multi-word phrases, or the category name itself. For entity categories, "
+            "use different entities of the same type; for POS categories, use words "
+            "with the requested POS. Categories:\n"
+            + json.dumps(rows, ensure_ascii=False)
+        )
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Return only valid JSON defining token replacement rules.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0,
+            "max_tokens": min(4096, max(512, 48 * len(categories))),
+        }
+        request = urllib.request.Request(
+            self.base_url + "/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            parsed = parse_json_object(data["choices"][0]["message"]["content"])
+        except Exception:
+            parsed = {}
+        result = {}
+        if isinstance(parsed, dict) and isinstance(parsed.get("rules"), list):
+            for row in parsed["rules"]:
+                if not isinstance(row, dict):
+                    continue
+                category = str(row.get("category", "")).strip()
+                candidates = row.get("candidates", [])
+                if isinstance(candidates, str):
+                    candidates = [candidates]
+                if category and isinstance(candidates, list):
+                    result[category] = {
+                        "category": category,
+                        "operation": str(row.get("operation", "sample_same_category")),
+                        "candidates": [
+                            str(value).strip()
+                            for value in candidates[:max_candidates]
+                            if str(value).strip() and not any(char.isspace() for char in str(value).strip())
+                        ],
+                    }
+        return result
+
     def replace_many_candidates(
         self,
         targets: list[dict],
