@@ -1,0 +1,161 @@
+# Eight-Dataset Evaluation Runbook
+
+This runbook freezes the protocol for HotpotQA, TimeQA, FinQA, MuSiQue, CUAD,
+Qasper, 2WikiMultiHopQA, and PubMedQA. HotpotQA is complete; the same contract
+is used for the remaining seven datasets.
+
+## Fixed Protocol
+
+- Primary population: 1,000 query IDs per dataset.
+- Retrieval: Qwen3-Embedding-0.6B dense retrieval with cosine similarity and
+  no reranker.
+- Retrieval range: build top-10 once and use nested prefixes for
+  `k in {1, 3, 5, 10}`.
+- Main table: top-5 retrieved chunks.
+- Corpus unit: 384 Qwen3 embedding-model tokens with 64-token overlap.
+  Documents shorter than 384 tokens remain unchanged.
+- Reader and graph model: Qwen2.5-7B-Instruct.
+- Reader decoding: greedy, at most 96 generated tokens.
+- Graph: closed positive message flow, receiver beam 48, then contraction by
+  surface-token position.
+- ReFlow: exact supported breakpoint flow-contract frontier. Do not use the
+  retired geometric price grid, beta threshold, gamma guessing, or the old
+  geometric solver recorded in legacy YAML files.
+- Replacement domain: the frozen top-10 position pool. Main-table evaluation
+  reads this pool with `k=5`.
+- Matched budget: for query `q`, every baseline modifies exactly the number of
+  positions actually modified by ReFlow on `q`.
+- Baselines: five-seed Random, answer-position Attention, Gradient x Input,
+  Integrated Gradients, MIRAGE, and ARC-JSD.
+- Metrics: intent-to-treat Answer-, F1-, EM-, and Acc-Flip plus the paired
+  factual-minus-paraphrase counterparts.
+
+The query and gold answer are never used to generate factual replacements.
+Gold supporting passages are used only to compute post-hoc retrieval recall.
+
+## Frozen Query Sources
+
+Use source order after removing rows with an empty query ID, question, or gold
+answer. Freeze the first 1,000 remaining rows and write their IDs to the
+dataset manifest.
+
+| Dataset | Question source | Corpus source | Preflight note |
+|---|---|---|---|
+| TimeQA | `/data1/yujia/RAGData/timeqa/questions/timeqa.json` | `/data1/yujia/RAGData/timeqa/corpus/timeqa_corpus.json` | 2,613 valid source rows |
+| FinQA | `/data1/yujia/RAGData/finqa/questions/finqa.json` | `/data1/yujia/RAGData/finqa/corpus/finqa_corpus.json` | Skip 13 empty-gold rows occurring in the first 1,000 raw rows |
+| MuSiQue | `/data1/yujia/RAGData/musique/questions/musique.json` | `/data1/yujia/RAGData/musique/corpus/musique_corpus.json` | All 1,000 rows are answerable |
+| CUAD | `/data1/yujia/RAGData/cuad/questions/cuad.json` | `/data1/yujia/RAGData/cuad/corpus/cuad_corpus.json` | Full contracts must be chunked before retrieval |
+| Qasper | `/data1/yujia/RAGData/qasper/questions/qasper.json` | `/data1/yujia/RAGData/qasper/corpus/qasper_corpus.json` | Long sections must be chunked |
+| 2Wiki | `/data1/yujia/RAGData/2wiki/questions/2wikimultihopqa.json` | `/data1/yujia/RAGData/2wiki/corpus/2wikimultihopqa_corpus.json` | Rebuild top-10; the existing artifact is top-5 only |
+| PubMedQA | `/data1/yujia/RAGData/pubmedqa/questions/pubmedqa.json` | `/data1/yujia/RAGData/pubmedqa/corpus/pubmedqa_corpus.json` | Preserve yes/no/maybe labels verbatim |
+
+Do not use `/data1/yujia/RAGData/universal/*/questions.jsonl` for the primary
+table: those files contain only 500 queries per dataset.
+
+## Artifact Layout
+
+Every dataset uses the same directory topology:
+
+```text
+/data1/yujia/CausalityRAG/out/<dataset>/
+  manifest.json
+  retrieval/
+    corpus_chunks_384t_o64.jsonl
+    queries_1000.jsonl
+    top10_1000.jsonl
+    top10_1000.summary.json
+    index/
+  inputs/
+    token_units_top10_1000.jsonl
+    clean_reference_top5_1000.jsonl
+  replacements/
+    shared_pool_top10_v1/
+      positions.jsonl
+      typed_keys.jsonl
+      typed_candidates.jsonl
+      shared_pool.jsonl
+      shared_pool.manifest.json
+  graphs/
+    contribution_graph_closed_beam48_top5_1000.jsonl
+    contribution_graph_token_label_top5_1000.jsonl
+  methods/
+    reflow/
+      frontier_top5_1000.jsonl
+      results_top5_1000.jsonl
+    baselines/
+      attention_top5_1000.jsonl
+      gradient_x_input_top5_1000.jsonl
+      integrated_gradients_top5_1000.jsonl
+      mirage_top5_1000.jsonl
+      arc_jsd_top5_1000.jsonl
+  controls/
+    paraphrase_pool_top5_v1.jsonl
+    paraphrase_results_top5_1000.jsonl
+  audits/
+    final_top10pool_k5/
+      baselines_1000.jsonl
+      factual_metrics_1000.json
+      protocol_audit.json
+  logs/
+```
+
+All JSONL files must have exactly 1,000 aligned query rows unless the manifest
+explicitly declares a corpus-level artifact. Every frozen pool and retrieval
+file records a SHA-256 digest in `manifest.json`.
+
+## Execution Order
+
+For each dataset:
+
+1. Freeze 1,000 query IDs and build the canonical 384/64 corpus chunks.
+2. Retrieve top-10 and audit row count, unique IDs, nested-prefix ordering, and
+   post-hoc gold-title recall.
+3. Build top-10 token units.
+4. Generate, validate, freeze, and hash the method-independent top-10 factual
+   replacement pool.
+5. Generate one frozen clean response from the top-5 prefix.
+6. Build the top-5 contribution graph and contract it to the token graph.
+7. Produce the six baseline rankings. Random is generated in the shared
+   evaluator; the five model-based rankers never perform replacements.
+8. Run the exact ReFlow breakpoint frontier and verify candidates with the
+   frozen reader.
+9. Evaluate every baseline with ReFlow's per-query actual edit count and the
+   same factual pool.
+10. Build the meaning-preserving control pool on the union of selected
+    positions and evaluate the same positions.
+11. Compute the eight main-table metrics, five-seed Random statistics,
+    protocol audit, coverage failures, average tokens, and reader calls.
+12. Freeze the complete dataset manifest before copying values into the paper.
+
+## Dataset Order
+
+Run a 10-query end-to-end smoke test before each 1,000-query job.
+
+1. 2Wiki: closest multi-hop transfer from HotpotQA and already has a top-5
+   retrieval artifact for cross-checking.
+2. PubMedQA: short corpus and label answers; catches answer-normalization bugs.
+3. TimeQA: temporal values and multi-answer strings.
+4. MuSiQue: multi-hop transfer with exactly 1,000 answerable rows.
+5. FinQA: numeric answers and explicit empty-gold filtering.
+6. Qasper: longer scientific sections.
+7. CUAD: most expensive corpus preparation and longest source documents.
+
+## Mandatory Preflight
+
+Do not start a formal job unless all checks pass:
+
+- source checkout is an immutable release directory, not the dirty development
+  checkout;
+- all 44 unit/protocol tests pass;
+- retrieval, pool, model, tokenizer, prompt, and query-manifest hashes are
+  recorded;
+- ports 8001, 8002, and 8003 are healthy behind port 8000 for reader-heavy
+  stages;
+- all three GPUs accept a new CUDA process before local graph/ranker stages;
+- spaCy `en_core_web_lg` is healthy;
+- at least 100 GB of free disk remains;
+- the 10-query smoke test has zero alignment or replacement-pool violations.
+
+The current server must be rebooted or its GPU driver reset before graph and
+model-internal baseline stages: GPU0 reports an NVML error, ports 8001 and 8002
+are down, and new CUDA processes cannot initialize.

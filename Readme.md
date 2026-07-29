@@ -132,18 +132,20 @@ python scripts/evaluate_reflow.py \
 
 ## Baselines
 
-The retained attribution baselines are ARC-JSD, Gradient x Input, and
-Integrated Gradients. Their rankers never modify context. Use the common ReFlow
-token budget and frozen pool for reader evaluation:
+The retained attribution baselines are Random, Attention, Gradient x Input,
+Integrated Gradients, MIRAGE, and ARC-JSD. Their rankers never modify context.
+Use the common ReFlow token budget and frozen pool for reader evaluation:
 
 ```bash
 python scripts/evaluate_matched_budget_baselines.py \
   --input RETRIEVAL.jsonl \
   --units-cache TOKEN_UNITS.jsonl \
   --reflow-results REFLOW_RESULTS.jsonl \
+  --scores attention=ATTENTION_SCORES.jsonl \
   --scores arc_jsd=ARC_JSD_SCORES.jsonl \
   --scores gradient_x_input=GRADIENT_SCORES.jsonl \
   --scores integrated_gradients=IG_SCORES.jsonl \
+  --scores mirage=MIRAGE_SCORES.jsonl \
   --shared-pool pool/shared_pool.jsonl \
   --expected-pool-sha256 POOL_SHA256 \
   --out BASELINE_RESULTS.jsonl \
