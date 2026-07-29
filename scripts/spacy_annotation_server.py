@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import spacy
 
-from causalityrag.replacement import (
+from causalityrag.replacement_validation import (
     validate_contextual_replacement,
     validate_contextual_replacements_batch,
 )

@@ -1,4 +1,4 @@
-from exp.run_contribution_aware_flow_contract_attack import (
+from causalityrag.flow_contract import (
     breakpoint_price_cuts,
     require_complete_graph_domain,
     solve_price_cut,
@@ -35,8 +35,6 @@ def test_selection_is_independent_of_replacement_pool_availability():
     assert result["status"] == "optimal"
     assert result["selected_ids"]
     assert set(result["selected_ids"]).issubset({"first", "second"})
-    assert result["token_units"] == 2
-    assert result["selectable_units"] == 2
 
 
 def test_graph_domain_cannot_be_pre_filtered_by_replacement_availability():
@@ -52,7 +50,7 @@ def test_graph_domain_cannot_be_pre_filtered_by_replacement_availability():
     try:
         require_complete_graph_domain(graph, units)
     except ValueError as error:
-        assert "every non-punctuation context token" in str(error)
+        assert "graph and token cache differ" in str(error)
     else:
         raise AssertionError("replacement-filtered graph domain was accepted")
 

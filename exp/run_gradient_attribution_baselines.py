@@ -3,8 +3,8 @@
 The two supported methods are deliberately outside ReFlow's contribution
 graph: Gradient x Input and Integrated Gradients use the clean-answer
 teacher-forced log-likelihood of the matching Hugging Face reader. The
-resulting Top-K selections are independent of replacement availability and
-are later evaluated with the shared on-demand replacement pool.
+resulting rankings are independent of replacement availability and are later
+evaluated against the shared frozen replacement pool.
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ from exp.arc_jsd import ArcJsdModel
 
 
 METHOD_NAMES = {
-    "gradient_x_input": "gradient_x_input_top5",
-    "integrated_gradients": "integrated_gradients_top5",
+    "gradient_x_input": "gradient_x_input",
+    "integrated_gradients": "integrated_gradients",
 }
 
 

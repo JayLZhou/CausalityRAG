@@ -15,6 +15,26 @@ TOKEN_RE = re.compile(r"[A-Za-z]+(?:[-'][A-Za-z]+)*|\d+(?:[.,:/-]\d+)*|[%$€£�
 WORD_RE = re.compile(r"[A-Za-z0-9]+")
 NUMBER_RE = re.compile(r"^\d+(?:[.,:/-]\d+)*$")
 MONEY_RE = re.compile(r"^[%$€£¥]+$")
+ONTO_TYPES = {
+    "DATE",
+    "TIME",
+    "CARDINAL",
+    "QUANTITY",
+    "PERCENT",
+    "ORDINAL",
+    "MONEY",
+    "PERSON",
+    "NORP",
+    "FAC",
+    "ORG",
+    "GPE",
+    "LOC",
+    "PRODUCT",
+    "EVENT",
+    "WORK_OF_ART",
+    "LAW",
+    "LANGUAGE",
+}
 
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "been", "being", "by", "did", "do",
@@ -256,8 +276,6 @@ def all_context_word_units(
                     None,
                 )
                 if entity is not None:
-                    from causalityrag.rules import ONTO_TYPES
-
                     if str(entity["label"]).upper() in ONTO_TYPES:
                         unit_type = str(entity["label"]).upper()
             elif doc is not None:
@@ -280,8 +298,6 @@ def all_context_word_units(
                     None,
                 )
                 if entity is not None:
-                    from causalityrag.rules import ONTO_TYPES
-
                     if entity.label_.upper() in ONTO_TYPES:
                         unit_type = entity.label_.upper()
             unit = {
