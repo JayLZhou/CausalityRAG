@@ -76,8 +76,7 @@ Every dataset uses the same directory topology:
       shared_pool.jsonl
       shared_pool.manifest.json
   graphs/
-    contribution_graph_closed_beam48_top5_1000.jsonl
-    contribution_graph_token_label_top5_1000.jsonl
+    contribution_graph_top5_1000.jsonl
   methods/
     reflow/
       frontier_top5_1000.jsonl
@@ -114,7 +113,7 @@ For each dataset:
 4. Generate, validate, freeze, and hash the method-independent top-10 factual
    replacement pool.
 5. Generate one frozen clean response from the top-5 prefix.
-6. Build the top-5 contribution graph and contract it to the token graph.
+6. Build the final top-5 contribution graph in one end-to-end execution.
 7. Produce the six baseline rankings. Random is generated in the shared
    evaluator; the five model-based rankers never perform replacements.
 8. Run the exact ReFlow breakpoint frontier and verify candidates with the

@@ -79,14 +79,12 @@ python scripts/freeze_shared_replacement_pool.py \
   --positions pool/positions.jsonl \
   --typed-candidates pool/typed_candidates.jsonl \
   --out pool/shared_pool.jsonl \
-  --manifest-out pool/shared_pool.manifest.json \
-  --exclude-unresolved
+  --manifest-out pool/shared_pool.manifest.json
 ```
 
-When extending top-k, `scripts/seed_typed_pool_from_position_pool.py` can seed
-typed candidates from an existing frozen position pool. Exclusions are common
-to every method and represent positions for which no legal counterfactual was
-found under the declared contract.
+Pool freezing fails closed if any declared content-token position has no legal
+counterfactual candidate. Generation must resolve every typed key before the
+pool can be used by ReFlow or a baseline.
 
 ## ReFlow
 
@@ -98,9 +96,11 @@ scripts/generate_reader_targets.py
 scripts/build_contribution_graph.py
 ```
 
-If a compatible closed message-flow artifact already exists,
-`scripts/contract_contribution_graph.py` contracts it into the final token
-graph without another model forward/backward pass.
+`scripts/build_contribution_graph.py` is the only graph-construction entry
+point. It computes answer-conditioned message contributions, closes the
+positive message flow, and contracts Transformer positions to retrieved-token
+positions in one end-to-end execution. Its formal output is
+`contribution_graph_top5_1000.jsonl`.
 
 Generate the graph frontier:
 
