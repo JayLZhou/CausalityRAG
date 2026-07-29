@@ -110,6 +110,7 @@ def evaluate_query(
         "gold_answer": gold_answer,
         "clean_correct": answers_exact_match(clean_answer, gold_answer),
         "matched_token_budget": budget,
+        "budget_source": "reflow_terminal",
         "replacement_seed": replacement_seed,
     }
     if not valid_clean_answer(clean_answer):
@@ -349,6 +350,7 @@ def main() -> None:
         "shared_pool": os.path.abspath(args.shared_pool),
         "shared_pool_sha256": actual_pool_sha,
         "replacement_seed": args.replacement_seed,
+        "budget_source": "reflow_terminal",
         "random_seeds": random_seeds,
         "score_files": {
             spec.split("=", 1)[0]: os.path.abspath(spec.split("=", 1)[1])

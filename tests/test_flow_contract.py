@@ -13,7 +13,6 @@ def test_fixed_price_flow_contract_returns_a_token_gated_cut():
         {("u1", "u2"): 2.0},
         {"u2": 2.0},
         token_price=0.5,
-        edge_capacity_mode="unit-plus-normalized",
     )
 
     assert result["status"] == "optimal"
@@ -29,7 +28,6 @@ def test_selection_is_independent_of_replacement_pool_availability():
         {("first", "second"): 2.0},
         {"second": 2.0},
         token_price=0.5,
-        edge_capacity_mode="unit-plus-normalized",
     )
 
     assert result["status"] == "optimal"
@@ -62,7 +60,6 @@ def test_breakpoint_frontier_recovers_every_extreme_cardinality():
         {"high": 3.0, "low": 1.0},
         {},
         {"high": 3.0, "low": 1.0},
-        edge_capacity_mode="unit-plus-normalized",
     )
 
     assert result["status"] == "ok"

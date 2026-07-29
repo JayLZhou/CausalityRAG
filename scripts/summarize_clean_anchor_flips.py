@@ -40,7 +40,7 @@ def _is_executed(method: dict[str, Any]) -> bool:
 def _metric_row(*, row: dict[str, Any], edited_answer: str) -> dict[str, Any] | None:
     clean_answer = str(row.get("clean_answer", ""))
     gold_answer = str(row.get("gold_answer", ""))
-    if not clean_answer or not gold_answer:
+    if not clean_answer or not gold_answer or not edited_answer.strip():
         return None
     return {
         "id": str(row.get("id", "")),
@@ -56,6 +56,7 @@ def _metric_row(*, row: dict[str, Any], edited_answer: str) -> dict[str, Any] | 
 def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> dict[str, Any]:
     total_queries = 0
     evaluated = 0
+    valid_answers = 0
     scored = 0
     answer_flips = 0
     f1_flips = 0
@@ -70,8 +71,9 @@ def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> 
         evaluated += 1
         clean_answer = str(parent.get("clean_answer", ""))
         edited_answer = str(method.get("edited_answer", method.get("answer", "")))
-        if clean_answer:
+        if clean_answer and edited_answer.strip():
             answer_flips += int(not answers_exact_match(edited_answer, clean_answer))
+            valid_answers += 1
         metrics = _metric_row(
             row=parent,
             edited_answer=edited_answer,
@@ -102,6 +104,7 @@ def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> 
     return {
         "total_queries": total_queries,
         "reader_executed_queries": evaluated,
+        "valid_answer_queries": valid_answers,
         "gold_scored_queries": scored,
         "answer_flip_count": answer_flips,
         "answer_flip_ratio": answer_flips / denominator,
@@ -146,7 +149,7 @@ def main() -> None:
     })
     output: dict[str, Any] = {
         "metric_contract": {
-            "population": "all 1,000 HotpotQA rows; no reader execution or no legal edit contributes zero flips",
+            "population": "all 1,000 HotpotQA rows; no reader execution, no legal edit, or an empty answer contributes zero flips",
             "answer_flip": "normalized EM(edited, clean) = 0",
             "f1_flip": "HippoRAG-style normalized token F1(edited, gold) != token F1(clean, gold)",
             "em_flip": "normalized EM(edited, gold) != normalized EM(clean, gold)",

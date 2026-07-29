@@ -20,7 +20,8 @@ contracted by surface-token position. ReFlow then restricts optimization to a
 method-independent editable domain fixed before any method runs. For each
 contract price, the inner token-gated cut is solved exactly by max-flow. An
 output-sensitive breakpoint recursion enumerates all extreme supported
-cardinality-flow solutions without a price grid.
+cardinality-flow solutions. Positive contribution capacities are normalized by
+their query-level mean before frontier construction.
 
 The graph is a search surrogate. A token set is a valid intervention only when
 direct reader verification changes the response.

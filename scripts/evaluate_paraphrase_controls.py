@@ -85,6 +85,19 @@ def evaluate_selected(
             "edits": revision["edits"],
         }
     edited = reader.answer(str(record.get("question", "")), revision["edited_contexts"])
+    if not edited.strip():
+        return {
+            "status": "invalid_empty_answer",
+            "reader_called": True,
+            "selected_ids": selected,
+            "n_modified_tokens": int(revision["n_edits"]),
+            "edits": revision["edits"],
+            "edited_answer": edited,
+            "answer_flip": False,
+            "f1_flip": False,
+            "em_flip": False,
+            "acc_flip": False,
+        }
     clean_f1 = answer_token_f1(clean_answer, gold_answer)
     edited_f1 = answer_token_f1(edited, gold_answer)
     return {
@@ -115,27 +128,32 @@ def summarize(rows: list[dict]) -> dict:
     for name in method_names:
         values = [row.get("methods", {}).get(name, {}) for row in rows]
         executed = [row for row in values if row.get("reader_called")]
+        valid = [
+            row for row in executed
+            if str(row.get("edited_answer", "")).strip()
+        ]
         methods[name] = {
             "queries": len(values),
             "executed_queries": len(executed),
-            "answer_flips": sum(bool(row.get("answer_flip")) for row in executed),
+            "valid_answer_queries": len(valid),
+            "answer_flips": sum(bool(row.get("answer_flip")) for row in valid),
             "answer_flip_rate_itt": (
-                sum(bool(row.get("answer_flip")) for row in executed)
+                sum(bool(row.get("answer_flip")) for row in valid)
                 / max(1, len(values))
             ),
-            "f1_flips": sum(bool(row.get("f1_flip")) for row in executed),
+            "f1_flips": sum(bool(row.get("f1_flip")) for row in valid),
             "f1_flip_rate_itt": (
-                sum(bool(row.get("f1_flip")) for row in executed)
+                sum(bool(row.get("f1_flip")) for row in valid)
                 / max(1, len(values))
             ),
-            "em_flips": sum(bool(row.get("em_flip")) for row in executed),
+            "em_flips": sum(bool(row.get("em_flip")) for row in valid),
             "em_flip_rate_itt": (
-                sum(bool(row.get("em_flip")) for row in executed)
+                sum(bool(row.get("em_flip")) for row in valid)
                 / max(1, len(values))
             ),
-            "acc_flips": sum(bool(row.get("acc_flip")) for row in executed),
+            "acc_flips": sum(bool(row.get("acc_flip")) for row in valid),
             "acc_flip_rate_itt": (
-                sum(bool(row.get("acc_flip")) for row in executed)
+                sum(bool(row.get("acc_flip")) for row in valid)
                 / max(1, len(values))
             ),
             "status_histogram": {

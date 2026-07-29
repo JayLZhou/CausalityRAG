@@ -193,6 +193,14 @@ def main() -> None:
     parser.add_argument("--out", required=True)
     parser.add_argument("--manifest-out", required=True)
     parser.add_argument("--unresolved-out", required=True)
+    parser.add_argument(
+        "--existing-pool",
+        default="",
+        help=(
+            "Reuse covered rows from an existing frozen pool and generate "
+            "only newly selected positions."
+        ),
+    )
     parser.add_argument("--n", type=int, default=1000)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--workers", type=int, default=24)
@@ -238,7 +246,23 @@ def main() -> None:
                 raise KeyError(f"selected token missing from unit cache: {unit_id}")
             targets[unit_id] = target_from_unit(by_id[unit_id], sentences)
 
-    ordered = [targets[unit_id] for unit_id in sorted(targets)]
+    existing_rows = {}
+    if args.existing_pool:
+        existing_rows = {
+            str(row["unit_id"]): row
+            for row in load_records(args.existing_pool)
+            if row.get("unit_id") and row.get("candidates")
+        }
+    reused = [
+        existing_rows[unit_id]
+        for unit_id in sorted(targets)
+        if unit_id in existing_rows
+    ]
+    ordered = [
+        targets[unit_id]
+        for unit_id in sorted(targets)
+        if unit_id not in existing_rows
+    ]
     batches = [
         ordered[start : start + args.batch_size]
         for start in range(0, len(ordered), args.batch_size)
@@ -247,7 +271,7 @@ def main() -> None:
         base_url=args.llm_base_url or None,
         model=args.llm_model or None,
     )
-    rows = []
+    rows = list(reused)
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = [
             executor.submit(
@@ -297,6 +321,18 @@ def main() -> None:
             for row in covered
         ),
         "llm_calls": client.calls,
+        "reused_positions": len(reused),
+        "generated_positions": len(ordered),
+        "existing_pool": (
+            os.path.abspath(args.existing_pool)
+            if args.existing_pool
+            else None
+        ),
+        "existing_pool_sha256": (
+            file_sha256(args.existing_pool)
+            if args.existing_pool
+            else None
+        ),
         "pool": os.path.abspath(args.out),
         "pool_sha256": file_sha256(args.out),
     }

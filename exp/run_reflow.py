@@ -37,11 +37,6 @@ def main() -> None:
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--n", type=int, default=1000)
     parser.add_argument("--k", type=int, default=5)
-    parser.add_argument(
-        "--edge-capacity-mode",
-        choices=("unit-plus-normalized", "normalized"),
-        default="unit-plus-normalized",
-    )
     args = parser.parse_args()
 
     actual_pool_sha = file_sha256(args.shared_pool)
@@ -86,7 +81,6 @@ def main() -> None:
                 source,
                 interactions,
                 target,
-                edge_capacity_mode=args.edge_capacity_mode,
             )
             initial_flow = remaining_contribution_flow(
                 units,
@@ -94,7 +88,6 @@ def main() -> None:
                 interactions,
                 target,
                 removed_ids=frozenset(),
-                edge_capacity_mode=args.edge_capacity_mode,
             )
             candidates = []
             for candidate in frontier.get("candidates", []):
@@ -108,7 +101,6 @@ def main() -> None:
                     interactions,
                     target,
                     removed_ids=set(selected_ids),
-                    edge_capacity_mode=args.edge_capacity_mode,
                 )
                 candidates.append({
                     **candidate,
@@ -127,7 +119,7 @@ def main() -> None:
                 "clean_answer": str(
                     graph.get("clean_answer", graph.get("target_answer", ""))
                 ),
-                "edge_capacity_mode": args.edge_capacity_mode,
+                "capacity_normalization": "mean-positive-edge",
                 "graph_token_units": len(all_units),
                 "editable_token_units": len(units),
                 "shared_pool_sha256": actual_pool_sha,
@@ -162,7 +154,7 @@ def main() -> None:
         )
         if rows
         else 0.0,
-        "edge_capacity_mode": args.edge_capacity_mode,
+        "capacity_normalization": "mean-positive-edge",
         "shared_pool": os.path.abspath(args.shared_pool),
         "shared_pool_sha256": actual_pool_sha,
         "out": os.path.abspath(args.out),

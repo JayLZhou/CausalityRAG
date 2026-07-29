@@ -7,13 +7,10 @@ import math
 from causalityrag.max_flow import Dinic
 
 
-def contribution_capacity(weight: float, mean_weight: float, mode: str) -> float:
-    normalized = float(weight) / mean_weight
-    if mode == "normalized":
-        return normalized
-    if mode == "unit-plus-normalized":
-        return 1.0 + normalized
-    raise ValueError(f"unknown edge capacity mode: {mode}")
+def contribution_capacity(weight: float, mean_weight: float) -> float:
+    """Normalize every positive contribution by the query-level edge mean."""
+
+    return float(weight) / mean_weight
 
 
 def require_complete_graph_domain(graph_row: dict, units: list[dict]) -> None:
@@ -75,7 +72,6 @@ def solve_price_cut(
     target_edges: dict[str, float],
     *,
     token_price: float,
-    edge_capacity_mode: str = "unit-plus-normalized",
 ) -> dict:
     unit_ids, source_weights, internal, target_weights = _positive_graph(
         units,
@@ -117,11 +113,7 @@ def solve_price_cut(
     contribution_arcs = []
 
     def add(src: int, dst: int, weight: float) -> None:
-        capacity = contribution_capacity(
-            weight,
-            mean_weight,
-            edge_capacity_mode,
-        )
+        capacity = contribution_capacity(weight, mean_weight)
         graph.add_edge(src, dst, capacity)
         contribution_arcs.append((src, dst, capacity))
 
@@ -160,7 +152,7 @@ def solve_price_cut(
         "residual_edge_cost": float(residual),
         "cut_value": float(cut_value),
         "mean_edge_weight": float(mean_weight),
-        "edge_capacity_mode": edge_capacity_mode,
+        "capacity_normalization": "mean-positive-edge",
     }
 
 
@@ -171,7 +163,6 @@ def remaining_contribution_flow(
     target_edges: dict[str, float],
     *,
     removed_ids: set[str] | frozenset[str],
-    edge_capacity_mode: str = "unit-plus-normalized",
 ) -> float:
     unit_ids, source_weights, internal, target_weights = _positive_graph(
         units,
@@ -191,11 +182,7 @@ def remaining_contribution_flow(
         return 0.0
 
     def capacity(weight: float) -> float:
-        return contribution_capacity(
-            weight,
-            mean_weight,
-            edge_capacity_mode,
-        )
+        return contribution_capacity(weight, mean_weight)
 
     open_gate = sum(capacity(weight) for weight in weights) + 1.0
     removed = {str(unit_id) for unit_id in removed_ids}
@@ -287,7 +274,6 @@ def breakpoint_price_cuts(
     interactions: dict[tuple[str, str], float],
     target: dict[str, float],
     *,
-    edge_capacity_mode: str = "unit-plus-normalized",
     tolerance: float = 1e-9,
 ) -> dict:
     initial_flow = remaining_contribution_flow(
@@ -296,7 +282,6 @@ def breakpoint_price_cuts(
         interactions,
         target,
         removed_ids=frozenset(),
-        edge_capacity_mode=edge_capacity_mode,
     )
     if initial_flow <= tolerance:
         return {
@@ -316,7 +301,7 @@ def breakpoint_price_cuts(
         "lambda": 0.0,
         "objective_value": 0.0,
         "token_cost": 0.0,
-        "edge_capacity_mode": edge_capacity_mode,
+        "capacity_normalization": "mean-positive-edge",
     }
     right = {
         "status": "optimal",
@@ -327,7 +312,7 @@ def breakpoint_price_cuts(
         "token_cost": 0.0,
         "residual_edge_cost": initial_flow,
         "cut_value": initial_flow,
-        "edge_capacity_mode": edge_capacity_mode,
+        "capacity_normalization": "mean-positive-edge",
     }
     cache = {}
     demand_calls = 0
@@ -342,7 +327,6 @@ def breakpoint_price_cuts(
                 interactions,
                 target,
                 token_price=price,
-                edge_capacity_mode=edge_capacity_mode,
             )
         return cache[price]
 
@@ -421,6 +405,6 @@ def breakpoint_price_cuts(
             "demand_calls": demand_calls,
             "total_maxflow_calls": demand_calls + 2,
             "certified_adjacent_intervals": certified,
-            "edge_capacity_mode": edge_capacity_mode,
+            "capacity_normalization": "mean-positive-edge",
         },
     }

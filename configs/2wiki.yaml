@@ -4,16 +4,17 @@ experiment: 2wiki_contribution_flow_final
 seed: 20260711
 
 data:
-  input: /data1/yujia/RAGData/2wiki-exp/results/retrieval_2wiki_top5_all1000.jsonl
+  input: /data1/yujia/CausalityRAG/out/2wiki/retrieval/top10_1000.jsonl
   start: 0
   count: 1000
-  retrieved_chunks: 5
+  replacement_pool_chunks: 10
+  evaluation_chunks: 5
 
 reader:
   backend: vllm_openai_compatible
   model_path: /data1/yujia/models/Qwen2.5-7B-Instruct
   served_model: qwen2.5-7b
-  base_url: http://127.0.0.1:8002/v1
+  base_url: http://127.0.0.1:8000/v1
   dtype: bfloat16
   decoding: greedy
   max_new_tokens: 96
@@ -25,25 +26,20 @@ annotation:
 
 contribution_graph:
   backend: huggingface_sdpa_layerwise_attention_recompute
-  method: direct-activation
-  absorbing_flow: true
+  method: answer_conditioned_closed_positive_message_flow
+  target_objective: mean_answer_logit
   context_truncation: none
   sequence_limit: model_context_window
   max_receivers_per_layer: 48
-  # Keep every positive incoming edge for each active receiver.
+  token_contraction: surface_position
 
 optimization:
-  projection: projected-token
-  capacity_mode: raw
-  solver: geometric-k-guessing
-  beta: 0.1
-  eta: 1.0
-  gamma: 1.0
+  capacity_normalization: mean-positive-edge
+  solver: exact-supported-breakpoint-flow-contract
 
 replacement:
-  counterfactual_pools: /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/cf_pools.json
-  type_rules: /data1/yujia/RAGData/hotpotqa-exp/memory/yvette/type_rules_llm.yaml
-  mode: fixed_point_shared_registry
+  mode: frozen_shared_top10_pool
+  seed: 0
   deletion_allowed: false
   require_single_token: true
   require_contextual_pos: true
@@ -52,28 +48,17 @@ replacement:
   entity_policy: same_type_same_length_same_slot
 
 evaluation:
-  native_remaining_flow_threshold: 0.2
-  clean_correct_policy: exact
+  population: all_1000_queries
+  baseline_budget: matched_reflow_terminal_set
   final_backend: vllm_openai_compatible
   reader_workers: 16
 
 artifacts:
-  root: /data1/yujia/CausalityRAG/runs
-  run_id: all1000-final-v3
-  directory: /data1/yujia/CausalityRAG/runs/2wiki/all1000-final-v3
-  context_units: 01_context/context_units.jsonl
-  clean_targets: 02_reader/clean_targets.jsonl
-  contribution_graph: 03_graph/contribution_graph.jsonl
-  contribution_flow_initial: 04_flow/initial.jsonl
-  contribution_flow_final: 04_flow/final.jsonl
-  replacement_registry: 05_registry/final.jsonl
-  evaluation_clean_exact: 06_evaluation/clean_exact.jsonl
-  evaluation_all_queries: 06_evaluation/all_queries.jsonl
-  evaluation_clean_exact_all_available: 06_evaluation/clean_exact_all_available.jsonl
-  evaluation_all_queries_all_available: 06_evaluation/all_queries_all_available.jsonl
-  baseline_mirage_top5_scores: 07_baselines/mirage_top5/scores/final.jsonl
-  baseline_mirage_top5_selection: 07_baselines/mirage_top5/selection/final.jsonl
-  baseline_mirage_top5_registry: 07_baselines/mirage_top5/registry/final.jsonl
-  baseline_mirage_top5_clean_exact: 07_baselines/mirage_top5/evaluation/clean_exact.jsonl
-  baseline_mirage_top5_all_queries: 07_baselines/mirage_top5/evaluation/all_queries.jsonl
+  root: /data1/yujia/CausalityRAG/out/2wiki
+  token_units: inputs/token_units_top10_1000.jsonl
+  clean_targets: inputs/clean_reference_top5_1000.jsonl
+  replacement_pool: replacements/shared_pool_top10_v1/shared_pool.jsonl
+  contribution_graph: graphs/contribution_graph_top5_1000.jsonl
+  frontier: methods/reflow/frontier_top5_1000.jsonl
+  results: methods/reflow/results_top5_1000.jsonl
   manifest: manifest.json

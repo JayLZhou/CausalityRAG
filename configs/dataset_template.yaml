@@ -6,24 +6,22 @@ seed: 20260711
 
 data:
   name: dataset_name
-  input: /path/to/retrieval_records.jsonl
+  input: /data1/yujia/CausalityRAG/out/dataset_name/retrieval/top10_1000.jsonl
   start: 0
   count: 1000
-  retrieved_chunks: 5
+  replacement_pool_chunks: 10
+  evaluation_chunks: 5
 
 retrieval:
   chunk_unit: token
-  chunk_size_tokens: null
-  chunk_overlap_tokens: null
-  embedding_model: null
-  embedding_fields: null
-  query_instruction: null
+  chunk_size_tokens: 384
+  chunk_overlap_tokens: 64
+  embedding_model: Qwen3-Embedding-0.6B
   embedding_sequence_truncation: none
   vector_normalization: l2
-  index: null
-  similarity: null
+  similarity: cosine
   reranker: none
-  top_k: 5
+  top_k: 10
 
 reader:
   backend: vllm_openai_compatible
@@ -41,25 +39,20 @@ annotation:
 
 contribution_graph:
   backend: huggingface_sdpa_layerwise_attention_recompute
-  method: direct-activation
-  absorbing_flow: true
+  method: answer_conditioned_closed_positive_message_flow
+  target_objective: mean_answer_logit
   context_truncation: none
   sequence_limit: model_context_window
   max_receivers_per_layer: 48
-  # Keep every positive incoming edge for each active receiver.
+  token_contraction: surface_position
 
 optimization:
-  projection: projected-token
-  capacity_mode: raw
-  solver: geometric-k-guessing
-  beta: 0.1
-  eta: 1.0
-  gamma: 1.0
+  capacity_normalization: mean-positive-edge
+  solver: exact-supported-breakpoint-flow-contract
 
 replacement:
-  counterfactual_pools: /path/to/counterfactual_pools.json
-  type_rules: /path/to/type_rules.yaml
-  mode: fixed_point_shared_registry
+  mode: frozen_shared_top10_pool
+  seed: 0
   deletion_allowed: false
   require_single_token: true
   require_contextual_pos: true
@@ -68,20 +61,17 @@ replacement:
   entity_policy: same_type_same_length_same_slot
 
 evaluation:
-  native_remaining_flow_threshold: 0.2
-  clean_correct_policy: exact
+  population: all_1000_queries
+  baseline_budget: matched_reflow_terminal_set
   final_backend: vllm_openai_compatible
   reader_workers: 16
 
 artifacts:
-  root: /data1/yujia/CausalityRAG/runs
-  run_id: final-v1
-  directory: /data1/yujia/CausalityRAG/runs/dataset_name/final-v1
-  context_units: 01_context/context_units.jsonl
-  clean_targets: 02_reader/clean_targets.jsonl
-  contribution_graph: 03_graph/contribution_graph.jsonl
-  contribution_flow_initial: 04_flow/initial.jsonl
-  contribution_flow_final: 04_flow/final.jsonl
-  replacement_registry: 05_registry/final.jsonl
-  evaluation_directory: 06_evaluation
+  root: /data1/yujia/CausalityRAG/out/dataset_name
+  token_units: inputs/token_units_top10_1000.jsonl
+  clean_targets: inputs/clean_reference_top5_1000.jsonl
+  replacement_pool: replacements/shared_pool_top10_v1/shared_pool.jsonl
+  contribution_graph: graphs/contribution_graph_top5_1000.jsonl
+  frontier: methods/reflow/frontier_top5_1000.jsonl
+  results: methods/reflow/results_top5_1000.jsonl
   manifest: manifest.json

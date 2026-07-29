@@ -18,9 +18,8 @@ is used for the remaining seven datasets.
 - Reader decoding: greedy, at most 96 generated tokens.
 - Graph: closed positive message flow, receiver beam 48, then contraction by
   surface-token position.
-- ReFlow: exact supported breakpoint flow-contract frontier. Do not use the
-  retired geometric price grid, beta threshold, gamma guessing, or the old
-  geometric solver recorded in legacy YAML files.
+- ReFlow: exact supported breakpoint flow-contract frontier with
+  mean-normalized positive contribution capacities.
 - Replacement domain: the frozen top-10 position pool. Main-table evaluation
   reads this pool with `k=5`.
 - Matched budget: for query `q`, every baseline modifies exactly the number of
