@@ -11,6 +11,8 @@ def apply_token_replacements(
     replacements: dict[str, dict],
     *,
     k: int = 5,
+    allow_whitespace: bool = False,
+    allow_case_only: bool = False,
 ) -> dict:
     contexts = retrieved_contexts(record)
     if k:
@@ -54,8 +56,14 @@ def apply_token_replacements(
                 continue
             if (
                 not new
-                or new.casefold() == old.casefold()
-                or any(character.isspace() for character in new)
+                or (
+                    not allow_case_only
+                    and new.casefold() == old.casefold()
+                )
+                or (
+                    not allow_whitespace
+                    and any(character.isspace() for character in new)
+                )
             ):
                 edits.append({
                     **base,

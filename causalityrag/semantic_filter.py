@@ -91,3 +91,42 @@ def is_lexical_paraphrase(
                 if wup_similarity is not None and wup_similarity >= 0.85:
                     return True
     return False
+
+
+@lru_cache(maxsize=32768)
+def lexical_paraphrase_candidates(
+    original: str,
+    pos: str,
+    *,
+    limit: int = 8,
+) -> tuple[str, ...]:
+    """Return direct WordNet synonyms under the shared corpus lock."""
+
+    wordnet_pos = _POS_MAP.get(str(pos).upper())
+    if wordnet_pos is None:
+        return ()
+    try:
+        from nltk.corpus import wordnet
+    except ImportError:
+        return ()
+    source = str(original).strip()
+    suggestions = []
+    seen = {source.casefold()}
+    with _WORDNET_LOCK:
+        try:
+            synsets = wordnet.synsets(source.casefold(), pos=wordnet_pos)
+            for synset in synsets:
+                for lemma in synset.lemma_names():
+                    candidate = lemma.replace("_", " ")
+                    if source[:1].isupper():
+                        candidate = candidate[:1].upper() + candidate[1:]
+                    folded = candidate.casefold()
+                    if folded in seen or len(candidate.split()) > 5:
+                        continue
+                    seen.add(folded)
+                    suggestions.append(candidate)
+                    if len(suggestions) >= limit:
+                        return tuple(suggestions)
+        except LookupError:
+            return ()
+    return tuple(suggestions)

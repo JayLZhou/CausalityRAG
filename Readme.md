@@ -153,6 +153,27 @@ python scripts/evaluate_matched_budget_baselines.py \
 Finally, `scripts/audit_shared_replacement_protocol.py` verifies that every
 executed edit exactly matches the deterministic candidate from the frozen pool.
 
+## Meaning-Preserving Control
+
+The primary factual intervention is paired with a surface-only control on the
+same selected token positions. `scripts/build_paraphrase_control_pool.py`
+constructs this frozen control pool in three stages:
+
+1. direct WordNet synonym suggestions;
+2. contextual synonym or alias generation with an independent LLM
+   factual-equivalence audit;
+3. a deterministic information-preserving rendering for positions without a
+   faithful lexical paraphrase, such as a proper-name case variant or a
+   written-out number.
+
+The manifest reports how many positions use each stage and records the pool
+SHA-256. `scripts/evaluate_paraphrase_controls.py` then applies the frozen
+surface-only replacement to exactly the positions selected by ReFlow and every
+matched-budget baseline. It performs one reader call per method and reports
+Answer-, F1-, EM-, and Acc-Flip under the meaning-preserving control. Short
+multiword aliases are allowed only in this control; factual counterfactual
+replacements remain single surface tokens.
+
 Graph construction requires a local Hugging Face model because it records
 activations and gradients. Reader verification uses the OpenAI-compatible
 endpoint configured by `YVETTE_LLM_BASE_URL` and `YVETTE_LLM_MODEL`.

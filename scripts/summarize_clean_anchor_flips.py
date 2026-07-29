@@ -70,7 +70,7 @@ def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> 
         evaluated += 1
         clean_answer = str(parent.get("clean_answer", ""))
         edited_answer = str(method.get("edited_answer", method.get("answer", "")))
-        if clean_answer and edited_answer:
+        if clean_answer:
             answer_flips += int(not answers_exact_match(edited_answer, clean_answer))
         metrics = _metric_row(
             row=parent,
