@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import urllib.request
+from urllib.error import HTTPError
 from pathlib import Path
 
 import numpy as np
@@ -125,21 +126,13 @@ def embed(
     rows = []
     for start in range(0, len(texts), batch_size):
         batch = texts[start : start + batch_size]
-        payload = json.dumps({"model": model, "input": batch}).encode("utf-8")
-        request = urllib.request.Request(
-            base_url.rstrip("/") + "/embeddings",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=600) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        data = sorted(result.get("data", []), key=lambda item: int(item["index"]))
-        if len(data) != len(batch):
-            raise RuntimeError(
-                f"embedding service returned {len(data)}/{len(batch)} rows"
+        rows.extend(
+            request_embedding_batch(
+                batch,
+                base_url=base_url,
+                model=model,
             )
-        rows.extend(item["embedding"] for item in data)
+        )
         completed = min(len(texts), start + len(batch))
         if completed == len(texts) or completed % (batch_size * 10) == 0:
             print(f"[embedding:{label}] {completed}/{len(texts)}", flush=True)
@@ -148,6 +141,50 @@ def embed(
     if np.any(norms <= 0):
         raise ValueError("embedding service returned a zero vector")
     return matrix / norms
+
+
+def request_embedding_batch(
+    texts: list[str],
+    *,
+    base_url: str,
+    model: str,
+) -> list[list[float]]:
+    """Embed a batch, splitting it deterministically when the server rejects it."""
+
+    payload = json.dumps({"model": model, "input": texts}).encode("utf-8")
+    request = urllib.request.Request(
+        base_url.rstrip("/") + "/embeddings",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=600) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        if error.code not in {413, 500, 502, 503, 504} or len(texts) == 1:
+            raise
+        middle = len(texts) // 2
+        print(
+            f"[embedding:split] status={error.code} "
+            f"batch={len(texts)} -> {middle}+{len(texts) - middle}",
+            flush=True,
+        )
+        return request_embedding_batch(
+            texts[:middle],
+            base_url=base_url,
+            model=model,
+        ) + request_embedding_batch(
+            texts[middle:],
+            base_url=base_url,
+            model=model,
+        )
+    data = sorted(result.get("data", []), key=lambda item: int(item["index"]))
+    if len(data) != len(texts):
+        raise RuntimeError(
+            f"embedding service returned {len(data)}/{len(texts)} rows"
+        )
+    return [item["embedding"] for item in data]
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -174,7 +211,7 @@ def main() -> None:
     parser.add_argument("--overlap", type=int, default=64)
     parser.add_argument("--embedding-base-url", default="http://127.0.0.1:8017/v1")
     parser.add_argument("--embedding-model", default="Qwen3-Embedding-0.6B")
-    parser.add_argument("--embedding-batch-size", type=int, default=128)
+    parser.add_argument("--embedding-batch-size", type=int, default=32)
     args = parser.parse_args()
 
     from transformers import AutoTokenizer
