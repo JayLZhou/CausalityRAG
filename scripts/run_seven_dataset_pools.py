@@ -104,8 +104,6 @@ def generate_until_complete(
     pool_dir: Path,
     max_passes: int,
 ) -> None:
-    previous_covered = -1
-    stagnant = 0
     for generation_pass in range(1, max_passes + 1):
         manifest = pool_dir / "generation.json"
         if generation_pass == 1:
@@ -160,13 +158,6 @@ def generate_until_complete(
         )
         if unresolved == 0:
             return
-        stagnant = stagnant + 1 if covered == previous_covered else 0
-        previous_covered = covered
-        if stagnant >= 8:
-            raise RuntimeError(
-                "replacement generation made no progress for eight passes; "
-                "the partial pool was not frozen"
-            )
     raise RuntimeError(
         f"replacement generation remains unresolved after {max_passes} passes"
     )
@@ -247,7 +238,7 @@ def main() -> None:
         "--python",
         default="/data1/yujia/envs/graphrag/bin/python",
     )
-    parser.add_argument("--max-generation-passes", type=int, default=40)
+    parser.add_argument("--max-generation-passes", type=int, default=100)
     args = parser.parse_args()
 
     repository = Path(__file__).resolve().parents[1]
