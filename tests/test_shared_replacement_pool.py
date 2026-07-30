@@ -5,6 +5,7 @@ import pytest
 from causalityrag.shared_replacement_pool import (
     POOL_SCHEMA,
     FrozenSharedReplacementPool,
+    is_editable_unit,
     stable_shared_candidate,
     typed_pool_key,
 )
@@ -56,6 +57,13 @@ def test_shared_candidate_does_not_depend_on_method_or_query():
         seed=3,
     )
     assert first == second
+
+
+def test_editable_domain_excludes_nonsemantic_types():
+    assert is_editable_unit({"text": "Paris", "pos": "PROPN", "type": "GPE"})
+    assert not is_editable_unit(
+        {"text": "Other", "pos": "ADJ", "type": "STOPWORD"}
+    )
 
 
 def test_frozen_pool_tracks_common_excluded_positions(tmp_path):

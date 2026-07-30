@@ -144,7 +144,7 @@ Do not start a formal job unless all checks pass:
 
 - source checkout is an immutable release directory, not the dirty development
   checkout;
-- all 44 unit/protocol tests pass;
+- all unit/protocol tests pass;
 - retrieval, pool, model, tokenizer, prompt, and query-manifest hashes are
   recorded;
 - ports 8001, 8002, and 8003 are healthy behind port 8000 for reader-heavy
@@ -157,3 +157,23 @@ Do not start a formal job unless all checks pass:
 The current server must be rebooted or its GPU driver reset before graph and
 model-internal baseline stages: GPU0 reports an NVML error, ports 8001 and 8002
 are down, and new CUDA processes cannot initialize.
+
+The retrieval and shared-pool stages may run before that reset. They use the
+embedding service on port 8017, spaCy on port 8021, and the existing Qwen
+service through port 8000; they do not create a new CUDA context. Launch the
+seven-dataset pool stage from an immutable release as follows:
+
+```bash
+screen -dmS reflow_7datasets_pools bash -lc '
+  cd /data1/yujia/CausalityRAG_release_<commit>
+  export PYTHONUNBUFFERED=1
+  /data1/yujia/envs/graphrag/bin/python \
+    scripts/run_seven_dataset_pools.py \
+    2>&1 | tee -a \
+    /data1/yujia/CausalityRAG/out/seven_dataset_pools.log
+'
+```
+
+The runner performs a fail-closed 10-query pool smoke test before freezing each
+1,000-query pool. It writes rejected candidates to `unresolved.jsonl` and
+never freezes a pool while a semantic token remains uncovered.

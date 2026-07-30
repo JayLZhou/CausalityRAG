@@ -30,7 +30,7 @@ _GENERIC_INVALID = {
     "same",
     "unknown",
 }
-_LLM_GRAMMAR_FALLBACK_REASONS = {
+_LLM_GRAMMAR_OVERRIDE_REASONS = {
     "pos_mismatch",
     "tag_mismatch",
     "tokenization_mismatch",
@@ -64,19 +64,38 @@ def _target(row: dict, forbidden: list[str]) -> dict:
 
 def _contextual_unit(row: dict) -> tuple[dict, str]:
     examples = row.get("examples", [])
-    marked = str(examples[0].get("marked_sentence", "")) if examples else ""
-    left = marked.find("[[")
-    right = marked.find("]]", left + 2)
-    if left < 0 or right < 0:
+    example = examples[0] if examples else {}
+    sentence = str(example.get("sentence", ""))
+    explicit_start = example.get("sentence_char_start")
+    explicit_end = example.get("sentence_char_end")
+    if (
+        sentence
+        and explicit_start is not None
+        and explicit_end is not None
+    ):
+        context = sentence
+        start = int(explicit_start)
+        end = int(explicit_end)
+    else:
+        marked = str(example.get("marked_sentence", ""))
+        left = marked.find("[[")
+        right = marked.find("]]", left + 2)
+        if left < 0 or right < 0:
+            context = str(row["surface"])
+            start = 0
+            end = len(context)
+        else:
+            context = marked[:left] + marked[left + 2:right] + marked[right + 2:]
+            start = left
+            end = start + len(str(row["surface"]))
+    if context[start:end] != str(row["surface"]):
         context = str(row["surface"])
         start = 0
-    else:
-        context = marked[:left] + marked[left + 2:right] + marked[right + 2:]
-        start = left
+        end = len(context)
     unit = {
         "text": str(row["surface"]),
         "chunk_char_start": start,
-        "chunk_char_end": start + len(str(row["surface"])),
+        "chunk_char_end": end,
         "pos": str(row.get("pos", "")),
         "tag": str(row.get("tag", "")),
         "morph": row.get("morph", ""),
@@ -91,26 +110,38 @@ def _filter_generated(
     nlp: SpacyAnnotationClient,
 ) -> tuple[list[dict], list[dict]]:
     original = str(row["surface"])
-    seen = {original.casefold(), *_GENERIC_INVALID}
+    seen = {original.casefold()}
     proposals = []
     filtered = []
+    pre_rejected = []
     unit, context = _contextual_unit(row)
     for value in values:
         candidate = str(value).strip()
         folded = candidate.casefold()
-        if (
-            not candidate
-            or folded in seen
-            or any(character.isspace() for character in candidate)
-            or is_lexical_paraphrase(
+        if not candidate or folded in seen:
+            continue
+        seen.add(folded)
+        reason = ""
+        if folded in _GENERIC_INVALID:
+            reason = "generic_placeholder"
+        elif any(character.isspace() for character in candidate):
+            reason = "multi_token_surface"
+        elif is_lexical_paraphrase(
                 original,
                 candidate,
                 str(row.get("pos", "")),
                 str(row.get("type", "")),
-            )
         ):
+            reason = "lexical_paraphrase"
+        if reason:
+            pre_rejected.append({
+                "ok": False,
+                "old": original,
+                "new": candidate,
+                "policy": POLICY,
+                "validation": {"valid": False, "reason": reason},
+            })
             continue
-        seen.add(folded)
         proposals.append({
             "unit": unit,
             "context": context,
@@ -134,7 +165,7 @@ def _filter_generated(
         for candidate, validation in zip(filtered, validations)
         if validation.get("valid") is True
     ]
-    rejected = [
+    rejected = pre_rejected + [
         {
             "ok": False,
             "old": original,
@@ -155,13 +186,18 @@ def _generate_batch(
     *,
     max_candidates: int,
     generation_rounds: int,
+    initial_forbidden: dict[str, list[str]] | None = None,
+    attempt_offset: int = 0,
 ) -> tuple[list[dict], list[dict], int]:
     pending = {str(row["typed_key"]): row for row in rows}
     accumulated: dict[str, list[dict]] = {
         str(row["typed_key"]): [] for row in rows
     }
     forbidden: dict[str, list[str]] = {
-        str(row["typed_key"]): [] for row in rows
+        str(row["typed_key"]): list(
+            (initial_forbidden or {}).get(str(row["typed_key"]), [])
+        )
+        for row in rows
     }
     calls = 0
 
@@ -175,7 +211,7 @@ def _generate_batch(
         generated = editor.generate_many(
             targets,
             max_candidates=max_candidates,
-            attempt=attempt,
+            attempt=attempt_offset + attempt,
         )
         calls += 1
         filtered = {
@@ -188,7 +224,7 @@ def _generate_batch(
             if accepted
         }
         semantic_judgments = (
-            editor.judge_many(targets, semantic_candidates)
+            editor.classify_relations_many(targets, semantic_candidates)
             if semantic_candidates
             else {}
         )
@@ -199,24 +235,27 @@ def _generate_batch(
             for item in accepted:
                 judgment = semantic_judgments.get(
                     (key, str(item["new"]).casefold()),
-                    {"valid": False},
+                    {"label": "INVALID"},
                 )
-                if judgment.get("valid") is True:
-                    item["semantic_judgment"] = judgment
+                if judgment.get("label") == "COUNTERFACTUAL":
+                    item["semantic_relation"] = judgment
                     semantically_valid.append(item)
                 else:
                     rejected.append({
                         **item,
                         "ok": False,
-                        "semantic_judgment": judgment,
+                        "semantic_relation": judgment,
                         "validation": {
                             "valid": False,
-                            "reason": "llm_semantic_rejection",
+                            "reason": (
+                                "llm_relation_"
+                                + str(judgment.get("label", "INVALID")).lower()
+                            ),
                         },
                     })
             filtered[key] = (semantically_valid, rejected)
 
-        fallback_candidates = {}
+        override_candidates = {}
         for key, (accepted, rejected) in filtered.items():
             if accepted:
                 continue
@@ -224,17 +263,19 @@ def _generate_batch(
             for item in rejected:
                 reason = str(item.get("validation", {}).get("reason", ""))
                 if (
-                    reason in _LLM_GRAMMAR_FALLBACK_REASONS
+                    reason in _LLM_GRAMMAR_OVERRIDE_REASONS
                     or reason.startswith("morph_mismatch:")
                 ):
                     candidates.append(str(item["new"]))
             if candidates:
-                fallback_candidates[key] = candidates
-        if fallback_candidates:
-            fallback_judgments = editor.judge_many(targets, fallback_candidates)
+                override_candidates[key] = candidates
+        override_relations = (
+            editor.classify_relations_many(targets, override_candidates)
+            if override_candidates
+            else {}
+        )
+        if override_candidates:
             calls += 1
-        else:
-            fallback_judgments = {}
 
         next_pending = {}
         for key, row in pending.items():
@@ -242,16 +283,19 @@ def _generate_batch(
             seen = {str(item["new"]).casefold() for item in current}
             accepted, rejected = filtered[key]
             for item in rejected:
-                judgment = fallback_judgments.get(
-                    (key, str(item.get("new", "")).casefold())
+                candidate = str(item.get("new", ""))
+                relation = override_relations.get(
+                    (key, candidate.casefold()),
+                    {"label": "INVALID"},
                 )
-                if judgment and judgment.get("valid") is True:
-                    fallback = dict(item)
-                    fallback["ok"] = True
-                    fallback["llm_grammar_fallback"] = judgment
-                    accepted.append(fallback)
+                if relation.get("label") == "COUNTERFACTUAL":
+                    override = dict(item)
+                    override["ok"] = True
+                    override["semantic_relation"] = relation
+                    override["llm_grammar_override"] = True
+                    accepted.append(override)
                 else:
-                    forbidden[key].append(str(item.get("new", "")))
+                    forbidden[key].append(candidate)
             for candidate in accepted:
                 folded = str(candidate["new"]).casefold()
                 if folded in seen:
@@ -304,6 +348,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=24)
     parser.add_argument("--max-candidates", type=int, default=5)
     parser.add_argument("--generation-rounds", type=int, default=8)
+    parser.add_argument("--attempt-offset", type=int, default=0)
     parser.add_argument(
         "--limit",
         type=int,
@@ -330,8 +375,24 @@ def main() -> None:
                 if not line.strip():
                     continue
                 row = json.loads(line)
-                if row.get("candidates"):
-                    resolved[str(row["typed_key"])] = row
+                key = str(row.get("typed_key", ""))
+                if key in rows_by_key and row.get("candidates"):
+                    resolved[key] = row
+
+    previous_forbidden = {}
+    if os.path.exists(args.unresolved_out):
+        with open(args.unresolved_out, encoding="utf-8") as source:
+            for line in source:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                key = str(row.get("typed_key", ""))
+                if key in rows_by_key:
+                    previous_forbidden[key] = list(dict.fromkeys(
+                        str(value)
+                        for value in row.get("forbidden", [])
+                        if str(value).strip()
+                    ))
 
     missing = [
         rows_by_key[key]
@@ -366,6 +427,8 @@ def main() -> None:
             nlp,
             max_candidates=args.max_candidates,
             generation_rounds=args.generation_rounds,
+            initial_forbidden=previous_forbidden,
+            attempt_offset=args.attempt_offset,
         )
 
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
@@ -382,7 +445,7 @@ def main() -> None:
                         resolved[str(row["typed_key"])] = row
                     output.flush()
                 unresolved_rows.extend(failed_rows)
-            if completed % 100 == 0:
+            if completed % 10 == 0 or completed == len(batches):
                 print(
                     f"[{completed}/{len(batches)} batches] "
                     f"covered={len(resolved)}/{len(rows_by_key)} "

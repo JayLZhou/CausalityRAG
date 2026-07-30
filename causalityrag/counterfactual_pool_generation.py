@@ -13,8 +13,8 @@ from causalityrag.reader import parse_json_object
 POLICY = "llm_typed_counterfactual_v1"
 
 
-def marked_target_sentence(unit: dict, context: str) -> str:
-    """Mark exactly one surface-token occurrence in its containing sentence."""
+def target_sentence(unit: dict, context: str) -> dict:
+    """Return a sentence-local target span and an LLM-facing marked form."""
 
     start = int(unit["chunk_char_start"])
     end = int(unit["chunk_char_end"])
@@ -37,13 +37,24 @@ def marked_target_sentence(unit: dict, context: str) -> str:
     local_start = start - sentence_start
     local_end = end - sentence_start
     sentence = context[sentence_start:sentence_end]
-    return (
-        sentence[:local_start]
-        + "[["
-        + sentence[local_start:local_end]
-        + "]]"
-        + sentence[local_end:]
-    ).strip()
+    return {
+        "sentence": sentence,
+        "sentence_char_start": local_start,
+        "sentence_char_end": local_end,
+        "marked_sentence": (
+            sentence[:local_start]
+            + "[["
+            + sentence[local_start:local_end]
+            + "]]"
+            + sentence[local_end:]
+        ).strip(),
+    }
+
+
+def marked_target_sentence(unit: dict, context: str) -> str:
+    """Mark exactly one surface-token occurrence in its containing sentence."""
+
+    return str(target_sentence(unit, context)["marked_sentence"])
 
 
 class SentenceCounterfactualClient:

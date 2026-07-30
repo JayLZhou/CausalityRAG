@@ -11,7 +11,7 @@ from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from causalityrag.io import load_records, record_id, retrieved_contexts
-from causalityrag.counterfactual_pool_generation import marked_target_sentence
+from causalityrag.counterfactual_pool_generation import target_sentence
 from causalityrag.shared_replacement_pool import (
     POOL_SCHEMA,
     file_sha256,
@@ -83,10 +83,11 @@ def main() -> None:
             if len(examples) < args.examples_per_key and all(
                 example["unit_id"] != unit_id for example in examples
             ):
+                sentence = target_sentence(unit, context)
                 examples.append({
                     "unit_id": unit_id,
                     "query_id": query_id,
-                    "marked_sentence": marked_target_sentence(unit, context),
+                    **sentence,
                     "entity_text": str(unit.get("entity_text", "")),
                     "entity_token_index": unit.get("entity_token_index"),
                     "entity_token_count": unit.get("entity_token_count"),

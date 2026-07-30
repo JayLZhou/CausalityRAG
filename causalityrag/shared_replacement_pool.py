@@ -10,6 +10,7 @@ from collections.abc import Iterable
 
 POOL_SCHEMA = "causalityrag.shared_counterfactual_pool.v1"
 EDITABLE_POS = {"NOUN", "PROPN", "VERB", "ADJ", "ADV", "NUM"}
+NON_SEMANTIC_TYPES = {"STOPWORD"}
 
 
 def is_editable_unit(unit: dict) -> bool:
@@ -20,6 +21,7 @@ def is_editable_unit(unit: dict) -> bool:
         bool(token)
         and any(character.isalnum() for character in token)
         and str(unit.get("pos", "")).upper() in EDITABLE_POS
+        and str(unit.get("type", "")).upper() not in NON_SEMANTIC_TYPES
     )
 
 
