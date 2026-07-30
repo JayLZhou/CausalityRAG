@@ -138,7 +138,8 @@ def main() -> None:
 
     rows = []
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    with open(args.out, "w", encoding="utf-8") as output:
+    temporary_out = args.out + ".tmp"
+    with open(temporary_out, "w", encoding="utf-8") as output:
         with executor:
             for completed, row in enumerate(generated, 1):
                 rows.append(row)
@@ -150,6 +151,9 @@ def main() -> None:
                         f"units={len(row['units'])} seconds={row['elapsed_seconds']}",
                         flush=True,
                     )
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(temporary_out, args.out)
     elapsed = [row["elapsed_seconds"] for row in rows]
     summary = {
         "queries": len(rows),
@@ -169,8 +173,12 @@ def main() -> None:
     rendered = json.dumps(summary, ensure_ascii=False, indent=2)
     print("[context-units summary]", rendered)
     if args.summary_out:
-        with open(args.summary_out, "w", encoding="utf-8") as output:
+        temporary_summary = args.summary_out + ".tmp"
+        with open(temporary_summary, "w", encoding="utf-8") as output:
             output.write(rendered + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary_summary, args.summary_out)
 
 
 if __name__ == "__main__":

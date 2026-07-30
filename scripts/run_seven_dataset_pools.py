@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -90,9 +91,46 @@ def write_manifest(root: Path, dataset: str, status: str) -> None:
     os.replace(temporary, root / "manifest.json")
 
 
-def run(command: list[str], *, cwd: Path) -> None:
-    print("[command] " + " ".join(command), flush=True)
-    subprocess.run(command, cwd=cwd, check=True)
+def run(command: list[str], *, cwd: Path, attempts: int = 3) -> None:
+    for attempt in range(1, attempts + 1):
+        print(
+            f"[command:attempt={attempt}/{attempts}] "
+            + " ".join(command),
+            flush=True,
+        )
+        try:
+            subprocess.run(command, cwd=cwd, check=True)
+            return
+        except subprocess.CalledProcessError:
+            if attempt == attempts:
+                raise
+            time.sleep(5 * attempt)
+
+
+def jsonl_count(path: Path) -> int:
+    if not path.exists():
+        return 0
+    with path.open(encoding="utf-8") as source:
+        return sum(1 for line in source if line.strip())
+
+
+def artifact_complete(
+    path: Path,
+    summary_path: Path,
+    *,
+    expected_rows: int,
+    top_k_field: str,
+) -> bool:
+    if jsonl_count(path) != expected_rows or not summary_path.exists():
+        return False
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        int(summary.get("queries", -1)) == expected_rows
+        and int(summary.get(top_k_field, -1)) == 10
+    )
 
 
 def generate_until_complete(
@@ -247,49 +285,71 @@ def main() -> None:
         root = out_root / dataset
         write_manifest(root, dataset, "pool_building")
         retrieval = root / "retrieval" / "top10_1000.jsonl"
+        retrieval_summary = (
+            root / "retrieval" / "top10_1000.summary.json"
+        )
         units = root / "inputs" / "token_units_top10_1000.jsonl"
+        units_summary = (
+            root / "inputs" / "token_units_top10_1000.summary.json"
+        )
         print(f"\n[dataset:start] {dataset}", flush=True)
-        run(
-            [
-                args.python,
-                "scripts/prepare_dataset_retrieval.py",
-                "--dataset",
-                dataset,
-                "--questions",
-                questions,
-                "--corpus",
-                corpus,
-                "--out-root",
-                str(root),
-                "--tokenizer-path",
-                args.tokenizer_path,
-            ],
-            cwd=repository,
-        )
+        if artifact_complete(
+            retrieval,
+            retrieval_summary,
+            expected_rows=1000,
+            top_k_field="retrieval_top_k",
+        ):
+            print(f"[resume:retrieval] {dataset}", flush=True)
+        else:
+            run(
+                [
+                    args.python,
+                    "scripts/prepare_dataset_retrieval.py",
+                    "--dataset",
+                    dataset,
+                    "--questions",
+                    questions,
+                    "--corpus",
+                    corpus,
+                    "--out-root",
+                    str(root),
+                    "--tokenizer-path",
+                    args.tokenizer_path,
+                ],
+                cwd=repository,
+            )
         units.parent.mkdir(parents=True, exist_ok=True)
-        run(
-            [
-                "/data1/yujia/envs/spacyner/bin/python",
-                "scripts/build_context_units.py",
-                "--input",
-                str(retrieval),
-                "--out",
-                str(units),
-                "--summary-out",
-                str(root / "inputs" / "token_units_top10_1000.summary.json"),
-                "--n",
-                "1000",
-                "--k",
-                "10",
-                "--workers",
-                "24",
-                "--backend",
-                "service",
-                "--spacy-base-url",
-                "http://127.0.0.1:8021",
-            ],
-            cwd=repository,
-        )
+        if artifact_complete(
+            units,
+            units_summary,
+            expected_rows=1000,
+            top_k_field="top_k",
+        ):
+            print(f"[resume:context-units] {dataset}", flush=True)
+        else:
+            run(
+                [
+                    "/data1/yujia/envs/spacyner/bin/python",
+                    "scripts/build_context_units.py",
+                    "--input",
+                    str(retrieval),
+                    "--out",
+                    str(units),
+                    "--summary-out",
+                    str(units_summary),
+                    "--n",
+                    "1000",
+                    "--k",
+                    "10",
+                    "--workers",
+                    "8",
+                    "--backend",
+                    "service",
+                    "--spacy-base-url",
+                    "http://127.0.0.1:8021",
+                ],
+                cwd=repository,
+            )
 
         smoke = root / "replacements" / "smoke10"
         build_inventory(
