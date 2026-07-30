@@ -10,7 +10,10 @@ from typing import Iterable
 def load_records(path: str | Path) -> list[dict]:
     path = Path(path)
     if path.suffix == ".jsonl":
-        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        # Iterate over physical lines. ``str.splitlines()`` also splits on
+        # Unicode separators that may legitimately occur inside JSON strings.
+        with path.open(encoding="utf-8") as source:
+            return [json.loads(line) for line in source if line.strip()]
     data = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(data, list):
         return data
