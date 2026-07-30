@@ -177,3 +177,33 @@ screen -dmS reflow_7datasets_pools bash -lc '
 The runner performs a fail-closed 10-query pool smoke test before freezing each
 1,000-query pool. It writes rejected candidates to `unresolved.jsonl` and
 never freezes a pool while a semantic token remains uncovered.
+
+## Unattended Top-5 Graph Runner
+
+After the shared services are healthy, the remaining formal top-5 graphs can
+be built with the resumable runner:
+
+```bash
+screen -dmS reflow_all_top5_auto bash -lc '
+  cd /data1/yujia/CausalityRAG_release_<commit>
+  export PYTHONUNBUFFERED=1
+  while true; do
+    /data1/yujia/envs/graphrag/bin/python \
+      scripts/run_remaining_top5_graphs.py \
+      --out-root /data1/yujia/CausalityRAG/out \
+      --status-out \
+        /data1/yujia/CausalityRAG/out/top5_graph_automation_status.json \
+      >> /data1/yujia/CausalityRAG/out/top5_graph_automation.log 2>&1 \
+      && break
+    sleep 60
+  done
+'
+```
+
+The runner validates and resumes retrieval, token typing, the frozen top-10
+replacement pool, top-5 clean targets, and two-GPU graph shards in dataset
+order. It stops the vLLM replicas before graph construction so that both GPUs
+are available, merges the two aligned 500-query shards only after both pass
+validation, and restarts reader services for the next dataset. Completed
+artifacts are never recomputed. The JSON status file records the active
+dataset and stage for progress checks.
