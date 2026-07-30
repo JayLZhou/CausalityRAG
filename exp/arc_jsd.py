@@ -9,7 +9,12 @@ from typing import Iterable, Sequence
 
 from causalityrag.io import retrieved_contexts
 from causalityrag.max_flow import Dinic, INF
-from causalityrag.reader import READ_SYSTEM, READ_USER, format_passages
+from causalityrag.reader import (
+    READ_SYSTEM,
+    READ_USER,
+    format_passages,
+    model_context_window,
+)
 from causalityrag.token_units import (
     all_context_word_units,
     context_sentence_units,
@@ -579,6 +584,7 @@ class ArcJsdModel:
         # GPU, but torch<2.5 does not populate the supported TP-style table.
         config.base_model_tp_plan = None
         config.base_model_pp_plan = None
+        self.max_context_tokens = model_context_window(config)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
             config=config,
@@ -901,11 +907,15 @@ class ArcJsdModel:
         self,
         question: str,
         contexts: Sequence[dict],
-        *,
-        max_new_tokens: int = 96,
     ) -> CleanTrajectory:
         torch = self.torch
         prompt_ids = self._prompt_ids(question, contexts)
+        max_new_tokens = self.max_context_tokens - len(prompt_ids)
+        if max_new_tokens <= 0:
+            raise ValueError(
+                f"reader prompt has {len(prompt_ids)} tokens, which reaches "
+                f"the {self.max_context_tokens}-token model context window"
+            )
         input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=self.device)
         attention_mask = torch.ones_like(input_ids)
         with torch.inference_mode():
@@ -948,16 +958,20 @@ class ArcJsdModel:
         self,
         question: str,
         context_variants: Sequence[Sequence[dict]],
-        *,
-        max_new_tokens: int = 96,
     ) -> list[str]:
-        """Greedily generate several context variants with left padding."""
+        """Greedily generate several context variants until EOS."""
 
         if not context_variants:
             return []
         torch = self.torch
         prompts = [self._prompt_ids(question, contexts) for contexts in context_variants]
         max_prompt_length = max(len(prompt) for prompt in prompts)
+        max_new_tokens = self.max_context_tokens - max_prompt_length
+        if max_new_tokens <= 0:
+            raise ValueError(
+                f"reader prompt has {max_prompt_length} tokens, which reaches "
+                f"the {self.max_context_tokens}-token model context window"
+            )
         input_ids = torch.full(
             (len(prompts), max_prompt_length),
             self.tokenizer.pad_token_id,

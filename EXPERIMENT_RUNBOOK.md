@@ -15,7 +15,7 @@ is used for the remaining seven datasets.
 - Corpus unit: 384 Qwen3 embedding-model tokens with 64-token overlap.
   Documents shorter than 384 tokens remain unchanged.
 - Reader and graph model: Qwen2.5-7B-Instruct.
-- Reader decoding: greedy, at most 96 generated tokens.
+- Reader decoding: greedy, stopping at EOS or the model context window.
 - Graph: closed positive message flow, receiver beam 48, then contraction by
   surface-token position.
 - ReFlow: exact supported breakpoint flow-contract frontier with

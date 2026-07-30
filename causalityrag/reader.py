@@ -52,7 +52,6 @@ class ReaderClient:
                 },
             ],
             "temperature": 0,
-            "max_tokens": 96,
         }
         request = urllib.request.Request(
             self.base_url + "/chat/completions",
@@ -106,6 +105,7 @@ class LocalHFReader:
             config.base_model_tp_plan = None
         if hasattr(config, "base_model_pp_plan"):
             config.base_model_pp_plan = None
+        self.max_context_tokens = model_context_window(config)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
             config=config,
@@ -119,10 +119,8 @@ class LocalHFReader:
         self,
         question: str,
         context_variants: Sequence[Sequence[dict]],
-        *,
-        max_new_tokens: int = 96,
     ) -> list[str]:
-        """Greedily generate answers for context variants with left padding."""
+        """Greedily generate until EOS or the model context window."""
 
         if not context_variants:
             return []
@@ -131,6 +129,12 @@ class LocalHFReader:
             self._prompt_ids(question, contexts) for contexts in context_variants
         ]
         max_prompt_length = max(len(prompt) for prompt in prompts)
+        max_new_tokens = self.max_context_tokens - max_prompt_length
+        if max_new_tokens <= 0:
+            raise ValueError(
+                f"reader prompt has {max_prompt_length} tokens, which reaches "
+                f"the {self.max_context_tokens}-token model context window"
+            )
         input_ids = torch.full(
             (len(prompts), max_prompt_length),
             self.tokenizer.pad_token_id,
@@ -191,6 +195,16 @@ class LocalHFReader:
             prompt,
             add_special_tokens=False,
         )["input_ids"]
+
+
+def model_context_window(config) -> int:
+    """Return the finite context limit declared by a Hugging Face model config."""
+
+    for field in ("max_position_embeddings", "n_positions", "seq_length"):
+        value = getattr(config, field, None)
+        if isinstance(value, int) and 0 < value < 1_000_000_000:
+            return value
+    raise ValueError("model config does not declare a finite context window")
 
 
 def format_passages(contexts: list[dict]) -> str:
