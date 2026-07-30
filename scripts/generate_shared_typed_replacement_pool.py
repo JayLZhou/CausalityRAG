@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
@@ -35,6 +36,49 @@ _LLM_GRAMMAR_OVERRIDE_REASONS = {
     "tag_mismatch",
     "tokenization_mismatch",
 }
+_NUMERIC_SURFACE = re.compile(
+    r"^[+-]?\d+(?:\.\d+)?(?:[-–—][+-]?\d+(?:\.\d+)?)?$"
+)
+
+
+def _numeric_shape(value: str) -> tuple[int, tuple[int, ...]] | None:
+    if not _NUMERIC_SURFACE.fullmatch(value):
+        return None
+    parts = re.split(r"[-–—]", value.lstrip("+-"))
+    decimal_places = tuple(
+        len(part.rsplit(".", 1)[1]) if "." in part else 0
+        for part in parts
+    )
+    return len(parts), decimal_places
+
+
+def _is_format_preserving_numeric_counterfactual(
+    row: dict,
+    candidate: str,
+) -> bool:
+    original = str(row["surface"])
+    if str(row.get("type", "")) != "CARDINAL":
+        return False
+    return (
+        original != candidate
+        and _numeric_shape(original) is not None
+        and _numeric_shape(original) == _numeric_shape(candidate)
+    )
+
+
+def _allow_contextual_single_letter_override(
+    row: dict,
+    candidate: str,
+    reason: str,
+) -> bool:
+    return (
+        reason == "lexical_paraphrase"
+        and str(row.get("type", "")) == "PROPER"
+        and len(str(row["surface"])) == 1
+        and len(candidate) == 1
+        and str(row["surface"]).isalpha()
+        and candidate.isalpha()
+    )
 
 
 def _target(row: dict, forbidden: list[str]) -> dict:
@@ -233,6 +277,16 @@ def _generate_batch(
         for key, (accepted, rejected) in filtered.items():
             semantically_valid = []
             for item in accepted:
+                if _is_format_preserving_numeric_counterfactual(
+                    pending[key],
+                    str(item["new"]),
+                ):
+                    item["semantic_relation"] = {
+                        "label": "COUNTERFACTUAL",
+                        "classifier_value": "format_preserving_numeric_change",
+                    }
+                    semantically_valid.append(item)
+                    continue
                 judgment = semantic_judgments.get(
                     (key, str(item["new"]).casefold()),
                     {"label": "INVALID"},
@@ -265,6 +319,11 @@ def _generate_batch(
                 if (
                     reason in _LLM_GRAMMAR_OVERRIDE_REASONS
                     or reason.startswith("morph_mismatch:")
+                    or _allow_contextual_single_letter_override(
+                        pending[key],
+                        str(item["new"]),
+                        reason,
+                    )
                 ):
                     candidates.append(str(item["new"]))
             if candidates:
