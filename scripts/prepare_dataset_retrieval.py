@@ -212,6 +212,11 @@ def main() -> None:
     parser.add_argument("--embedding-base-url", default="http://127.0.0.1:8017/v1")
     parser.add_argument("--embedding-model", default="Qwen3-Embedding-0.6B")
     parser.add_argument("--embedding-batch-size", type=int, default=32)
+    parser.add_argument(
+        "--chunks-only",
+        action="store_true",
+        help="freeze queries and corpus chunks without running embeddings",
+    )
     args = parser.parse_args()
 
     from transformers import AutoTokenizer
@@ -244,6 +249,20 @@ def main() -> None:
         )
         write_jsonl(chunk_path, chunks)
         print(f"[chunks] wrote {len(chunks)} to {chunk_path}", flush=True)
+
+    if args.chunks_only:
+        print(json.dumps({
+            "dataset": args.dataset,
+            "queries": len(queries),
+            "corpus_documents": len(load_records(args.corpus)),
+            "corpus_chunks": len(chunks),
+            "chunk_size_tokens": args.chunk_size,
+            "chunk_overlap_tokens": args.overlap,
+            "chunks_only": True,
+            "queries_sha256": file_sha256(query_path),
+            "chunks_sha256": file_sha256(chunk_path),
+        }, indent=2, ensure_ascii=False), flush=True)
+        return
 
     if embedding_path.exists():
         chunk_embeddings = np.load(embedding_path)
