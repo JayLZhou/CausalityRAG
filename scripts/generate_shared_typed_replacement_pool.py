@@ -57,7 +57,15 @@ def _is_format_preserving_numeric_counterfactual(
     candidate: str,
 ) -> bool:
     original = str(row["surface"])
-    if str(row.get("type", "")) != "CARDINAL":
+    unit_type = str(row.get("type", "")).upper()
+    entity_token_count = int(row.get("entity_token_count") or 0)
+    is_numeric_value = unit_type in {"CARDINAL", "NUMBER"}
+    is_named_entity_numeric_slot = (
+        entity_token_count > 1
+        and unit_type
+        not in {"", "CONTENT", "FUNCTION", "NOUN", "VERB", "ADJECTIVE"}
+    )
+    if not (is_numeric_value or is_named_entity_numeric_slot):
         return False
     return (
         original != candidate
