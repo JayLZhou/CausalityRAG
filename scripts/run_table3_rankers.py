@@ -13,7 +13,7 @@ from pathlib import Path
 from causalityrag.io import load_records, record_id
 
 
-DATASETS = ("timeqa", "finqa", "musique", "cuad", "qasper", "2wiki", "pubmedqa")
+DATASETS = ("timeqa", "finqa", "musique", "quartz", "qasper", "2wiki", "pubmedqa")
 METHODS = ("attention", "gradient_x_input", "integrated_gradients", "mirage", "arc_jsd")
 FILENAMES = {
     "attention": "attention_top5_1000.jsonl",

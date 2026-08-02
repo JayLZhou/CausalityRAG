@@ -16,7 +16,7 @@ from causalityrag.io import load_records, record_id
 from causalityrag.shared_replacement_pool import file_sha256
 
 
-DATASETS = ("timeqa", "finqa", "musique", "cuad", "qasper", "2wiki", "pubmedqa")
+DATASETS = ("timeqa", "finqa", "musique", "quartz", "qasper", "2wiki", "pubmedqa")
 SCORE_FILES = {
     "attention": "attention_top5_1000.jsonl",
     "gradient_x_input": "gradient_x_input_top5_1000.jsonl",

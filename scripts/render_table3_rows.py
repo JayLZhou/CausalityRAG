@@ -14,7 +14,7 @@ DATASETS = (
     ("timeqa", "TimeQA", "TimeQAMetricRows"),
     ("finqa", "FinQA", "FinQAMetricRows"),
     ("musique", "MuSiQue", "MuSiQueMetricRows"),
-    ("cuad", "CUAD", "CUADMetricRows"),
+    ("quartz", "QuaRTz", "QuartzMetricRows"),
     ("qasper", "Qasper", "QasperMetricRows"),
     ("2wiki", "2Wiki", "TwoWikiMetricRows"),
     ("pubmedqa", "PubMedQA", "PubMedQAMetricRows"),
@@ -129,6 +129,16 @@ def dataset_paths(root: Path, dataset: str) -> tuple[Path, Path]:
 
 def render_dataset(root: Path, dataset: str, label: str, macro: str) -> str:
     factual_path, control_path = dataset_paths(root, dataset)
+    if not factual_path.is_file() or not control_path.is_file():
+        lines = [f"\\newcommand{{\\{macro}}}{{%", f"  \\multirow{{8}}{{*}}{{{label}}}"]
+        for row_index, (row_label, _, _) in enumerate(METRICS):
+            suffix = " \\\\" if row_index < len(METRICS) - 1 else ""
+            lines.append("  & " + row_label + " & " + " & ".join(["--"] * 7) + suffix)
+            if row_index == 3:
+                lines[-1] += "[-0.5pt]"
+                lines.append("  \\cmidrule(lr){2-9}")
+        lines.append("}")
+        return "\n".join(lines)
     factual = load_json(factual_path)
     control = load_json(control_path)
     lines = [f"\\newcommand{{\\{macro}}}{{%", f"  \\multirow{{8}}{{*}}{{{label}}}"]
