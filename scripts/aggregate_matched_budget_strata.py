@@ -27,8 +27,12 @@ METHODS = ("mirage", "arc_jsd", "reflow")
 STRATA: tuple[tuple[str, Callable[[int], bool]], ...] = (
     ("1", lambda budget: budget == 1),
     ("2", lambda budget: budget == 2),
-    ("3-4", lambda budget: 3 <= budget <= 4),
-    ("5-8", lambda budget: 5 <= budget <= 8),
+    ("3", lambda budget: budget == 3),
+    ("4", lambda budget: budget == 4),
+    ("5", lambda budget: budget == 5),
+    ("6", lambda budget: budget == 6),
+    ("7", lambda budget: budget == 7),
+    ("8", lambda budget: budget == 8),
     (">=9", lambda budget: budget >= 9),
 )
 
@@ -110,7 +114,9 @@ def aggregate_dataset(base: Path) -> dict[str, Any]:
                 )
             method_values[method] = {
                 "acc_cfr_count": flips,
-                "acc_cfr_percent": round(100.0 * flips / max(1, len(clean_rows)), 1),
+                "acc_cfr_percent": (
+                    round(100.0 * flips / len(clean_rows), 1) if clean_rows else None
+                ),
             }
         output["strata"][label] = {
             "all_queries": len(rows),
