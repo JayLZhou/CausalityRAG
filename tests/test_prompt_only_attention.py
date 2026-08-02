@@ -34,6 +34,8 @@ def test_arc_jsd_routing_is_not_reused_as_attention() -> None:
     symbol = "_arc_jsd_response_to_context_routing"
     users = []
     for path in repo.rglob("*.py"):
+        if path.resolve() == Path(__file__).resolve():
+            continue
         if symbol in path.read_text(encoding="utf-8"):
             users.append(path.relative_to(repo).as_posix())
 
