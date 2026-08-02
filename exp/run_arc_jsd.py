@@ -107,7 +107,7 @@ def main() -> None:
                         top_k=args.feature_top_k,
                     )
                 )
-                routing = model.response_to_context_attention_routing(
+                routing = model._arc_jsd_response_to_context_routing(
                     question,
                     contexts,
                     units,

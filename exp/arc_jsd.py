@@ -633,7 +633,7 @@ class ArcJsdModel:
             for positions in positions_by_unit
         ]
 
-    def response_to_context_attention_routing(
+    def _arc_jsd_response_to_context_routing(
         self,
         question: str,
         contexts: Sequence[dict],
@@ -642,7 +642,7 @@ class ArcJsdModel:
         *,
         last_layers: int = 8,
     ) -> list[list[float]]:
-        """Extract upper-layer response-to-context attention for every token."""
+        """Route ARC-JSD sentence effects to tokens using the clean response."""
 
         torch = self.torch
         prompt_text = self._prompt_text(question, contexts)
