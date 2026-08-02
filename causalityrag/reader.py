@@ -23,7 +23,11 @@ class ReaderClient:
     """Concurrent-safe client for the vLLM OpenAI-compatible endpoint."""
 
     def __init__(
-        self, base_url: str | None = None, model: str | None = None, timeout: int = 120
+        self,
+        base_url: str | None = None,
+        model: str | None = None,
+        timeout: int = 120,
+        max_tokens: int | None = None,
     ) -> None:
         self.base_url = (
             base_url
@@ -38,6 +42,7 @@ class ReaderClient:
             or "qwen2.5-7b"
         )
         self.timeout = timeout
+        self.max_tokens = max_tokens
 
     def answer(self, question: str, contexts: list[dict]) -> str:
         payload = {
@@ -53,6 +58,8 @@ class ReaderClient:
             ],
             "temperature": 0,
         }
+        if self.max_tokens is not None:
+            payload["max_tokens"] = self.max_tokens
         request = urllib.request.Request(
             self.base_url + "/chat/completions",
             data=json.dumps(payload).encode("utf-8"),

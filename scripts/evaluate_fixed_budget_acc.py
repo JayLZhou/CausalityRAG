@@ -65,6 +65,8 @@ def evaluate_query(
     budgets: list[int],
     replacement_seed: int,
     k: int,
+    include_reflow: bool = True,
+    seed_row: dict | None = None,
 ) -> dict:
     identifier = record_id(record)
     clean_answer = str(frontier_row.get("clean_answer", ""))
@@ -92,12 +94,12 @@ def evaluate_query(
     eligible = {
         unit_id for unit_id in by_id if pool.is_eligible(unit_id)
     }
-    method_sets: dict[str, dict[int, list[str]]] = {
-        "reflow": {
+    method_sets: dict[str, dict[int, list[str]]] = {}
+    if include_reflow:
+        method_sets["reflow"] = {
             budget: reflow_set(frontier_row, budget, eligible)
             for budget in budgets
         }
-    }
     for name, row in score_rows.items():
         ranking = [
             unit_id
@@ -114,6 +116,12 @@ def evaluate_query(
     for method, budget_sets in method_sets.items():
         method_results = {}
         for budget in budgets:
+            seeded = (
+                seed_row or {}
+            ).get("methods", {}).get(method, {}).get(str(budget))
+            if seeded is not None:
+                method_results[str(budget)] = seeded
+                continue
             selected = budget_sets[budget]
             if not selected:
                 method_results[str(budget)] = {
@@ -231,12 +239,15 @@ def main() -> None:
     parser.add_argument("--out", required=True)
     parser.add_argument("--summary-out", required=True)
     parser.add_argument("--budgets", default="1,3,5,7,9")
+    parser.add_argument("--seed-results", default="")
+    parser.add_argument("--skip-reflow", action="store_true")
     parser.add_argument("--replacement-seed", type=int, default=0)
     parser.add_argument("--n", type=int, default=1000)
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--workers", type=int, default=48)
     parser.add_argument("--llm-base-url", default="")
     parser.add_argument("--llm-model", default="")
+    parser.add_argument("--reader-max-tokens", type=int, default=128)
     args = parser.parse_args()
 
     budgets = sorted({int(value) for value in args.budgets.split(",")})
@@ -276,10 +287,17 @@ def main() -> None:
     reader = ReaderClient(
         base_url=args.llm_base_url or None,
         model=args.llm_model or None,
+        max_tokens=args.reader_max_tokens,
     )
     output_path = Path(args.out)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     expected_ids = {record_id(record) for record in records}
+    seed_by_id = {}
+    if args.seed_results:
+        for row in load_records(args.seed_results):
+            identifier = str(row.get("id", ""))
+            if identifier in expected_ids:
+                seed_by_id[identifier] = row
     existing = {}
     if output_path.is_file():
         for row in load_records(output_path):
@@ -299,6 +317,8 @@ def main() -> None:
             budgets=budgets,
             replacement_seed=args.replacement_seed,
             k=args.k,
+            include_reflow=not args.skip_reflow,
+            seed_row=seed_by_id.get(record_id(records[index])),
         )
         with lock:
             with output_path.open("a", encoding="utf-8") as handle:
@@ -341,6 +361,8 @@ def main() -> None:
         "shared_pool": os.path.abspath(args.shared_pool),
         "shared_pool_sha256": actual_sha,
         "replacement_seed": args.replacement_seed,
+        "seed_results": os.path.abspath(args.seed_results) if args.seed_results else "",
+        "includes_reflow": not args.skip_reflow,
     })
     Path(args.summary_out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.summary_out).write_text(

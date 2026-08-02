@@ -60,6 +60,40 @@ def test_reader_client_does_not_send_an_output_token_cap(monkeypatch):
     assert "max_completion_tokens" not in captured
 
 
+def test_reader_client_sends_an_explicit_output_token_cap(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"choices":[{"message":{"content":"{\\"answer\\":\\"Paris\\"}"}}]}'
+
+    def fake_urlopen(request, timeout):
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "causalityrag.reader.urllib.request.urlopen",
+        fake_urlopen,
+    )
+
+    answer = ReaderClient(
+        base_url="http://reader.test/v1",
+        max_tokens=128,
+    ).answer(
+        "What is the capital of France?",
+        [{"chunk_id": "c0", "text": "Paris is the capital of France."}],
+    )
+
+    assert answer == "Paris"
+    assert captured["max_tokens"] == 128
+
+
 def test_model_context_window_uses_the_declared_architecture_limit():
     assert model_context_window(
         SimpleNamespace(max_position_embeddings=32768)
