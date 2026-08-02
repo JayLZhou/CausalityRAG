@@ -46,11 +46,6 @@ def metric_rows(
             for name in method_names
         )
         adjusted = factual - control
-        if adjusted < -1e-12:
-            raise ValueError(
-                f"negative adjusted {metric} flip for {method_names}: "
-                f"factual={factual}, control={control}"
-            )
         result[metric] = {
             "factual_flip_ratio": factual,
             "meaning_preserving_flip_ratio": control,
@@ -78,10 +73,16 @@ def main() -> None:
         RANDOM_METHODS,
     )
     result = {
-        "population": (
-            "All 1,000 queries; unsupported or unexecuted interventions "
-            "contribute zero flips."
-        ),
+        "population": {
+            "answer": (
+                "All queries; unsupported or unexecuted interventions "
+                "contribute zero flips."
+            ),
+            "correctness": (
+                "Metric-specific clean-correct subsets shared by factual "
+                "and meaning-preserving interventions."
+            ),
+        },
         "adjustment": (
             "factual counterfactual flip ratio minus the flip ratio produced "
             "by meaning-preserving replacements at the same selected positions"

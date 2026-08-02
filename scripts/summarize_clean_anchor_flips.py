@@ -1,14 +1,15 @@
 """Summarize HotpotQA counterfactual flips against clean reader answers.
 
 Each answer is evaluated against the same dataset gold answer with the
-HippoRAG/MRQA normalizer.  The clean reader answer is the per-query reference
-level: a flip is a change in the corresponding gold-scored RAG metric, rather
-than a raw string difference.  We report:
+HippoRAG/MRQA normalizer.  Answer-Flip is measured over every query.  The
+gold-based metrics are correctness-conditioned: each metric uses the queries
+that the clean reader answered correctly under that same metric, and only a
+decrease counts as a flip.  We report:
 
 * Answer-Flip: normalized EM(edited, clean) = 0;
-* F1-Flip: normalized token F1(edited, gold) != F1(clean, gold);
-* EM-Flip: normalized EM(edited, gold) != EM(clean, gold);
-* Acc-Flip: normalized-containment answer accuracy changes from clean to edited.
+* F1-CFlip: normalized token F1(edited, gold) < F1(clean, gold);
+* EM-CFlip: clean exact match is lost after editing;
+* Acc-CFlip: clean benchmark correctness is lost after editing.
 
 This script only reads saved JSONL outputs; it never calls the reader or the
 replacement model.  It accepts one flat ReFlow output and one nested matched-
@@ -58,6 +59,9 @@ def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> 
     evaluated = 0
     valid_answers = 0
     scored = 0
+    f1_clean_correct_queries = 0
+    em_clean_correct_queries = 0
+    acc_clean_correct_queries = 0
     answer_flips = 0
     f1_flips = 0
     em_flips = 0
@@ -66,10 +70,27 @@ def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> 
     examples = []
     for parent, method in method_rows:
         total_queries += 1
+        clean_answer = str(parent.get("clean_answer", ""))
+        gold_answer = str(parent.get("gold_answer", ""))
+        clean_f1_score = (
+            answer_token_f1(clean_answer, gold_answer)
+            if clean_answer and gold_answer
+            else 0.0
+        )
+        clean_em_score = bool(
+            clean_answer and gold_answer
+            and answers_exact_match(clean_answer, gold_answer)
+        )
+        clean_acc_score = bool(
+            clean_answer and gold_answer and answers_match(clean_answer, gold_answer)
+        )
+        f1_clean_correct = clean_f1_score >= 1.0 - 1e-12
+        f1_clean_correct_queries += int(f1_clean_correct)
+        em_clean_correct_queries += int(clean_em_score)
+        acc_clean_correct_queries += int(clean_acc_score)
         if not _is_executed(method):
             continue
         evaluated += 1
-        clean_answer = str(parent.get("clean_answer", ""))
         edited_answer = str(method.get("edited_answer", method.get("answer", "")))
         if clean_answer and edited_answer.strip():
             answer_flips += int(not answers_exact_match(edited_answer, clean_answer))
@@ -83,13 +104,14 @@ def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> 
         scored += 1
         clean_f1 = float(metrics["clean_f1"])
         edited_f1 = float(metrics["edited_f1"])
-        f1_flip = edited_f1 != clean_f1
-        em_flip = bool(metrics["clean_em"]) != bool(metrics["edited_em"])
-        acc_flip = bool(metrics["clean_acc"]) != bool(metrics["edited_acc"])
+        f1_flip = f1_clean_correct and edited_f1 < clean_f1
+        em_flip = bool(metrics["clean_em"]) and not bool(metrics["edited_em"])
+        acc_flip = bool(metrics["clean_acc"]) and not bool(metrics["edited_acc"])
         f1_flips += int(f1_flip)
         em_flips += int(em_flip)
         acc_flips += int(acc_flip)
-        mean_f1_delta += edited_f1 - clean_f1
+        if f1_clean_correct:
+            mean_f1_delta += edited_f1 - clean_f1
         if len(examples) < 5 and (f1_flip or em_flip or acc_flip):
             examples.append({
                 "id": metrics["id"],
@@ -106,15 +128,20 @@ def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> 
         "reader_executed_queries": evaluated,
         "valid_answer_queries": valid_answers,
         "gold_scored_queries": scored,
+        "f1_clean_correct_queries": f1_clean_correct_queries,
+        "em_clean_correct_queries": em_clean_correct_queries,
+        "acc_clean_correct_queries": acc_clean_correct_queries,
         "answer_flip_count": answer_flips,
         "answer_flip_ratio": answer_flips / denominator,
         "f1_flip_count": f1_flips,
-        "f1_flip_ratio": f1_flips / denominator,
+        "f1_flip_ratio": f1_flips / max(1, f1_clean_correct_queries),
         "em_flip_count": em_flips,
-        "em_flip_ratio": em_flips / denominator,
+        "em_flip_ratio": em_flips / max(1, em_clean_correct_queries),
         "acc_flip_count": acc_flips,
-        "acc_flip_ratio": acc_flips / denominator,
-        "mean_token_f1_delta_edited_minus_clean": mean_f1_delta / max(1, scored),
+        "acc_flip_ratio": acc_flips / max(1, acc_clean_correct_queries),
+        "mean_token_f1_delta_edited_minus_clean": (
+            mean_f1_delta / max(1, f1_clean_correct_queries)
+        ),
         "example_metric_rows": examples,
     }
 
@@ -149,11 +176,12 @@ def main() -> None:
     })
     output: dict[str, Any] = {
         "metric_contract": {
-            "population": "all 1,000 HotpotQA rows; no reader execution, no legal edit, or an empty answer contributes zero flips",
+            "answer_population": "all rows; no reader execution, no legal edit, or an empty answer contributes zero answer flips",
+            "correctness_population": "metric-specific clean-correct queries: clean F1=1 for F1, clean exact match for EM, and clean normalized containment accuracy for Acc; unexecuted or invalid edits contribute zero correctness flips",
             "answer_flip": "normalized EM(edited, clean) = 0",
-            "f1_flip": "HippoRAG-style normalized token F1(edited, gold) != token F1(clean, gold)",
-            "em_flip": "normalized EM(edited, gold) != normalized EM(clean, gold)",
-            "acc_flip": "normalized containment accuracy(edited, gold) != accuracy(clean, gold)",
+            "f1_flip": "on the clean-correct population, normalized token F1(edited, gold) < token F1(clean, gold)",
+            "em_flip": "on the clean-correct population, clean exact match is lost after editing",
+            "acc_flip": "on the clean-correct population, normalized containment accuracy is lost after editing",
         },
         "sources": {
             "reflow": os.path.abspath(args.reflow),

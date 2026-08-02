@@ -108,14 +108,14 @@ def evaluate_selected(
         "edits": revision["edits"],
         "edited_answer": edited,
         "answer_flip": not answers_exact_match(clean_answer, edited),
-        "f1_flip": clean_f1 != edited_f1,
+        "f1_flip": edited_f1 < clean_f1,
         "em_flip": (
             answers_exact_match(clean_answer, gold_answer)
-            != answers_exact_match(edited, gold_answer)
+            and not answers_exact_match(edited, gold_answer)
         ),
         "acc_flip": (
             answers_match(clean_answer, gold_answer)
-            != answers_match(edited, gold_answer)
+            and not answers_match(edited, gold_answer)
         ),
     }
 
@@ -126,12 +126,73 @@ def summarize(rows: list[dict]) -> dict:
     })
     methods = {}
     for name in method_names:
-        values = [row.get("methods", {}).get(name, {}) for row in rows]
+        pairs = [
+            (row, row.get("methods", {}).get(name, {}))
+            for row in rows
+        ]
+        values = [method for _, method in pairs]
         executed = [row for row in values if row.get("reader_called")]
         valid = [
             row for row in executed
             if str(row.get("edited_answer", "")).strip()
         ]
+        f1_clean_correct = [
+            (parent, method)
+            for parent, method in pairs
+            if answer_token_f1(
+                str(parent.get("clean_answer", "")),
+                str(parent.get("gold_answer", "")),
+            ) >= 1.0 - 1e-12
+        ]
+        em_clean_correct = [
+            (parent, method)
+            for parent, method in pairs
+            if answers_exact_match(
+                str(parent.get("clean_answer", "")),
+                str(parent.get("gold_answer", "")),
+            )
+        ]
+        acc_clean_correct = [
+            (parent, method)
+            for parent, method in pairs
+            if answers_match(
+                str(parent.get("clean_answer", "")),
+                str(parent.get("gold_answer", "")),
+            )
+        ]
+
+        def valid_correct(population: list[tuple[dict, dict]]) -> list[tuple[dict, dict]]:
+            return [
+                (parent, method)
+                for parent, method in population
+                if method.get("reader_called")
+                and str(method.get("edited_answer", "")).strip()
+            ]
+
+        valid_f1_correct = valid_correct(f1_clean_correct)
+        valid_em_correct = valid_correct(em_clean_correct)
+        valid_acc_correct = valid_correct(acc_clean_correct)
+        f1_flips = sum(
+            answer_token_f1(
+                str(method.get("edited_answer", "")),
+                str(parent.get("gold_answer", "")),
+            ) < 1.0 - 1e-12
+            for parent, method in valid_f1_correct
+        )
+        em_flips = sum(
+            not answers_exact_match(
+                str(method.get("edited_answer", "")),
+                str(parent.get("gold_answer", "")),
+            )
+            for parent, method in valid_em_correct
+        )
+        acc_flips = sum(
+            not answers_match(
+                str(method.get("edited_answer", "")),
+                str(parent.get("gold_answer", "")),
+            )
+            for parent, method in valid_acc_correct
+        )
         methods[name] = {
             "queries": len(values),
             "executed_queries": len(executed),
@@ -141,21 +202,15 @@ def summarize(rows: list[dict]) -> dict:
                 sum(bool(row.get("answer_flip")) for row in valid)
                 / max(1, len(values))
             ),
-            "f1_flips": sum(bool(row.get("f1_flip")) for row in valid),
-            "f1_flip_rate_itt": (
-                sum(bool(row.get("f1_flip")) for row in valid)
-                / max(1, len(values))
-            ),
-            "em_flips": sum(bool(row.get("em_flip")) for row in valid),
-            "em_flip_rate_itt": (
-                sum(bool(row.get("em_flip")) for row in valid)
-                / max(1, len(values))
-            ),
-            "acc_flips": sum(bool(row.get("acc_flip")) for row in valid),
-            "acc_flip_rate_itt": (
-                sum(bool(row.get("acc_flip")) for row in valid)
-                / max(1, len(values))
-            ),
+            "f1_clean_correct_queries": len(f1_clean_correct),
+            "em_clean_correct_queries": len(em_clean_correct),
+            "acc_clean_correct_queries": len(acc_clean_correct),
+            "f1_flips": f1_flips,
+            "f1_flip_rate_itt": f1_flips / max(1, len(f1_clean_correct)),
+            "em_flips": em_flips,
+            "em_flip_rate_itt": em_flips / max(1, len(em_clean_correct)),
+            "acc_flips": acc_flips,
+            "acc_flip_rate_itt": acc_flips / max(1, len(acc_clean_correct)),
             "status_histogram": {
                 status: sum(row.get("status") == status for row in values)
                 for status in sorted({
