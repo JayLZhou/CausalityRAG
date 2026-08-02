@@ -594,6 +594,45 @@ class ArcJsdModel:
         ).to(device)
         self.model.eval()
 
+    def prompt_last_position_attention(
+        self,
+        question: str,
+        contexts: Sequence[dict],
+        units: Sequence[dict],
+    ) -> list[float]:
+        """Return prompt-only last-layer attention to each context token.
+
+        The model receives exactly the rendered RAG prompt with its generation
+        marker. No generated, clean, or gold answer tokens are appended.
+        """
+
+        torch = self.torch
+        prompt_ids, positions_by_unit = self._prompt_context_token_positions(
+            question,
+            contexts,
+            units,
+        )
+        input_ids = torch.tensor(
+            [prompt_ids],
+            dtype=torch.long,
+            device=self.device,
+        )
+        attention_mask = torch.ones_like(input_ids)
+        with torch.inference_mode():
+            output = self.model.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_attentions=True,
+                use_cache=False,
+                return_dict=True,
+            )
+        # [heads, query, key] -> mean heads -> final prompt query position.
+        final_attention = output.attentions[-1][0].mean(dim=0)[-1]
+        return [
+            float(final_attention[positions].sum().item())
+            for positions in positions_by_unit
+        ]
+
     def response_to_context_attention_routing(
         self,
         question: str,
