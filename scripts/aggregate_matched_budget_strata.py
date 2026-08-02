@@ -26,13 +26,8 @@ DATASETS = (
 METHODS = ("mirage", "arc_jsd", "reflow")
 STRATA: tuple[tuple[str, Callable[[int], bool]], ...] = (
     ("1", lambda budget: budget == 1),
-    ("2", lambda budget: budget == 2),
-    ("3", lambda budget: budget == 3),
-    ("4", lambda budget: budget == 4),
-    ("5", lambda budget: budget == 5),
-    ("6", lambda budget: budget == 6),
-    ("7", lambda budget: budget == 7),
-    ("8", lambda budget: budget == 8),
+    ("2-3", lambda budget: 2 <= budget <= 3),
+    ("4-8", lambda budget: 4 <= budget <= 8),
     (">=9", lambda budget: budget >= 9),
 )
 
