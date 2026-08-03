@@ -286,6 +286,23 @@ def prepare(args: argparse.Namespace) -> None:
             str(chunk["chunk_id"])
             for chunk in corrupted_record.get("retrieved", [])[: args.k]
         }
+        corrupted_unit_row["top_k"] = args.k
+        corrupted_unit_row["units"] = [
+            item
+            for item in corrupted_unit_row.get("units", [])
+            if str(item.get("chunk_id", "")) in topk_chunk_ids
+        ]
+        corrupted_unit_row["sentences"] = [
+            sentence
+            for sentence in corrupted_unit_row.get("sentences", [])
+            if str(sentence.get("chunk_id", "")) in topk_chunk_ids
+        ]
+        corrupted_unit_row["context_sha256"] = {
+            str(chunk["chunk_id"]): hashlib.sha256(
+                str(chunk["text"]).encode("utf-8")
+            ).hexdigest()
+            for chunk in corrupted_record.get("retrieved", [])[: args.k]
+        }
         for item in corrupted_unit_row.get("units", []):
             item_id = str(item["unit_id"])
             if str(item.get("chunk_id", "")) not in topk_chunk_ids or item_id not in pool:
