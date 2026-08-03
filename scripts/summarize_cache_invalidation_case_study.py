@@ -38,6 +38,14 @@ def deduplicate_unit_ids(unit_ids: list[str]) -> list[str]:
     return result
 
 
+def project_units_to_sentences(
+    unit_ids: list[str], sentence_by_unit: dict[str, str]
+) -> list[str]:
+    return deduplicate_unit_ids(
+        [sentence_by_unit.get(str(unit_id), "") for unit_id in unit_ids]
+    )
+
+
 def reflow_rank(row: dict) -> list[str]:
     candidates = sorted(
         row.get("frontier_candidates", []),
@@ -107,9 +115,44 @@ def metrics(labels: list[bool], predictions: list[bool]) -> dict:
 
 
 def covered_by_signature(
-    update_unit_ids: set[str], ranked_unit_ids: list[str], budget: int
+    update_ids: set[str], ranked_ids: list[str], budget: int
 ) -> bool:
-    return bool(update_unit_ids & set(ranked_unit_ids[:budget]))
+    return bool(update_ids & set(ranked_ids[:budget]))
+
+
+def evaluate_curves(
+    *,
+    labels: list[bool],
+    trials: list[dict],
+    update_ids: list[set[str]],
+    ranked_ids: dict[str, dict[str, list[str]]],
+    budgets: list[int],
+) -> dict[str, dict[str, dict]]:
+    curves = {}
+    for method, signatures in ranked_ids.items():
+        curve = {}
+        for budget in budgets:
+            predictions = [
+                covered_by_signature(
+                    update_ids[index], signatures[record_id(row)], budget
+                )
+                for index, row in enumerate(trials)
+            ]
+            curve[str(budget)] = metrics(labels, predictions)
+        curves[method] = curve
+    return curves
+
+
+def average_random_curves(
+    random_curves: list[dict[str, dict]], budgets: list[int]
+) -> dict[str, dict]:
+    return {
+        str(budget): {
+            key: statistics.mean(curve[str(budget)][key] for curve in random_curves)
+            for key in random_curves[0][str(budget)]
+        }
+        for budget in budgets
+    }
 
 
 def main() -> None:
@@ -142,6 +185,14 @@ def main() -> None:
         ]
         for query_id in query_ids
     }
+    sentence_by_query = {
+        query_id: {
+            str(unit["unit_id"]): str(unit.get("sentence_id", ""))
+            for unit in units[query_id].get("units", [])
+            if unit.get("unit_id") is not None
+        }
+        for query_id in query_ids
+    }
     ranked_units: dict[str, dict[str, list[str]]] = {}
     for method, source in sources.items():
         ranked_units[method] = {}
@@ -157,31 +208,49 @@ def main() -> None:
                 for unit_id in deduplicate_unit_ids(unit_ids)
                 if unit_id in eligible
             ]
+    ranked_sentences = {
+        method: {
+            query_id: project_units_to_sentences(
+                unit_ids, sentence_by_query[query_id]
+            )
+            for query_id, unit_ids in signatures.items()
+        }
+        for method, signatures in ranked_units.items()
+    }
 
     labels = [bool(row.get("correctness_flip")) for row in trials]
     update_units = [
         {str(unit_id) for unit_id in row.get("selected_ids", [])}
         for row in trials
     ]
+    update_sentences = [
+        {
+            sentence_by_query[record_id(row)].get(str(unit_id), "")
+            for unit_id in row.get("selected_ids", [])
+        }
+        - {""}
+        for row in trials
+    ]
 
-    curves = {}
-    for method in sources:
-        curve = {}
-        for budget in args.budgets:
-            predictions = [
-                covered_by_signature(
-                    update_units[index],
-                    ranked_units[method][record_id(row)],
-                    budget,
-                )
-                for index, row in enumerate(trials)
-            ]
-            curve[str(budget)] = metrics(labels, predictions)
-        curves[method] = curve
+    token_curves = evaluate_curves(
+        labels=labels,
+        trials=trials,
+        update_ids=update_units,
+        ranked_ids=ranked_units,
+        budgets=args.budgets,
+    )
+    sentence_curves = evaluate_curves(
+        labels=labels,
+        trials=trials,
+        update_ids=update_sentences,
+        ranked_ids=ranked_sentences,
+        budgets=args.budgets,
+    )
 
-    random_curves = []
+    random_token_curves = []
+    random_sentence_curves = []
     for seed in range(args.random_seeds):
-        signatures = {
+        token_signatures = {
             query_id: stable_random_units(
                 eligible_units_by_query[query_id],
                 query_id=query_id,
@@ -189,27 +258,47 @@ def main() -> None:
             )
             for query_id in query_ids
         }
-        curve = {}
-        for budget in args.budgets:
-            predictions = [
-                covered_by_signature(
-                    update_units[index], signatures[record_id(row)], budget
-                )
-                for index, row in enumerate(trials)
-            ]
-            curve[str(budget)] = metrics(labels, predictions)
-        random_curves.append(curve)
-    curves["random_5seed_mean"] = {
-        str(budget): {
-            key: statistics.mean(curve[str(budget)][key] for curve in random_curves)
-            for key in random_curves[0][str(budget)]
+        sentence_signatures = {
+            query_id: stable_random_units(
+                sorted(set(sentence_by_query[query_id].values()) - {""}),
+                query_id=query_id,
+                seed=seed,
+            )
+            for query_id in query_ids
         }
-        for budget in args.budgets
+        random_token_curves.append(
+            evaluate_curves(
+                labels=labels,
+                trials=trials,
+                update_ids=update_units,
+                ranked_ids={"random": token_signatures},
+                budgets=args.budgets,
+            )["random"]
+        )
+        random_sentence_curves.append(
+            evaluate_curves(
+                labels=labels,
+                trials=trials,
+                update_ids=update_sentences,
+                ranked_ids={"random": sentence_signatures},
+                budgets=args.budgets,
+            )["random"]
+        )
+    token_curves["random_5seed_mean"] = average_random_curves(
+        random_token_curves, args.budgets
+    )
+    sentence_curves["random_5seed_mean"] = average_random_curves(
+        random_sentence_curves, args.budgets
+    )
+
+    results = {
+        "retrieved_token_position": {"curves": token_curves},
+        "evidence_sentence": {"curves": sentence_curves},
     }
 
     output = {
-        "schema": "causalityrag.cache_invalidation_case_study.v2",
-        "monitoring_unit": "retrieved_token_position",
+        "schema": "causalityrag.cache_invalidation_case_study.v3",
+        "monitoring_units": list(results),
         "queries": len(query_ids),
         "update_trials": len(trials),
         "factual_tokens_per_update": len(trials[0].get("selected_ids", [])),
@@ -223,7 +312,7 @@ def main() -> None:
             "cache_reuse_rate": 0.0,
             "stale_answer_rate": 0.0,
         },
-        "curves": curves,
+        "results": results,
     }
     target = Path(args.out)
     target.parent.mkdir(parents=True, exist_ok=True)
