@@ -27,14 +27,14 @@ def index_rows(path: str) -> dict[str, dict]:
     return indexed
 
 
-def deduplicate_sentences(unit_ids: list[str], sentence_by_unit: dict[str, str]) -> list[str]:
+def deduplicate_unit_ids(unit_ids: list[str]) -> list[str]:
     result = []
     seen = set()
     for unit_id in unit_ids:
-        sentence_id = sentence_by_unit.get(str(unit_id), "")
-        if sentence_id and sentence_id not in seen:
-            seen.add(sentence_id)
-            result.append(sentence_id)
+        unit_id = str(unit_id)
+        if unit_id and unit_id not in seen:
+            seen.add(unit_id)
+            result.append(unit_id)
     return result
 
 
@@ -70,13 +70,13 @@ def score_rank(row: dict) -> list[str]:
     ]
 
 
-def stable_random_sentences(
-    sentence_ids: list[str], *, query_id: str, seed: int
+def stable_random_units(
+    unit_ids: list[str], *, query_id: str, seed: int
 ) -> list[str]:
     return sorted(
-        sentence_ids,
-        key=lambda sentence_id: hashlib.sha256(
-            f"{seed}\0{query_id}\0{sentence_id}".encode("utf-8")
+        unit_ids,
+        key=lambda unit_id: hashlib.sha256(
+            f"{seed}\0{query_id}\0{unit_id}".encode("utf-8")
         ).digest(),
     )
 
@@ -106,6 +106,12 @@ def metrics(labels: list[bool], predictions: list[bool]) -> dict:
     }
 
 
+def covered_by_signature(
+    update_unit_ids: set[str], ranked_unit_ids: list[str], budget: int
+) -> bool:
+    return bool(update_unit_ids & set(ranked_unit_ids[:budget]))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stress-results", required=True)
@@ -128,43 +134,45 @@ def main() -> None:
         "integrated_gradients": index_rows(args.integrated_gradients),
     }
     query_ids = sorted({record_id(row) for row in trials})
-    sentence_by_query = {
-        query_id: {
-            str(unit["unit_id"]): str(unit.get("sentence_id", ""))
+    eligible_units_by_query = {
+        query_id: [
+            str(unit["unit_id"])
             for unit in units[query_id].get("units", [])
-        }
+            if unit.get("unit_id") is not None
+        ]
         for query_id in query_ids
     }
-    ranked_sentences: dict[str, dict[str, list[str]]] = {}
+    ranked_units: dict[str, dict[str, list[str]]] = {}
     for method, source in sources.items():
-        ranked_sentences[method] = {}
+        ranked_units[method] = {}
         for query_id in query_ids:
             unit_ids = (
                 reflow_rank(source[query_id])
                 if method == "reflow"
                 else score_rank(source[query_id])
             )
-            ranked_sentences[method][query_id] = deduplicate_sentences(
-                unit_ids, sentence_by_query[query_id]
-            )
+            eligible = set(eligible_units_by_query[query_id])
+            ranked_units[method][query_id] = [
+                unit_id
+                for unit_id in deduplicate_unit_ids(unit_ids)
+                if unit_id in eligible
+            ]
 
     labels = [bool(row.get("correctness_flip")) for row in trials]
-    update_sentences = []
-    for row in trials:
-        query_id = record_id(row)
-        update_sentences.append({
-            sentence_by_query[query_id].get(str(unit_id), "")
-            for unit_id in row.get("selected_ids", [])
-        } - {""})
+    update_units = [
+        {str(unit_id) for unit_id in row.get("selected_ids", [])}
+        for row in trials
+    ]
 
     curves = {}
     for method in sources:
         curve = {}
         for budget in args.budgets:
             predictions = [
-                bool(
-                    update_sentences[index]
-                    & set(ranked_sentences[method][record_id(row)][:budget])
+                covered_by_signature(
+                    update_units[index],
+                    ranked_units[method][record_id(row)],
+                    budget,
                 )
                 for index, row in enumerate(trials)
             ]
@@ -174,8 +182,8 @@ def main() -> None:
     random_curves = []
     for seed in range(args.random_seeds):
         signatures = {
-            query_id: stable_random_sentences(
-                sorted(set(sentence_by_query[query_id].values()) - {""}),
+            query_id: stable_random_units(
+                eligible_units_by_query[query_id],
                 query_id=query_id,
                 seed=seed,
             )
@@ -184,7 +192,9 @@ def main() -> None:
         curve = {}
         for budget in args.budgets:
             predictions = [
-                bool(update_sentences[index] & set(signatures[record_id(row)][:budget]))
+                covered_by_signature(
+                    update_units[index], signatures[record_id(row)], budget
+                )
                 for index, row in enumerate(trials)
             ]
             curve[str(budget)] = metrics(labels, predictions)
@@ -198,7 +208,8 @@ def main() -> None:
     }
 
     output = {
-        "schema": "causalityrag.cache_invalidation_case_study.v1",
+        "schema": "causalityrag.cache_invalidation_case_study.v2",
+        "monitoring_unit": "retrieved_token_position",
         "queries": len(query_ids),
         "update_trials": len(trials),
         "factual_tokens_per_update": len(trials[0].get("selected_ids", [])),
