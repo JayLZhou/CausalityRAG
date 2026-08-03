@@ -83,7 +83,7 @@ def make_request_trace(
     zipf_alpha: float,
     updates_per_query: int,
     seed: int,
-) -> tuple[list[str], dict[int, str]]:
+) -> tuple[list[str], dict[int, list[str]]]:
     rng = random.Random(seed)
     popularity_order = list(query_ids)
     rng.shuffle(popularity_order)
@@ -94,16 +94,18 @@ def make_request_trace(
     for index, query_id in enumerate(requests):
         positions[query_id].append(index)
 
-    updates: dict[int, str] = {}
+    updates: dict[int, list[str]] = {}
     for query_id in query_ids:
         occurrences = positions[query_id]
         if len(occurrences) < 2:
             continue
         update_count = min(updates_per_query, len(occurrences) - 1)
-        for occurrence_index in rng.sample(
-            range(1, len(occurrences)), update_count
-        ):
-            updates[occurrences[occurrence_index]] = query_id
+        for gap_index in rng.sample(range(len(occurrences) - 1), update_count):
+            update_position = rng.randrange(
+                occurrences[gap_index] + 1,
+                occurrences[gap_index + 1] + 1,
+            )
+            updates.setdefault(update_position, []).append(query_id)
     return requests, updates
 
 
@@ -150,7 +152,7 @@ def replay_policy(
     spec: PolicySpec,
     capacity: int,
     requests: list[str],
-    updates: dict[int, str],
+    updates: dict[int, list[str]],
     update_rows: dict[str, dict],
     sentence_by_query: dict[str, dict[str, str]],
     token_signatures: dict[str, list[str]],
@@ -180,8 +182,7 @@ def replay_policy(
         counters[reason] += 1
 
     for step, query_id in enumerate(requests):
-        update_query = updates.get(step)
-        if update_query is not None:
+        for update_query in updates.get(step, []):
             update = update_rows[update_query]
             source_versions[update_query] = 1 - source_versions.get(
                 update_query, 0
@@ -362,7 +363,7 @@ def main() -> None:
             {
                 "seed": seed,
                 "requests": len(requests),
-                "scheduled_updates": len(updates),
+                "scheduled_updates": sum(map(len, updates.values())),
             }
         )
         for capacity in args.capacities:

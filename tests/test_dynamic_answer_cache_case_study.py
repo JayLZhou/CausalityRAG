@@ -10,7 +10,7 @@ def _replay(spec: PolicySpec) -> dict:
         spec=spec,
         capacity=1,
         requests=["q", "q"],
-        updates={1: "q"},
+        updates={1: ["q"]},
         update_rows={
             "q": {
                 "answer_changed": True,
@@ -46,7 +46,7 @@ def test_second_version_toggle_can_refresh_an_old_cached_answer() -> None:
         spec=PolicySpec(name="lru"),
         capacity=1,
         requests=["q", "q", "q"],
-        updates={1: "q", 2: "q"},
+        updates={1: ["q"], 2: ["q"]},
         update_rows={
             "q": {
                 "answer_changed": True,
@@ -62,6 +62,24 @@ def test_second_version_toggle_can_refresh_an_old_cached_answer() -> None:
     assert result["stale_hits"] == 1
 
 
+def test_lru_can_evict_a_stale_entry_before_its_next_request() -> None:
+    result = replay_policy(
+        spec=PolicySpec(name="lru"),
+        capacity=1,
+        requests=["q", "a", "q"],
+        updates={1: ["q"]},
+        update_rows={
+            "q": {"answer_changed": True, "selected_ids": ["u"]}
+        },
+        sentence_by_query={"q": {"u": "s"}, "a": {}},
+        token_signatures={"q": ["u"], "a": []},
+        sentence_signatures={"q": ["s"], "a": []},
+    )
+
+    assert result["stale_hits"] == 0
+    assert result["stale_episode_recall"] == 1
+
+
 def test_trace_places_updates_between_repeated_requests() -> None:
     requests, updates = make_request_trace(
         ["q1", "q2"],
@@ -71,8 +89,12 @@ def test_trace_places_updates_between_repeated_requests() -> None:
         seed=0,
     )
 
-    for position, query_id in updates.items():
-        occurrences = [i for i, value in enumerate(requests) if value == query_id]
-        assert occurrences[0] < position <= occurrences[-1]
+    for position, query_ids in updates.items():
+        for query_id in query_ids:
+            occurrences = [
+                i for i, value in enumerate(requests) if value == query_id
+            ]
+            assert occurrences[0] < position <= occurrences[-1]
 
-    assert len(updates) == 6
+    assert sum(map(len, updates.values())) == 6
+    assert any(requests[position] not in query_ids for position, query_ids in updates.items())
