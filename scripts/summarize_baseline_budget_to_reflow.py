@@ -64,12 +64,23 @@ def summarize_dataset(base: Path, sweep_name: str) -> dict[str, Any]:
             None,
         )
         if matched_budget is None:
+            best_budget = max(
+                budgets,
+                key=lambda budget: (
+                    float(curve[str(budget)]["acc_cfr"]),
+                    -budget,
+                ),
+            )
+            best_point = curve[str(best_budget)]
             methods[method] = {
                 "status": "not_reached",
                 "max_tested_budget": max(budgets),
-                "max_tested_acc_cfr": max(
-                    float(values["acc_cfr"]) for values in curve.values()
+                "best_top_k": best_budget,
+                "best_acc_cfr": float(best_point["acc_cfr"]),
+                "best_mean_modified_tokens": float(
+                    best_point["mean_modified_tokens"]
                 ),
+                "target_shortfall": target - float(best_point["acc_cfr"]),
             }
             continue
         point = curve[str(matched_budget)]

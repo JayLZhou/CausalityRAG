@@ -70,7 +70,7 @@ def evaluate_query(
 ) -> dict:
     identifier = record_id(record)
     clean_answer = str(frontier_row.get("clean_answer", ""))
-    gold_answer = str(record.get("answer", ""))
+    gold_answer = str(record.get("answer") or record.get("gold_answer", ""))
     clean_acc = bool(
         valid_clean_answer(clean_answer)
         and gold_answer.strip()
@@ -107,7 +107,7 @@ def evaluate_query(
             if unit_id in eligible
         ]
         method_sets[name] = {
-            budget: ranking[:budget] if len(ranking) >= budget else []
+            budget: ranking[:budget]
             for budget in budgets
         }
 
@@ -119,7 +119,7 @@ def evaluate_query(
             seeded = (
                 seed_row or {}
             ).get("methods", {}).get(method, {}).get(str(budget))
-            if seeded is not None:
+            if seeded is not None and seeded.get("edited_answer"):
                 method_results[str(budget)] = seeded
                 continue
             selected = budget_sets[budget]
@@ -355,8 +355,9 @@ def main() -> None:
         "metric": "Acc-CFR",
         "budget_contract": (
             "at most b edits; ReFlow uses the minimum-residual supported set "
-            "with cardinality <= b; ranking baselines use their first b "
-            "eligible tokens"
+            "with cardinality <= b; ranking baselines use up to their first b "
+            "eligible tokens and use all available ranked tokens when fewer "
+            "than b exist"
         ),
         "shared_pool": os.path.abspath(args.shared_pool),
         "shared_pool_sha256": actual_sha,
