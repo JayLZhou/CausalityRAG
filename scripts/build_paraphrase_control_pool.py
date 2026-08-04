@@ -14,6 +14,7 @@ from causalityrag.io import load_records, record_id
 from causalityrag.paraphrase_control import (
     PARAPHRASE_POLICY,
     SentenceParaphraseClient,
+    excluded_from_paraphrase_control,
     wordnet_support,
 )
 from causalityrag.semantic_filter import ensure_wordnet_available
@@ -111,13 +112,14 @@ def generate_batch(
         if accepted[unit_id]:
             continue
         fallback = equivalent_rendering(str(target["token"]))
-        accepted[unit_id].append({
-            "new": fallback,
-            "policy": "deterministic_equivalent_rendering_v1",
-            "wordnet_supported": False,
-            "llm_equivalence_judge": False,
-            "fallback": True,
-        })
+        if fallback is not None:
+            accepted[unit_id].append({
+                "new": fallback,
+                "policy": "deterministic_equivalent_rendering_v2",
+                "wordnet_supported": False,
+                "llm_equivalence_judge": False,
+                "fallback": True,
+            })
     return [
         {
             "unit_id": unit_id,
@@ -130,18 +132,10 @@ def generate_batch(
     ]
 
 
-def equivalent_rendering(token: str) -> str:
+def equivalent_rendering(token: str) -> str | None:
     """Return a deterministic information-preserving surface rendering."""
 
     value = str(token).strip()
-    if value.isdigit():
-        number = int(value)
-        if 1000 <= number <= 2099:
-            first, last = divmod(number, 100)
-            if last:
-                return f"{number_words(first)} {number_words(last)}"
-            return f"{number_words(first)} hundred"
-        return number_words(number)
     if any(character.isalpha() for character in value):
         upper = value.upper()
         if upper != value:
@@ -149,39 +143,7 @@ def equivalent_rendering(token: str) -> str:
         lower = value.lower()
         if lower != value:
             return lower
-    return value + ".0"
-
-
-def number_words(number: int) -> str:
-    """Spell non-negative integers used by the numeric paraphrase fallback."""
-
-    if number < 0:
-        return "minus " + number_words(-number)
-    ones = (
-        "zero", "one", "two", "three", "four", "five", "six", "seven",
-        "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
-        "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
-    )
-    tens = (
-        "", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
-        "eighty", "ninety",
-    )
-    if number < 20:
-        return ones[number]
-    if number < 100:
-        quotient, remainder = divmod(number, 10)
-        return tens[quotient] + (f"-{ones[remainder]}" if remainder else "")
-    if number < 1000:
-        quotient, remainder = divmod(number, 100)
-        return (
-            f"{ones[quotient]} hundred"
-            + (f" {number_words(remainder)}" if remainder else "")
-        )
-    quotient, remainder = divmod(number, 1000)
-    return (
-        f"{number_words(quotient)} thousand"
-        + (f" {number_words(remainder)}" if remainder else "")
-    )
+    return None
 
 
 def main() -> None:
@@ -246,6 +208,17 @@ def main() -> None:
                 raise KeyError(f"selected token missing from unit cache: {unit_id}")
             targets[unit_id] = target_from_unit(by_id[unit_id], sentences)
 
+    excluded_targets = {
+        unit_id: target
+        for unit_id, target in targets.items()
+        if excluded_from_paraphrase_control(target)
+    }
+    eligible_targets = {
+        unit_id: target
+        for unit_id, target in targets.items()
+        if unit_id not in excluded_targets
+    }
+
     existing_rows = {}
     if args.existing_pool:
         existing_rows = {
@@ -255,12 +228,12 @@ def main() -> None:
         }
     reused = [
         existing_rows[unit_id]
-        for unit_id in sorted(targets)
+        for unit_id in sorted(eligible_targets)
         if unit_id in existing_rows
     ]
     ordered = [
-        targets[unit_id]
-        for unit_id in sorted(targets)
+        eligible_targets[unit_id]
+        for unit_id in sorted(eligible_targets)
         if unit_id not in existing_rows
     ]
     batches = [
@@ -304,10 +277,16 @@ def main() -> None:
             output.write(json.dumps(row, ensure_ascii=False) + "\n")
     manifest = {
         "policy": PARAPHRASE_POLICY,
-        "selected_positions": len(rows),
+        "selected_positions": len(targets),
+        "paraphrase_eligible_positions": len(eligible_targets),
+        "excluded_numeric_date_positions": len(excluded_targets),
         "covered_positions": len(covered),
         "unresolved_positions": len(unresolved),
-        "coverage": len(covered) / max(1, len(rows)),
+        "coverage": (
+            len(covered) / len(eligible_targets)
+            if eligible_targets
+            else 1.0
+        ),
         "wordnet_supported_positions": sum(
             any(candidate.get("wordnet_supported") for candidate in row["candidates"])
             for row in covered

@@ -13,6 +13,7 @@ from threading import Lock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from causalityrag.io import load_records, record_id
+from causalityrag.paraphrase_control import excluded_from_paraphrase_control
 from causalityrag.reader import (
     ReaderClient,
     answer_token_f1,
@@ -56,20 +57,46 @@ def evaluate_selected(
 ) -> dict:
     if not selected:
         return {"status": "no_selected_tokens", "reader_called": False}
-    missing = [unit_id for unit_id in selected if unit_id not in pool]
+    excluded = [
+        unit_id
+        for unit_id in selected
+        if excluded_from_paraphrase_control(units[unit_id])
+    ]
+    excluded_set = set(excluded)
+    control_selected = [
+        unit_id for unit_id in selected if unit_id not in excluded_set
+    ]
+    if not control_selected:
+        return {
+            "status": "no_paraphrase_eligible_tokens",
+            "reader_called": False,
+            "selected_ids": selected,
+            "control_selected_ids": [],
+            "excluded_numeric_date_ids": excluded,
+            "n_modified_tokens": 0,
+            "edited_answer": clean_answer,
+            "answer_flip": False,
+            "f1_flip": False,
+            "em_flip": False,
+            "acc_flip": False,
+        }
+    missing = [unit_id for unit_id in control_selected if unit_id not in pool]
     if missing:
         return {
             "status": "missing_paraphrase",
             "reader_called": False,
+            "selected_ids": selected,
+            "control_selected_ids": control_selected,
+            "excluded_numeric_date_ids": excluded,
             "missing_ids": missing,
         }
     replacements = {
         unit_id: stable_candidate(pool[unit_id]["candidates"], unit_id, seed)
-        for unit_id in selected
+        for unit_id in control_selected
     }
     revision = apply_token_replacements(
         record,
-        [units[unit_id] for unit_id in selected],
+        [units[unit_id] for unit_id in control_selected],
         replacements,
         k=k,
         allow_whitespace=True,
@@ -77,11 +104,14 @@ def evaluate_selected(
     )
     if (
         int(revision["n_failed_edits"])
-        or int(revision["n_edits"]) != len(selected)
+        or int(revision["n_edits"]) != len(control_selected)
     ):
         return {
             "status": "protocol_violation_failed_edit",
             "reader_called": False,
+            "selected_ids": selected,
+            "control_selected_ids": control_selected,
+            "excluded_numeric_date_ids": excluded,
             "edits": revision["edits"],
         }
     edited = reader.answer(str(record.get("question", "")), revision["edited_contexts"])
@@ -90,6 +120,8 @@ def evaluate_selected(
             "status": "invalid_empty_answer",
             "reader_called": True,
             "selected_ids": selected,
+            "control_selected_ids": control_selected,
+            "excluded_numeric_date_ids": excluded,
             "n_modified_tokens": int(revision["n_edits"]),
             "edits": revision["edits"],
             "edited_answer": edited,
@@ -104,6 +136,8 @@ def evaluate_selected(
         "status": "evaluated",
         "reader_called": True,
         "selected_ids": selected,
+        "control_selected_ids": control_selected,
+        "excluded_numeric_date_ids": excluded,
         "n_modified_tokens": int(revision["n_edits"]),
         "edits": revision["edits"],
         "edited_answer": edited,
@@ -211,6 +245,12 @@ def summarize(rows: list[dict]) -> dict:
             "em_flip_rate_itt": em_flips / max(1, len(em_clean_correct)),
             "acc_flips": acc_flips,
             "acc_flip_rate_itt": acc_flips / max(1, len(acc_clean_correct)),
+            "excluded_numeric_date_selections": sum(
+                len(row.get("excluded_numeric_date_ids", [])) for row in values
+            ),
+            "paraphrase_edits": sum(
+                int(row.get("n_modified_tokens", 0)) for row in values
+            ),
             "status_histogram": {
                 status: sum(row.get("status") == status for row in values)
                 for status in sorted({

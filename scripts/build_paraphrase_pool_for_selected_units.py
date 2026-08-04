@@ -12,7 +12,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from causalityrag.io import load_records, record_id
-from causalityrag.paraphrase_control import PARAPHRASE_POLICY, SentenceParaphraseClient
+from causalityrag.paraphrase_control import (
+    PARAPHRASE_POLICY,
+    SentenceParaphraseClient,
+    excluded_from_paraphrase_control,
+)
 from causalityrag.semantic_filter import ensure_wordnet_available
 from causalityrag.shared_replacement_pool import file_sha256
 from scripts.build_paraphrase_control_pool import generate_batch, target_from_unit
@@ -58,6 +62,17 @@ def main() -> None:
                 raise KeyError(f"selected token missing from unit cache: {unit_id}")
             targets[unit_id] = target_from_unit(by_id[unit_id], sentences)
 
+    excluded_targets = {
+        unit_id: target
+        for unit_id, target in targets.items()
+        if excluded_from_paraphrase_control(target)
+    }
+    eligible_targets = {
+        unit_id: target
+        for unit_id, target in targets.items()
+        if unit_id not in excluded_targets
+    }
+
     existing_rows = {}
     if args.existing_pool and os.path.isfile(args.existing_pool):
         existing_rows = {
@@ -65,8 +80,16 @@ def main() -> None:
             for row in load_records(args.existing_pool)
             if row.get("unit_id") and row.get("candidates")
         }
-    rows = [existing_rows[unit_id] for unit_id in sorted(targets) if unit_id in existing_rows]
-    missing = [targets[unit_id] for unit_id in sorted(targets) if unit_id not in existing_rows]
+    rows = [
+        existing_rows[unit_id]
+        for unit_id in sorted(eligible_targets)
+        if unit_id in existing_rows
+    ]
+    missing = [
+        eligible_targets[unit_id]
+        for unit_id in sorted(eligible_targets)
+        if unit_id not in existing_rows
+    ]
     batches = [
         missing[start : start + args.batch_size]
         for start in range(0, len(missing), args.batch_size)
@@ -96,7 +119,7 @@ def main() -> None:
     rows.sort(key=lambda row: row["unit_id"])
     covered = [row for row in rows if row.get("candidates")]
     unresolved = [row for row in rows if not row.get("candidates")]
-    if len(covered) + len(unresolved) != len(targets):
+    if len(covered) + len(unresolved) != len(eligible_targets):
         raise ValueError("paraphrase output does not cover the selected token manifest")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as handle:
@@ -109,9 +132,15 @@ def main() -> None:
         "schema": "causalityrag.selected_unit_paraphrase_pool.v1",
         "policy": PARAPHRASE_POLICY,
         "selected_positions": len(targets),
+        "paraphrase_eligible_positions": len(eligible_targets),
+        "excluded_numeric_date_positions": len(excluded_targets),
         "covered_positions": len(covered),
         "unresolved_positions": len(unresolved),
-        "coverage": len(covered) / max(1, len(targets)),
+        "coverage": (
+            len(covered) / len(eligible_targets)
+            if eligible_targets
+            else 1.0
+        ),
         "reused_positions": len(rows) - len(missing),
         "generated_positions": len(missing),
         "llm_calls": client.calls,

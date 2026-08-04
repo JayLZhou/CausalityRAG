@@ -16,7 +16,16 @@ from causalityrag.io import load_records, record_id
 from causalityrag.shared_replacement_pool import file_sha256
 
 
-DATASETS = ("timeqa", "finqa", "musique", "quartz", "qasper", "2wiki", "pubmedqa")
+DATASETS = (
+    "hotpotqa",
+    "timeqa",
+    "finqa",
+    "musique",
+    "quartz",
+    "qasper",
+    "2wiki",
+    "pubmedqa",
+)
 SCORE_FILES = {
     "attention": "attention_top5_1000.jsonl",
     "gradient_x_input": "gradient_x_input_top5_1000.jsonl",
@@ -77,9 +86,9 @@ def build_paraphrase_pool(
 ) -> tuple[Path, str]:
     controls = base / "controls"
     controls.mkdir(parents=True, exist_ok=True)
-    pool = controls / "paraphrase_pool_top5_v1.jsonl"
-    manifest_path = controls / "paraphrase_pool_top5_v1.manifest.json"
-    unresolved = controls / "paraphrase_pool_top5_v1.unresolved.jsonl"
+    pool = controls / "paraphrase_pool_top5_v2.jsonl"
+    manifest_path = controls / "paraphrase_pool_top5_v2.manifest.json"
+    unresolved = controls / "paraphrase_pool_top5_v2.unresolved.jsonl"
 
     for generation_pass in range(1, max_passes + 1):
         if manifest_path.is_file() and pool.is_file():
@@ -228,8 +237,8 @@ def main() -> None:
             llm_base_url=args.llm_base_url,
             llm_model=args.llm_model,
         )
-        paraphrase_results = base / "controls/paraphrase_results_top5_1000.jsonl"
-        paraphrase_summary = base / "controls/paraphrase_results_top5_1000.summary.json"
+        paraphrase_results = base / "controls/paraphrase_results_top5_1000_v2.jsonl"
+        paraphrase_summary = base / "controls/paraphrase_results_top5_1000_v2.summary.json"
         if not (
             complete_jsonl(paraphrase_results, expected_ids)
             and paraphrase_summary.is_file()
@@ -260,7 +269,7 @@ def main() -> None:
             "--out", str(paraphrase_summary),
         ], cwd=repo)
 
-        adjusted = audit / "table3_metrics_1000.json"
+        adjusted = audit / "table3_metrics_1000_v2.json"
         run([
             args.python,
             "scripts/summarize_adjusted_flips.py",
@@ -274,9 +283,9 @@ def main() -> None:
         args.python,
         "scripts/render_table3_rows.py",
         "--metrics-root", str(root),
-        "--out", str(root / "table3_rows.tex"),
+        "--out", str(root / "table3_rows_v2.tex"),
     ], cwd=repo)
-    print(f"[table3-reader] TABLE READY: {root / 'table3_rows.tex'}", flush=True)
+    print(f"[table3-reader] TABLE READY: {root / 'table3_rows_v2.tex'}", flush=True)
 
 
 if __name__ == "__main__":

@@ -120,8 +120,10 @@ For each dataset:
 9. Evaluate every baseline with ReFlow's per-query actual edit count and the
    same factual pool.
 10. Build the meaning-preserving control pool on the union of selected
-    positions and evaluate the same positions.
-11. Compute the eight main-table metrics, five-seed Random statistics,
+    positions. Numeric and date positions are excluded from paraphrasing and
+    remain unchanged in the control context; the artifact records their count.
+11. Compute the eight main-table metrics (six for PubMedQA, where the two Acc
+    rows are omitted), five-seed Random statistics,
     protocol audit, coverage failures, average tokens, and reader calls.
 12. Freeze the complete dataset manifest before copying values into the paper.
 

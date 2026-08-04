@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.request
 from threading import Lock
 
@@ -14,7 +15,33 @@ from causalityrag.semantic_filter import (
 )
 
 
-PARAPHRASE_POLICY = "llm_wordnet_paraphrase_control_v1"
+PARAPHRASE_POLICY = "llm_wordnet_paraphrase_control_v2_no_numeric_date"
+
+PARAPHRASE_EXCLUDED_TYPES = frozenset({
+    "DATE",
+    "TIME",
+    "CARDINAL",
+    "QUANTITY",
+    "PERCENT",
+    "ORDINAL",
+    "MONEY",
+    "NUMBER",
+})
+_NUMERIC_OR_DATE_SURFACE = re.compile(
+    r"^(?:[%$\u20ac\u00a3\u00a5])?\d+(?:[.,:/-]\d+)*(?:%)?$"
+)
+
+
+def excluded_from_paraphrase_control(unit: dict) -> bool:
+    """Return whether a numeric/date token must stay unchanged in the control."""
+
+    unit_type = str(unit.get("unit_type", unit.get("type", ""))).upper()
+    if unit_type in PARAPHRASE_EXCLUDED_TYPES:
+        return True
+    surface = str(
+        unit.get("token", unit.get("text", unit.get("original", "")))
+    ).strip()
+    return bool(_NUMERIC_OR_DATE_SURFACE.fullmatch(surface))
 
 
 class SentenceParaphraseClient:

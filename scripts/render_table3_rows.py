@@ -38,6 +38,9 @@ METRICS = (
     ("EM-CEFR", "em", True),
     ("Acc-CEFR", "acc", True),
 )
+PUBMEDQA_METRICS = tuple(
+    row for row in METRICS if row[1] != "acc"
+)
 FACTUAL_KEYS = {
     "answer": "answer_flip_ratio",
     "f1": "f1_flip_ratio",
@@ -118,6 +121,7 @@ def dataset_paths(root: Path, dataset: str) -> tuple[Path, Path]:
         base / "factual_metrics_1000.json",
     )
     control_candidates = (
+        base / "controls/paraphrase_results_top5_1000_v2.summary.json",
         base / "controls/paraphrase_results_top5_1000.summary.json",
         base / "audits/final_top10pool_k5/paraphrase_eval_v3_1000.summary.json",
         base / "paraphrase_eval_v3_1000.summary.json",
@@ -128,27 +132,28 @@ def dataset_paths(root: Path, dataset: str) -> tuple[Path, Path]:
 
 
 def render_dataset(root: Path, dataset: str, label: str, macro: str) -> str:
+    metrics = PUBMEDQA_METRICS if dataset == "pubmedqa" else METRICS
     factual_path, control_path = dataset_paths(root, dataset)
     if not factual_path.is_file() or not control_path.is_file():
-        lines = [f"\\newcommand{{\\{macro}}}{{%", f"  \\multirow{{8}}{{*}}{{{label}}}"]
-        for row_index, (row_label, _, _) in enumerate(METRICS):
-            suffix = " \\\\" if row_index < len(METRICS) - 1 else ""
+        lines = [f"\\newcommand{{\\{macro}}}{{%", f"  \\multirow{{{len(metrics)}}}{{*}}{{{label}}}"]
+        for row_index, (row_label, _, _) in enumerate(metrics):
+            suffix = " \\\\" if row_index < len(metrics) - 1 else ""
             lines.append("  & " + row_label + " & " + " & ".join(["--"] * 7) + suffix)
-            if row_index == 3:
+            if row_index == len(metrics) // 2 - 1:
                 lines[-1] += "[-0.5pt]"
                 lines.append("  \\cmidrule(lr){2-9}")
         lines.append("}")
         return "\n".join(lines)
     factual = load_json(factual_path)
     control = load_json(control_path)
-    lines = [f"\\newcommand{{\\{macro}}}{{%", f"  \\multirow{{8}}{{*}}{{{label}}}"]
-    for row_index, (row_label, metric, adjusted) in enumerate(METRICS):
+    lines = [f"\\newcommand{{\\{macro}}}{{%", f"  \\multirow{{{len(metrics)}}}{{*}}{{{label}}}"]
+    for row_index, (row_label, metric, adjusted) in enumerate(metrics):
         values = metric_values(factual, control, metric, adjusted)
         rendered = cells(values, adjusted=adjusted)
         prefix = "  & " if row_index else "  & "
-        suffix = " \\\\" if row_index < len(METRICS) - 1 else ""
+        suffix = " \\\\" if row_index < len(metrics) - 1 else ""
         lines.append(prefix + row_label + " & " + " & ".join(rendered) + suffix)
-        if row_index == 3:
+        if row_index == len(metrics) // 2 - 1:
             lines[-1] += "[-0.5pt]"
             lines.append("  \\cmidrule(lr){2-9}")
     lines.append("}")
