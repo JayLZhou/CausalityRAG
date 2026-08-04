@@ -1,0 +1,1737 @@
+{
+  "schema": "causalityrag.prefix_f1_frontier.aggregate.v1",
+  "datasets": [
+    "2wiki",
+    "finqa",
+    "hotpotqa",
+    "musique",
+    "pubmedqa",
+    "qasper",
+    "quartz",
+    "timeqa"
+  ],
+  "query_counts": {
+    "2wiki": 100,
+    "finqa": 81,
+    "hotpotqa": 100,
+    "musique": 100,
+    "pubmedqa": 69,
+    "qasper": 44,
+    "quartz": 100,
+    "timeqa": 100
+  },
+  "total_queries": 694,
+  "max_n": 10,
+  "macro_average": {
+    "exhaustive": [
+      {
+        "n": 1,
+        "mean_modified_tokens": 1.0,
+        "factual_f1_flip_rate": 0.5188669911677158,
+        "synonym_f1_flip_rate": 0.1804783340652906,
+        "f1_cfr": 0.3383886571024252,
+        "mean_independent_verifications": 1.0
+      },
+      {
+        "n": 2,
+        "mean_modified_tokens": 1.4036275191528815,
+        "factual_f1_flip_rate": 0.6412410335236423,
+        "synonym_f1_flip_rate": 0.2107091445859562,
+        "f1_cfr": 0.43053188893768607,
+        "mean_independent_verifications": 2.4036275191528813
+      },
+      {
+        "n": 3,
+        "mean_modified_tokens": 1.6563353340164935,
+        "factual_f1_flip_rate": 0.7091975918606354,
+        "synonym_f1_flip_rate": 0.20563661982140244,
+        "f1_cfr": 0.5035609720392329,
+        "mean_independent_verifications": 4.379314766017664
+      },
+      {
+        "n": 4,
+        "mean_modified_tokens": 1.8307459864343922,
+        "factual_f1_flip_rate": 0.7559669765285707,
+        "synonym_f1_flip_rate": 0.20134985116869175,
+        "f1_cfr": 0.554617125359879,
+        "mean_independent_verifications": 7.245735495047089
+      },
+      {
+        "n": 5,
+        "mean_modified_tokens": 1.9913709559361734,
+        "factual_f1_flip_rate": 0.7822271019372469,
+        "synonym_f1_flip_rate": 0.20384985116869175,
+        "f1_cfr": 0.5783772507685551,
+        "mean_independent_verifications": 11.857172937100474
+      },
+      {
+        "n": 6,
+        "mean_modified_tokens": 2.0939916678865953,
+        "factual_f1_flip_rate": 0.8103465207631875,
+        "synonym_f1_flip_rate": 0.2077414239008442,
+        "f1_cfr": 0.6026050968623432,
+        "mean_independent_verifications": 19.141140572390572
+      },
+      {
+        "n": 7,
+        "mean_modified_tokens": 2.2114242668228172,
+        "factual_f1_flip_rate": 0.8242877445957156,
+        "synonym_f1_flip_rate": 0.19986092812179768,
+        "f1_cfr": 0.624426816473918,
+        "mean_independent_verifications": 31.87991009125067
+      },
+      {
+        "n": 8,
+        "mean_modified_tokens": 2.288392194895818,
+        "factual_f1_flip_rate": 0.8447407651393158,
+        "synonym_f1_flip_rate": 0.192629312448153,
+        "f1_cfr": 0.6521114526911628,
+        "mean_independent_verifications": 54.09310166886254
+      },
+      {
+        "n": 9,
+        "mean_modified_tokens": 2.3431978602449615,
+        "factual_f1_flip_rate": 0.8613235617039965,
+        "synonym_f1_flip_rate": 0.20208595618015907,
+        "f1_cfr": 0.6592376055238374,
+        "mean_independent_verifications": 92.79233530961791
+      },
+      {
+        "n": 10,
+        "mean_modified_tokens": 2.357692504757722,
+        "factual_f1_flip_rate": 0.8824401624945103,
+        "synonym_f1_flip_rate": 0.19926987263943785,
+        "f1_cfr": 0.6831702898550724,
+        "mean_independent_verifications": 159.9426661542966
+      }
+    ],
+    "reflow": [
+      {
+        "n": 1,
+        "mean_modified_tokens": 1.0,
+        "factual_f1_flip_rate": 0.5188669911677158,
+        "synonym_f1_flip_rate": 0.1804783340652906,
+        "f1_cfr": 0.3383886571024252,
+        "mean_independent_verifications": 1.0
+      },
+      {
+        "n": 2,
+        "mean_modified_tokens": 1.4765510784170204,
+        "factual_f1_flip_rate": 0.617378922070951,
+        "synonym_f1_flip_rate": 0.2054884594739667,
+        "f1_cfr": 0.41189046259698436,
+        "mean_independent_verifications": 1.4690510784170205
+      },
+      {
+        "n": 3,
+        "mean_modified_tokens": 1.8536582613575368,
+        "factual_f1_flip_rate": 0.6694147391792319,
+        "synonym_f1_flip_rate": 0.20597752891231152,
+        "f1_cfr": 0.46343721026692036,
+        "mean_independent_verifications": 1.8461582613575367
+      },
+      {
+        "n": 4,
+        "mean_modified_tokens": 2.161797809007954,
+        "factual_f1_flip_rate": 0.7007245156882838,
+        "synonym_f1_flip_rate": 0.20906394866539793,
+        "f1_cfr": 0.4916605670228858,
+        "mean_independent_verifications": 2.150943004928512
+      },
+      {
+        "n": 5,
+        "mean_modified_tokens": 2.4344307812423756,
+        "factual_f1_flip_rate": 0.7187566486117211,
+        "synonym_f1_flip_rate": 0.21541129898013955,
+        "f1_cfr": 0.5033453496315815,
+        "mean_independent_verifications": 2.4198259771629336
+      },
+      {
+        "n": 6,
+        "mean_modified_tokens": 2.67547278338945,
+        "factual_f1_flip_rate": 0.7340894451764017,
+        "synonym_f1_flip_rate": 0.22207125603864733,
+        "f1_cfr": 0.5120181891377543,
+        "mean_independent_verifications": 2.659617979310008
+      },
+      {
+        "n": 7,
+        "mean_modified_tokens": 2.90631233835944,
+        "factual_f1_flip_rate": 0.7366142707265896,
+        "synonym_f1_flip_rate": 0.21844806763285024,
+        "f1_cfr": 0.5181662030937393,
+        "mean_independent_verifications": 2.8861459400770997
+      },
+      {
+        "n": 8,
+        "mean_modified_tokens": 3.1028185843946714,
+        "factual_f1_flip_rate": 0.7449939003562192,
+        "synonym_f1_flip_rate": 0.2227596618357488,
+        "f1_cfr": 0.5222342385204704,
+        "mean_independent_verifications": 3.083902186112331
+      },
+      {
+        "n": 9,
+        "mean_modified_tokens": 3.275622468647831,
+        "factual_f1_flip_rate": 0.759051871370712,
+        "synonym_f1_flip_rate": 0.22420899819450543,
+        "f1_cfr": 0.5348428731762065,
+        "mean_independent_verifications": 3.2504560703654906
+      },
+      {
+        "n": 10,
+        "mean_modified_tokens": 3.4447535133948177,
+        "factual_f1_flip_rate": 0.7708091787439614,
+        "synonym_f1_flip_rate": 0.23011150148831308,
+        "f1_cfr": 0.5406976772556482,
+        "mean_independent_verifications": 3.4219603035182744
+      }
+    ]
+  },
+  "per_dataset": {
+    "hotpotqa": {
+      "schema": "causalityrag.prefix_f1_frontier.v1",
+      "queries": 100,
+      "max_n": 10,
+      "f1_cfr": "factual F1 correctness-flip rate minus same-position synonym F1 correctness-flip rate",
+      "enumeration_accounting": "independent logical reader verifications without cross-method cache sharing",
+      "methods": {
+        "exhaustive": [
+          {
+            "n": 1,
+            "queries": 100,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.66,
+            "synonym_f1_flip_rate": 0.14,
+            "f1_cfr": 0.52,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 100,
+            "mean_modified_tokens": 1.26,
+            "factual_f1_flip_rate": 0.81,
+            "synonym_f1_flip_rate": 0.2,
+            "f1_cfr": 0.6100000000000001,
+            "mean_independent_verifications": 2.26
+          },
+          {
+            "n": 3,
+            "queries": 100,
+            "mean_modified_tokens": 1.35,
+            "factual_f1_flip_rate": 0.89,
+            "synonym_f1_flip_rate": 0.2,
+            "f1_cfr": 0.69,
+            "mean_independent_verifications": 3.83
+          },
+          {
+            "n": 4,
+            "queries": 100,
+            "mean_modified_tokens": 1.42,
+            "factual_f1_flip_rate": 0.92,
+            "synonym_f1_flip_rate": 0.2,
+            "f1_cfr": 0.72,
+            "mean_independent_verifications": 5.87
+          },
+          {
+            "n": 5,
+            "queries": 100,
+            "mean_modified_tokens": 1.41,
+            "factual_f1_flip_rate": 0.94,
+            "synonym_f1_flip_rate": 0.19,
+            "f1_cfr": 0.75,
+            "mean_independent_verifications": 8.26
+          },
+          {
+            "n": 6,
+            "queries": 100,
+            "mean_modified_tokens": 1.44,
+            "factual_f1_flip_rate": 0.95,
+            "synonym_f1_flip_rate": 0.2,
+            "f1_cfr": 0.75,
+            "mean_independent_verifications": 11.8
+          },
+          {
+            "n": 7,
+            "queries": 100,
+            "mean_modified_tokens": 1.44,
+            "factual_f1_flip_rate": 0.96,
+            "synonym_f1_flip_rate": 0.19,
+            "f1_cfr": 0.77,
+            "mean_independent_verifications": 16.28
+          },
+          {
+            "n": 8,
+            "queries": 100,
+            "mean_modified_tokens": 1.47,
+            "factual_f1_flip_rate": 0.96,
+            "synonym_f1_flip_rate": 0.18,
+            "f1_cfr": 0.78,
+            "mean_independent_verifications": 23.76
+          },
+          {
+            "n": 9,
+            "queries": 100,
+            "mean_modified_tokens": 1.43,
+            "factual_f1_flip_rate": 0.97,
+            "synonym_f1_flip_rate": 0.19,
+            "f1_cfr": 0.78,
+            "mean_independent_verifications": 31.86
+          },
+          {
+            "n": 10,
+            "queries": 100,
+            "mean_modified_tokens": 1.46,
+            "factual_f1_flip_rate": 0.97,
+            "synonym_f1_flip_rate": 0.19,
+            "f1_cfr": 0.78,
+            "mean_independent_verifications": 50.44
+          }
+        ],
+        "reflow": [
+          {
+            "n": 1,
+            "queries": 100,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.66,
+            "synonym_f1_flip_rate": 0.14,
+            "f1_cfr": 0.52,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 100,
+            "mean_modified_tokens": 1.35,
+            "factual_f1_flip_rate": 0.78,
+            "synonym_f1_flip_rate": 0.16,
+            "f1_cfr": 0.62,
+            "mean_independent_verifications": 1.35
+          },
+          {
+            "n": 3,
+            "queries": 100,
+            "mean_modified_tokens": 1.58,
+            "factual_f1_flip_rate": 0.85,
+            "synonym_f1_flip_rate": 0.17,
+            "f1_cfr": 0.6799999999999999,
+            "mean_independent_verifications": 1.58
+          },
+          {
+            "n": 4,
+            "queries": 100,
+            "mean_modified_tokens": 1.75,
+            "factual_f1_flip_rate": 0.86,
+            "synonym_f1_flip_rate": 0.19,
+            "f1_cfr": 0.6699999999999999,
+            "mean_independent_verifications": 1.72
+          },
+          {
+            "n": 5,
+            "queries": 100,
+            "mean_modified_tokens": 1.91,
+            "factual_f1_flip_rate": 0.88,
+            "synonym_f1_flip_rate": 0.2,
+            "f1_cfr": 0.6799999999999999,
+            "mean_independent_verifications": 1.89
+          },
+          {
+            "n": 6,
+            "queries": 100,
+            "mean_modified_tokens": 2.07,
+            "factual_f1_flip_rate": 0.89,
+            "synonym_f1_flip_rate": 0.18,
+            "f1_cfr": 0.71,
+            "mean_independent_verifications": 2.05
+          },
+          {
+            "n": 7,
+            "queries": 100,
+            "mean_modified_tokens": 2.18,
+            "factual_f1_flip_rate": 0.91,
+            "synonym_f1_flip_rate": 0.18,
+            "f1_cfr": 0.73,
+            "mean_independent_verifications": 2.15
+          },
+          {
+            "n": 8,
+            "queries": 100,
+            "mean_modified_tokens": 2.25,
+            "factual_f1_flip_rate": 0.92,
+            "synonym_f1_flip_rate": 0.19,
+            "f1_cfr": 0.73,
+            "mean_independent_verifications": 2.22
+          },
+          {
+            "n": 9,
+            "queries": 100,
+            "mean_modified_tokens": 2.29,
+            "factual_f1_flip_rate": 0.94,
+            "synonym_f1_flip_rate": 0.2,
+            "f1_cfr": 0.74,
+            "mean_independent_verifications": 2.26
+          },
+          {
+            "n": 10,
+            "queries": 100,
+            "mean_modified_tokens": 2.39,
+            "factual_f1_flip_rate": 0.94,
+            "synonym_f1_flip_rate": 0.2,
+            "f1_cfr": 0.74,
+            "mean_independent_verifications": 2.36
+          }
+        ]
+      }
+    },
+    "2wiki": {
+      "schema": "causalityrag.prefix_f1_frontier.v1",
+      "queries": 100,
+      "max_n": 10,
+      "f1_cfr": "factual F1 correctness-flip rate minus same-position synonym F1 correctness-flip rate",
+      "enumeration_accounting": "independent logical reader verifications without cross-method cache sharing",
+      "methods": {
+        "exhaustive": [
+          {
+            "n": 1,
+            "queries": 100,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.74,
+            "synonym_f1_flip_rate": 0.32,
+            "f1_cfr": 0.42,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 100,
+            "mean_modified_tokens": 1.13,
+            "factual_f1_flip_rate": 0.92,
+            "synonym_f1_flip_rate": 0.33,
+            "f1_cfr": 0.5900000000000001,
+            "mean_independent_verifications": 2.13
+          },
+          {
+            "n": 3,
+            "queries": 100,
+            "mean_modified_tokens": 1.12,
+            "factual_f1_flip_rate": 0.96,
+            "synonym_f1_flip_rate": 0.35,
+            "f1_cfr": 0.61,
+            "mean_independent_verifications": 3.26
+          },
+          {
+            "n": 4,
+            "queries": 100,
+            "mean_modified_tokens": 1.14,
+            "factual_f1_flip_rate": 0.97,
+            "synonym_f1_flip_rate": 0.34,
+            "f1_cfr": 0.6299999999999999,
+            "mean_independent_verifications": 4.61
+          },
+          {
+            "n": 5,
+            "queries": 100,
+            "mean_modified_tokens": 1.15,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.33,
+            "f1_cfr": 0.6499999999999999,
+            "mean_independent_verifications": 6.22
+          },
+          {
+            "n": 6,
+            "queries": 100,
+            "mean_modified_tokens": 1.17,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.33,
+            "f1_cfr": 0.6499999999999999,
+            "mean_independent_verifications": 8.29
+          },
+          {
+            "n": 7,
+            "queries": 100,
+            "mean_modified_tokens": 1.19,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.32,
+            "f1_cfr": 0.6599999999999999,
+            "mean_independent_verifications": 11.15
+          },
+          {
+            "n": 8,
+            "queries": 100,
+            "mean_modified_tokens": 1.18,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.29,
+            "f1_cfr": 0.7,
+            "mean_independent_verifications": 15.09
+          },
+          {
+            "n": 9,
+            "queries": 100,
+            "mean_modified_tokens": 1.19,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.29,
+            "f1_cfr": 0.7,
+            "mean_independent_verifications": 21.22
+          },
+          {
+            "n": 10,
+            "queries": 100,
+            "mean_modified_tokens": 1.17,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.28,
+            "f1_cfr": 0.71,
+            "mean_independent_verifications": 25.23
+          }
+        ],
+        "reflow": [
+          {
+            "n": 1,
+            "queries": 100,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.74,
+            "synonym_f1_flip_rate": 0.32,
+            "f1_cfr": 0.42,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 100,
+            "mean_modified_tokens": 1.26,
+            "factual_f1_flip_rate": 0.9,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.5900000000000001,
+            "mean_independent_verifications": 1.25
+          },
+          {
+            "n": 3,
+            "queries": 100,
+            "mean_modified_tokens": 1.4,
+            "factual_f1_flip_rate": 0.95,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6399999999999999,
+            "mean_independent_verifications": 1.39
+          },
+          {
+            "n": 4,
+            "queries": 100,
+            "mean_modified_tokens": 1.46,
+            "factual_f1_flip_rate": 0.96,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6499999999999999,
+            "mean_independent_verifications": 1.45
+          },
+          {
+            "n": 5,
+            "queries": 100,
+            "mean_modified_tokens": 1.49,
+            "factual_f1_flip_rate": 0.97,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6599999999999999,
+            "mean_independent_verifications": 1.48
+          },
+          {
+            "n": 6,
+            "queries": 100,
+            "mean_modified_tokens": 1.54,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6699999999999999,
+            "mean_independent_verifications": 1.53
+          },
+          {
+            "n": 7,
+            "queries": 100,
+            "mean_modified_tokens": 1.57,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6699999999999999,
+            "mean_independent_verifications": 1.56
+          },
+          {
+            "n": 8,
+            "queries": 100,
+            "mean_modified_tokens": 1.58,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6799999999999999,
+            "mean_independent_verifications": 1.57
+          },
+          {
+            "n": 9,
+            "queries": 100,
+            "mean_modified_tokens": 1.59,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6799999999999999,
+            "mean_independent_verifications": 1.57
+          },
+          {
+            "n": 10,
+            "queries": 100,
+            "mean_modified_tokens": 1.6,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6799999999999999,
+            "mean_independent_verifications": 1.58
+          }
+        ]
+      }
+    },
+    "timeqa": {
+      "schema": "causalityrag.prefix_f1_frontier.v1",
+      "queries": 100,
+      "max_n": 10,
+      "f1_cfr": "factual F1 correctness-flip rate minus same-position synonym F1 correctness-flip rate",
+      "enumeration_accounting": "independent logical reader verifications without cross-method cache sharing",
+      "methods": {
+        "exhaustive": [
+          {
+            "n": 1,
+            "queries": 100,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.79,
+            "synonym_f1_flip_rate": 0.16,
+            "f1_cfr": 0.63,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 100,
+            "mean_modified_tokens": 1.11,
+            "factual_f1_flip_rate": 0.92,
+            "synonym_f1_flip_rate": 0.15,
+            "f1_cfr": 0.77,
+            "mean_independent_verifications": 2.11
+          },
+          {
+            "n": 3,
+            "queries": 100,
+            "mean_modified_tokens": 1.18,
+            "factual_f1_flip_rate": 0.93,
+            "synonym_f1_flip_rate": 0.13,
+            "f1_cfr": 0.8,
+            "mean_independent_verifications": 3.4
+          },
+          {
+            "n": 4,
+            "queries": 100,
+            "mean_modified_tokens": 1.14,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.13,
+            "f1_cfr": 0.85,
+            "mean_independent_verifications": 4.7
+          },
+          {
+            "n": 5,
+            "queries": 100,
+            "mean_modified_tokens": 1.15,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.14,
+            "f1_cfr": 0.84,
+            "mean_independent_verifications": 6.22
+          },
+          {
+            "n": 6,
+            "queries": 100,
+            "mean_modified_tokens": 1.17,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.14,
+            "f1_cfr": 0.84,
+            "mean_independent_verifications": 8.19
+          },
+          {
+            "n": 7,
+            "queries": 100,
+            "mean_modified_tokens": 1.19,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.15,
+            "f1_cfr": 0.83,
+            "mean_independent_verifications": 10.87
+          },
+          {
+            "n": 8,
+            "queries": 100,
+            "mean_modified_tokens": 1.13,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.15,
+            "f1_cfr": 0.84,
+            "mean_independent_verifications": 12.15
+          },
+          {
+            "n": 9,
+            "queries": 100,
+            "mean_modified_tokens": 1.14,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.16,
+            "f1_cfr": 0.83,
+            "mean_independent_verifications": 16.18
+          },
+          {
+            "n": 10,
+            "queries": 100,
+            "mean_modified_tokens": 1.15,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.15,
+            "f1_cfr": 0.84,
+            "mean_independent_verifications": 22.83
+          }
+        ],
+        "reflow": [
+          {
+            "n": 1,
+            "queries": 100,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.79,
+            "synonym_f1_flip_rate": 0.16,
+            "f1_cfr": 0.63,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 100,
+            "mean_modified_tokens": 1.3,
+            "factual_f1_flip_rate": 0.89,
+            "synonym_f1_flip_rate": 0.14,
+            "f1_cfr": 0.75,
+            "mean_independent_verifications": 1.3
+          },
+          {
+            "n": 3,
+            "queries": 100,
+            "mean_modified_tokens": 1.43,
+            "factual_f1_flip_rate": 0.91,
+            "synonym_f1_flip_rate": 0.14,
+            "f1_cfr": 0.77,
+            "mean_independent_verifications": 1.43
+          },
+          {
+            "n": 4,
+            "queries": 100,
+            "mean_modified_tokens": 1.53,
+            "factual_f1_flip_rate": 0.96,
+            "synonym_f1_flip_rate": 0.14,
+            "f1_cfr": 0.82,
+            "mean_independent_verifications": 1.52
+          },
+          {
+            "n": 5,
+            "queries": 100,
+            "mean_modified_tokens": 1.61,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.14,
+            "f1_cfr": 0.84,
+            "mean_independent_verifications": 1.57
+          },
+          {
+            "n": 6,
+            "queries": 100,
+            "mean_modified_tokens": 1.67,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.16,
+            "f1_cfr": 0.82,
+            "mean_independent_verifications": 1.62
+          },
+          {
+            "n": 7,
+            "queries": 100,
+            "mean_modified_tokens": 1.69,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.16,
+            "f1_cfr": 0.82,
+            "mean_independent_verifications": 1.63
+          },
+          {
+            "n": 8,
+            "queries": 100,
+            "mean_modified_tokens": 1.69,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.16,
+            "f1_cfr": 0.83,
+            "mean_independent_verifications": 1.64
+          },
+          {
+            "n": 9,
+            "queries": 100,
+            "mean_modified_tokens": 1.75,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.17,
+            "f1_cfr": 0.82,
+            "mean_independent_verifications": 1.67
+          },
+          {
+            "n": 10,
+            "queries": 100,
+            "mean_modified_tokens": 1.77,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.17,
+            "f1_cfr": 0.82,
+            "mean_independent_verifications": 1.68
+          }
+        ]
+      }
+    },
+    "musique": {
+      "schema": "causalityrag.prefix_f1_frontier.v1",
+      "queries": 100,
+      "max_n": 10,
+      "f1_cfr": "factual F1 correctness-flip rate minus same-position synonym F1 correctness-flip rate",
+      "enumeration_accounting": "independent logical reader verifications without cross-method cache sharing",
+      "methods": {
+        "exhaustive": [
+          {
+            "n": 1,
+            "queries": 100,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.79,
+            "synonym_f1_flip_rate": 0.24,
+            "f1_cfr": 0.55,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 100,
+            "mean_modified_tokens": 1.15,
+            "factual_f1_flip_rate": 0.92,
+            "synonym_f1_flip_rate": 0.29,
+            "f1_cfr": 0.6300000000000001,
+            "mean_independent_verifications": 2.15
+          },
+          {
+            "n": 3,
+            "queries": 100,
+            "mean_modified_tokens": 1.14,
+            "factual_f1_flip_rate": 0.96,
+            "synonym_f1_flip_rate": 0.3,
+            "f1_cfr": 0.6599999999999999,
+            "mean_independent_verifications": 3.34
+          },
+          {
+            "n": 4,
+            "queries": 100,
+            "mean_modified_tokens": 1.15,
+            "factual_f1_flip_rate": 0.97,
+            "synonym_f1_flip_rate": 0.26,
+            "f1_cfr": 0.71,
+            "mean_independent_verifications": 4.69
+          },
+          {
+            "n": 5,
+            "queries": 100,
+            "mean_modified_tokens": 1.17,
+            "factual_f1_flip_rate": 0.97,
+            "synonym_f1_flip_rate": 0.28,
+            "f1_cfr": 0.69,
+            "mean_independent_verifications": 6.28
+          },
+          {
+            "n": 6,
+            "queries": 100,
+            "mean_modified_tokens": 1.2,
+            "factual_f1_flip_rate": 0.97,
+            "synonym_f1_flip_rate": 0.28,
+            "f1_cfr": 0.69,
+            "mean_independent_verifications": 8.46
+          },
+          {
+            "n": 7,
+            "queries": 100,
+            "mean_modified_tokens": 1.21,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.29,
+            "f1_cfr": 0.69,
+            "mean_independent_verifications": 11.57
+          },
+          {
+            "n": 8,
+            "queries": 100,
+            "mean_modified_tokens": 1.21,
+            "factual_f1_flip_rate": 0.98,
+            "synonym_f1_flip_rate": 0.26,
+            "f1_cfr": 0.72,
+            "mean_independent_verifications": 15.18
+          },
+          {
+            "n": 9,
+            "queries": 100,
+            "mean_modified_tokens": 1.15,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.26,
+            "f1_cfr": 0.73,
+            "mean_independent_verifications": 16.54
+          },
+          {
+            "n": 10,
+            "queries": 100,
+            "mean_modified_tokens": 1.16,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.27,
+            "f1_cfr": 0.72,
+            "mean_independent_verifications": 23.28
+          }
+        ],
+        "reflow": [
+          {
+            "n": 1,
+            "queries": 100,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.79,
+            "synonym_f1_flip_rate": 0.24,
+            "f1_cfr": 0.55,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 100,
+            "mean_modified_tokens": 1.21,
+            "factual_f1_flip_rate": 0.92,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6100000000000001,
+            "mean_independent_verifications": 1.21
+          },
+          {
+            "n": 3,
+            "queries": 100,
+            "mean_modified_tokens": 1.33,
+            "factual_f1_flip_rate": 0.96,
+            "synonym_f1_flip_rate": 0.33,
+            "f1_cfr": 0.6299999999999999,
+            "mean_independent_verifications": 1.32
+          },
+          {
+            "n": 4,
+            "queries": 100,
+            "mean_modified_tokens": 1.36,
+            "factual_f1_flip_rate": 0.97,
+            "synonym_f1_flip_rate": 0.3,
+            "f1_cfr": 0.6699999999999999,
+            "mean_independent_verifications": 1.35
+          },
+          {
+            "n": 5,
+            "queries": 100,
+            "mean_modified_tokens": 1.42,
+            "factual_f1_flip_rate": 0.97,
+            "synonym_f1_flip_rate": 0.3,
+            "f1_cfr": 0.6699999999999999,
+            "mean_independent_verifications": 1.4
+          },
+          {
+            "n": 6,
+            "queries": 100,
+            "mean_modified_tokens": 1.43,
+            "factual_f1_flip_rate": 0.97,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6599999999999999,
+            "mean_independent_verifications": 1.41
+          },
+          {
+            "n": 7,
+            "queries": 100,
+            "mean_modified_tokens": 1.45,
+            "factual_f1_flip_rate": 0.97,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6599999999999999,
+            "mean_independent_verifications": 1.43
+          },
+          {
+            "n": 8,
+            "queries": 100,
+            "mean_modified_tokens": 1.47,
+            "factual_f1_flip_rate": 0.97,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6599999999999999,
+            "mean_independent_verifications": 1.45
+          },
+          {
+            "n": 9,
+            "queries": 100,
+            "mean_modified_tokens": 1.45,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.31,
+            "f1_cfr": 0.6799999999999999,
+            "mean_independent_verifications": 1.42
+          },
+          {
+            "n": 10,
+            "queries": 100,
+            "mean_modified_tokens": 1.48,
+            "factual_f1_flip_rate": 0.99,
+            "synonym_f1_flip_rate": 0.32,
+            "f1_cfr": 0.6699999999999999,
+            "mean_independent_verifications": 1.45
+          }
+        ]
+      }
+    },
+    "finqa": {
+      "schema": "causalityrag.prefix_f1_frontier.v1",
+      "queries": 81,
+      "max_n": 10,
+      "f1_cfr": "factual F1 correctness-flip rate minus same-position synonym F1 correctness-flip rate",
+      "enumeration_accounting": "independent logical reader verifications without cross-method cache sharing",
+      "methods": {
+        "exhaustive": [
+          {
+            "n": 1,
+            "queries": 81,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.345679012345679,
+            "synonym_f1_flip_rate": 0.14814814814814814,
+            "f1_cfr": 0.19753086419753085,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 81,
+            "mean_modified_tokens": 1.5432098765432098,
+            "factual_f1_flip_rate": 0.5185185185185185,
+            "synonym_f1_flip_rate": 0.19753086419753085,
+            "f1_cfr": 0.32098765432098764,
+            "mean_independent_verifications": 2.54320987654321
+          },
+          {
+            "n": 3,
+            "queries": 81,
+            "mean_modified_tokens": 1.9382716049382716,
+            "factual_f1_flip_rate": 0.5925925925925926,
+            "synonym_f1_flip_rate": 0.18518518518518517,
+            "f1_cfr": 0.4074074074074074,
+            "mean_independent_verifications": 4.9753086419753085
+          },
+          {
+            "n": 4,
+            "queries": 81,
+            "mean_modified_tokens": 1.9876543209876543,
+            "factual_f1_flip_rate": 0.7160493827160493,
+            "synonym_f1_flip_rate": 0.20987654320987653,
+            "f1_cfr": 0.5061728395061729,
+            "mean_independent_verifications": 7.864197530864198
+          },
+          {
+            "n": 5,
+            "queries": 81,
+            "mean_modified_tokens": 2.1481481481481484,
+            "factual_f1_flip_rate": 0.7654320987654321,
+            "synonym_f1_flip_rate": 0.20987654320987653,
+            "f1_cfr": 0.5555555555555556,
+            "mean_independent_verifications": 13.135802469135802
+          },
+          {
+            "n": 6,
+            "queries": 81,
+            "mean_modified_tokens": 2.246913580246914,
+            "factual_f1_flip_rate": 0.8024691358024691,
+            "synonym_f1_flip_rate": 0.19753086419753085,
+            "f1_cfr": 0.6049382716049383,
+            "mean_independent_verifications": 21.51851851851852
+          },
+          {
+            "n": 7,
+            "queries": 81,
+            "mean_modified_tokens": 2.271604938271605,
+            "factual_f1_flip_rate": 0.8395061728395061,
+            "synonym_f1_flip_rate": 0.18518518518518517,
+            "f1_cfr": 0.654320987654321,
+            "mean_independent_verifications": 34.46913580246913
+          },
+          {
+            "n": 8,
+            "queries": 81,
+            "mean_modified_tokens": 2.246913580246914,
+            "factual_f1_flip_rate": 0.8641975308641975,
+            "synonym_f1_flip_rate": 0.1728395061728395,
+            "f1_cfr": 0.691358024691358,
+            "mean_independent_verifications": 52.77777777777778
+          },
+          {
+            "n": 9,
+            "queries": 81,
+            "mean_modified_tokens": 2.246913580246914,
+            "factual_f1_flip_rate": 0.8888888888888888,
+            "synonym_f1_flip_rate": 0.19753086419753085,
+            "f1_cfr": 0.691358024691358,
+            "mean_independent_verifications": 85.66666666666667
+          },
+          {
+            "n": 10,
+            "queries": 81,
+            "mean_modified_tokens": 2.2962962962962963,
+            "factual_f1_flip_rate": 0.8888888888888888,
+            "synonym_f1_flip_rate": 0.2222222222222222,
+            "f1_cfr": 0.6666666666666666,
+            "mean_independent_verifications": 146.62962962962962
+          }
+        ],
+        "reflow": [
+          {
+            "n": 1,
+            "queries": 81,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.345679012345679,
+            "synonym_f1_flip_rate": 0.14814814814814814,
+            "f1_cfr": 0.19753086419753085,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 81,
+            "mean_modified_tokens": 1.6049382716049383,
+            "factual_f1_flip_rate": 0.49382716049382713,
+            "synonym_f1_flip_rate": 0.19753086419753085,
+            "f1_cfr": 0.2962962962962963,
+            "mean_independent_verifications": 1.6049382716049383
+          },
+          {
+            "n": 3,
+            "queries": 81,
+            "mean_modified_tokens": 2.0987654320987654,
+            "factual_f1_flip_rate": 0.5432098765432098,
+            "synonym_f1_flip_rate": 0.18518518518518517,
+            "f1_cfr": 0.35802469135802467,
+            "mean_independent_verifications": 2.0987654320987654
+          },
+          {
+            "n": 4,
+            "queries": 81,
+            "mean_modified_tokens": 2.54320987654321,
+            "factual_f1_flip_rate": 0.6419753086419753,
+            "synonym_f1_flip_rate": 0.20987654320987653,
+            "f1_cfr": 0.43209876543209874,
+            "mean_independent_verifications": 2.5308641975308643
+          },
+          {
+            "n": 5,
+            "queries": 81,
+            "mean_modified_tokens": 2.7901234567901234,
+            "factual_f1_flip_rate": 0.6790123456790124,
+            "synonym_f1_flip_rate": 0.24691358024691357,
+            "f1_cfr": 0.4320987654320988,
+            "mean_independent_verifications": 2.7777777777777777
+          },
+          {
+            "n": 6,
+            "queries": 81,
+            "mean_modified_tokens": 3.0246913580246915,
+            "factual_f1_flip_rate": 0.7037037037037037,
+            "synonym_f1_flip_rate": 0.2222222222222222,
+            "f1_cfr": 0.4814814814814815,
+            "mean_independent_verifications": 3.0123456790123457
+          },
+          {
+            "n": 7,
+            "queries": 81,
+            "mean_modified_tokens": 3.2839506172839505,
+            "factual_f1_flip_rate": 0.7283950617283951,
+            "synonym_f1_flip_rate": 0.2222222222222222,
+            "f1_cfr": 0.5061728395061729,
+            "mean_independent_verifications": 3.271604938271605
+          },
+          {
+            "n": 8,
+            "queries": 81,
+            "mean_modified_tokens": 3.4814814814814814,
+            "factual_f1_flip_rate": 0.7654320987654321,
+            "synonym_f1_flip_rate": 0.2222222222222222,
+            "f1_cfr": 0.5432098765432098,
+            "mean_independent_verifications": 3.4691358024691357
+          },
+          {
+            "n": 9,
+            "queries": 81,
+            "mean_modified_tokens": 3.654320987654321,
+            "factual_f1_flip_rate": 0.7654320987654321,
+            "synonym_f1_flip_rate": 0.2345679012345679,
+            "f1_cfr": 0.5308641975308641,
+            "mean_independent_verifications": 3.6419753086419755
+          },
+          {
+            "n": 10,
+            "queries": 81,
+            "mean_modified_tokens": 3.7777777777777777,
+            "factual_f1_flip_rate": 0.7777777777777778,
+            "synonym_f1_flip_rate": 0.2345679012345679,
+            "f1_cfr": 0.5432098765432098,
+            "mean_independent_verifications": 3.765432098765432
+          }
+        ]
+      }
+    },
+    "pubmedqa": {
+      "schema": "causalityrag.prefix_f1_frontier.v1",
+      "queries": 69,
+      "max_n": 10,
+      "f1_cfr": "factual F1 correctness-flip rate minus same-position synonym F1 correctness-flip rate",
+      "enumeration_accounting": "independent logical reader verifications without cross-method cache sharing",
+      "methods": {
+        "exhaustive": [
+          {
+            "n": 1,
+            "queries": 69,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.30434782608695654,
+            "synonym_f1_flip_rate": 0.18840579710144928,
+            "f1_cfr": 0.11594202898550726,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 69,
+            "mean_modified_tokens": 1.6521739130434783,
+            "factual_f1_flip_rate": 0.36231884057971014,
+            "synonym_f1_flip_rate": 0.2608695652173913,
+            "f1_cfr": 0.10144927536231885,
+            "mean_independent_verifications": 2.652173913043478
+          },
+          {
+            "n": 3,
+            "queries": 69,
+            "mean_modified_tokens": 2.0869565217391304,
+            "factual_f1_flip_rate": 0.4782608695652174,
+            "synonym_f1_flip_rate": 0.2753623188405797,
+            "f1_cfr": 0.2028985507246377,
+            "mean_independent_verifications": 5.217391304347826
+          },
+          {
+            "n": 4,
+            "queries": 69,
+            "mean_modified_tokens": 2.463768115942029,
+            "factual_f1_flip_rate": 0.5362318840579711,
+            "synonym_f1_flip_rate": 0.2463768115942029,
+            "f1_cfr": 0.2898550724637682,
+            "mean_independent_verifications": 9.53623188405797
+          },
+          {
+            "n": 5,
+            "queries": 69,
+            "mean_modified_tokens": 2.7246376811594204,
+            "factual_f1_flip_rate": 0.5942028985507246,
+            "synonym_f1_flip_rate": 0.2463768115942029,
+            "f1_cfr": 0.34782608695652173,
+            "mean_independent_verifications": 16.565217391304348
+          },
+          {
+            "n": 6,
+            "queries": 69,
+            "mean_modified_tokens": 2.869565217391304,
+            "factual_f1_flip_rate": 0.6666666666666666,
+            "synonym_f1_flip_rate": 0.2898550724637681,
+            "f1_cfr": 0.3768115942028985,
+            "mean_independent_verifications": 28.333333333333332
+          },
+          {
+            "n": 7,
+            "queries": 69,
+            "mean_modified_tokens": 3.0579710144927534,
+            "factual_f1_flip_rate": 0.6811594202898551,
+            "synonym_f1_flip_rate": 0.2318840579710145,
+            "f1_cfr": 0.4492753623188406,
+            "mean_independent_verifications": 48.710144927536234
+          },
+          {
+            "n": 8,
+            "queries": 69,
+            "mean_modified_tokens": 3.1884057971014492,
+            "factual_f1_flip_rate": 0.7246376811594203,
+            "synonym_f1_flip_rate": 0.2463768115942029,
+            "f1_cfr": 0.4782608695652174,
+            "mean_independent_verifications": 86.56521739130434
+          },
+          {
+            "n": 9,
+            "queries": 69,
+            "mean_modified_tokens": 3.1159420289855073,
+            "factual_f1_flip_rate": 0.782608695652174,
+            "synonym_f1_flip_rate": 0.2318840579710145,
+            "f1_cfr": 0.5507246376811594,
+            "mean_independent_verifications": 143.69565217391303
+          },
+          {
+            "n": 10,
+            "queries": 69,
+            "mean_modified_tokens": 3.0579710144927534,
+            "factual_f1_flip_rate": 0.8260869565217391,
+            "synonym_f1_flip_rate": 0.21739130434782608,
+            "f1_cfr": 0.6086956521739131,
+            "mean_independent_verifications": 239.7826086956522
+          }
+        ],
+        "reflow": [
+          {
+            "n": 1,
+            "queries": 69,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.30434782608695654,
+            "synonym_f1_flip_rate": 0.18840579710144928,
+            "f1_cfr": 0.11594202898550726,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 69,
+            "mean_modified_tokens": 1.6956521739130435,
+            "factual_f1_flip_rate": 0.3188405797101449,
+            "synonym_f1_flip_rate": 0.2463768115942029,
+            "f1_cfr": 0.07246376811594199,
+            "mean_independent_verifications": 1.6956521739130435
+          },
+          {
+            "n": 3,
+            "queries": 69,
+            "mean_modified_tokens": 2.36231884057971,
+            "factual_f1_flip_rate": 0.42028985507246375,
+            "synonym_f1_flip_rate": 0.2753623188405797,
+            "f1_cfr": 0.14492753623188404,
+            "mean_independent_verifications": 2.36231884057971
+          },
+          {
+            "n": 4,
+            "queries": 69,
+            "mean_modified_tokens": 2.927536231884058,
+            "factual_f1_flip_rate": 0.4492753623188406,
+            "synonym_f1_flip_rate": 0.2753623188405797,
+            "f1_cfr": 0.17391304347826086,
+            "mean_independent_verifications": 2.9130434782608696
+          },
+          {
+            "n": 5,
+            "queries": 69,
+            "mean_modified_tokens": 3.536231884057971,
+            "factual_f1_flip_rate": 0.463768115942029,
+            "synonym_f1_flip_rate": 0.2463768115942029,
+            "f1_cfr": 0.21739130434782608,
+            "mean_independent_verifications": 3.5217391304347827
+          },
+          {
+            "n": 6,
+            "queries": 69,
+            "mean_modified_tokens": 4.0,
+            "factual_f1_flip_rate": 0.5217391304347826,
+            "synonym_f1_flip_rate": 0.30434782608695654,
+            "f1_cfr": 0.21739130434782605,
+            "mean_independent_verifications": 3.9855072463768115
+          },
+          {
+            "n": 7,
+            "queries": 69,
+            "mean_modified_tokens": 4.449275362318841,
+            "factual_f1_flip_rate": 0.5072463768115942,
+            "synonym_f1_flip_rate": 0.2753623188405797,
+            "f1_cfr": 0.23188405797101452,
+            "mean_independent_verifications": 4.420289855072464
+          },
+          {
+            "n": 8,
+            "queries": 69,
+            "mean_modified_tokens": 4.956521739130435,
+            "factual_f1_flip_rate": 0.5072463768115942,
+            "synonym_f1_flip_rate": 0.2898550724637681,
+            "f1_cfr": 0.2173913043478261,
+            "mean_independent_verifications": 4.927536231884058
+          },
+          {
+            "n": 9,
+            "queries": 69,
+            "mean_modified_tokens": 5.318840579710145,
+            "factual_f1_flip_rate": 0.5797101449275363,
+            "synonym_f1_flip_rate": 0.2463768115942029,
+            "f1_cfr": 0.33333333333333337,
+            "mean_independent_verifications": 5.2898550724637685
+          },
+          {
+            "n": 10,
+            "queries": 69,
+            "mean_modified_tokens": 5.681159420289855,
+            "factual_f1_flip_rate": 0.6086956521739131,
+            "synonym_f1_flip_rate": 0.2608695652173913,
+            "f1_cfr": 0.3478260869565218,
+            "mean_independent_verifications": 5.681159420289855
+          }
+        ]
+      }
+    },
+    "qasper": {
+      "schema": "causalityrag.prefix_f1_frontier.v1",
+      "queries": 44,
+      "max_n": 10,
+      "f1_cfr": "factual F1 correctness-flip rate minus same-position synonym F1 correctness-flip rate",
+      "enumeration_accounting": "independent logical reader verifications without cross-method cache sharing",
+      "methods": {
+        "exhaustive": [
+          {
+            "n": 1,
+            "queries": 44,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.3409090909090909,
+            "synonym_f1_flip_rate": 0.22727272727272727,
+            "f1_cfr": 0.11363636363636362,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 44,
+            "mean_modified_tokens": 1.6136363636363635,
+            "factual_f1_flip_rate": 0.4090909090909091,
+            "synonym_f1_flip_rate": 0.22727272727272727,
+            "f1_cfr": 0.18181818181818185,
+            "mean_independent_verifications": 2.6136363636363638
+          },
+          {
+            "n": 3,
+            "queries": 44,
+            "mean_modified_tokens": 2.0454545454545454,
+            "factual_f1_flip_rate": 0.5227272727272727,
+            "synonym_f1_flip_rate": 0.20454545454545456,
+            "f1_cfr": 0.3181818181818181,
+            "mean_independent_verifications": 5.181818181818182
+          },
+          {
+            "n": 4,
+            "queries": 44,
+            "mean_modified_tokens": 2.4545454545454546,
+            "factual_f1_flip_rate": 0.5454545454545454,
+            "synonym_f1_flip_rate": 0.20454545454545456,
+            "f1_cfr": 0.34090909090909083,
+            "mean_independent_verifications": 9.545454545454545
+          },
+          {
+            "n": 5,
+            "queries": 44,
+            "mean_modified_tokens": 2.8181818181818183,
+            "factual_f1_flip_rate": 0.5681818181818182,
+            "synonym_f1_flip_rate": 0.20454545454545456,
+            "f1_cfr": 0.36363636363636365,
+            "mean_independent_verifications": 17.136363636363637
+          },
+          {
+            "n": 6,
+            "queries": 44,
+            "mean_modified_tokens": 3.0454545454545454,
+            "factual_f1_flip_rate": 0.6136363636363636,
+            "synonym_f1_flip_rate": 0.20454545454545456,
+            "f1_cfr": 0.40909090909090906,
+            "mean_independent_verifications": 29.727272727272727
+          },
+          {
+            "n": 7,
+            "queries": 44,
+            "mean_modified_tokens": 3.4318181818181817,
+            "factual_f1_flip_rate": 0.6136363636363636,
+            "synonym_f1_flip_rate": 0.18181818181818182,
+            "f1_cfr": 0.4318181818181818,
+            "mean_independent_verifications": 55.75
+          },
+          {
+            "n": 8,
+            "queries": 44,
+            "mean_modified_tokens": 3.6818181818181817,
+            "factual_f1_flip_rate": 0.6590909090909091,
+            "synonym_f1_flip_rate": 0.18181818181818182,
+            "f1_cfr": 0.47727272727272724,
+            "mean_independent_verifications": 104.93181818181819
+          },
+          {
+            "n": 9,
+            "queries": 44,
+            "mean_modified_tokens": 4.0227272727272725,
+            "factual_f1_flip_rate": 0.6590909090909091,
+            "synonym_f1_flip_rate": 0.22727272727272727,
+            "f1_cfr": 0.43181818181818177,
+            "mean_independent_verifications": 201.13636363636363
+          },
+          {
+            "n": 10,
+            "queries": 44,
+            "mean_modified_tokens": 4.2272727272727275,
+            "factual_f1_flip_rate": 0.7045454545454546,
+            "synonym_f1_flip_rate": 0.20454545454545456,
+            "f1_cfr": 0.5,
+            "mean_independent_verifications": 386.40909090909093
+          }
+        ],
+        "reflow": [
+          {
+            "n": 1,
+            "queries": 44,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.3409090909090909,
+            "synonym_f1_flip_rate": 0.22727272727272727,
+            "f1_cfr": 0.11363636363636362,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 44,
+            "mean_modified_tokens": 1.6818181818181819,
+            "factual_f1_flip_rate": 0.38636363636363635,
+            "synonym_f1_flip_rate": 0.25,
+            "f1_cfr": 0.13636363636363635,
+            "mean_independent_verifications": 1.6818181818181819
+          },
+          {
+            "n": 3,
+            "queries": 44,
+            "mean_modified_tokens": 2.3181818181818183,
+            "factual_f1_flip_rate": 0.4318181818181818,
+            "synonym_f1_flip_rate": 0.22727272727272727,
+            "f1_cfr": 0.20454545454545456,
+            "mean_independent_verifications": 2.3181818181818183
+          },
+          {
+            "n": 4,
+            "queries": 44,
+            "mean_modified_tokens": 2.8636363636363638,
+            "factual_f1_flip_rate": 0.45454545454545453,
+            "synonym_f1_flip_rate": 0.22727272727272727,
+            "f1_cfr": 0.22727272727272727,
+            "mean_independent_verifications": 2.8636363636363638
+          },
+          {
+            "n": 5,
+            "queries": 44,
+            "mean_modified_tokens": 3.409090909090909,
+            "factual_f1_flip_rate": 0.4772727272727273,
+            "synonym_f1_flip_rate": 0.25,
+            "f1_cfr": 0.2272727272727273,
+            "mean_independent_verifications": 3.409090909090909
+          },
+          {
+            "n": 6,
+            "queries": 44,
+            "mean_modified_tokens": 3.909090909090909,
+            "factual_f1_flip_rate": 0.4772727272727273,
+            "synonym_f1_flip_rate": 0.25,
+            "f1_cfr": 0.2272727272727273,
+            "mean_independent_verifications": 3.909090909090909
+          },
+          {
+            "n": 7,
+            "queries": 44,
+            "mean_modified_tokens": 4.4772727272727275,
+            "factual_f1_flip_rate": 0.4772727272727273,
+            "synonym_f1_flip_rate": 0.25,
+            "f1_cfr": 0.2272727272727273,
+            "mean_independent_verifications": 4.4772727272727275
+          },
+          {
+            "n": 8,
+            "queries": 44,
+            "mean_modified_tokens": 4.954545454545454,
+            "factual_f1_flip_rate": 0.4772727272727273,
+            "synonym_f1_flip_rate": 0.25,
+            "f1_cfr": 0.2272727272727273,
+            "mean_independent_verifications": 4.954545454545454
+          },
+          {
+            "n": 9,
+            "queries": 44,
+            "mean_modified_tokens": 5.431818181818182,
+            "factual_f1_flip_rate": 0.4772727272727273,
+            "synonym_f1_flip_rate": 0.2727272727272727,
+            "f1_cfr": 0.20454545454545459,
+            "mean_independent_verifications": 5.431818181818182
+          },
+          {
+            "n": 10,
+            "queries": 44,
+            "mean_modified_tokens": 5.909090909090909,
+            "factual_f1_flip_rate": 0.5,
+            "synonym_f1_flip_rate": 0.29545454545454547,
+            "f1_cfr": 0.20454545454545453,
+            "mean_independent_verifications": 5.909090909090909
+          }
+        ]
+      }
+    },
+    "quartz": {
+      "schema": "causalityrag.prefix_f1_frontier.v1",
+      "queries": 100,
+      "max_n": 10,
+      "f1_cfr": "factual F1 correctness-flip rate minus same-position synonym F1 correctness-flip rate",
+      "enumeration_accounting": "independent logical reader verifications without cross-method cache sharing",
+      "methods": {
+        "exhaustive": [
+          {
+            "n": 1,
+            "queries": 100,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.18,
+            "synonym_f1_flip_rate": 0.02,
+            "f1_cfr": 0.16,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 100,
+            "mean_modified_tokens": 1.77,
+            "factual_f1_flip_rate": 0.27,
+            "synonym_f1_flip_rate": 0.03,
+            "f1_cfr": 0.24000000000000002,
+            "mean_independent_verifications": 2.77
+          },
+          {
+            "n": 3,
+            "queries": 100,
+            "mean_modified_tokens": 2.39,
+            "factual_f1_flip_rate": 0.34,
+            "synonym_f1_flip_rate": 0.0,
+            "f1_cfr": 0.34,
+            "mean_independent_verifications": 5.83
+          },
+          {
+            "n": 4,
+            "queries": 100,
+            "mean_modified_tokens": 2.89,
+            "factual_f1_flip_rate": 0.41,
+            "synonym_f1_flip_rate": 0.02,
+            "f1_cfr": 0.38999999999999996,
+            "mean_independent_verifications": 11.15
+          },
+          {
+            "n": 5,
+            "queries": 100,
+            "mean_modified_tokens": 3.36,
+            "factual_f1_flip_rate": 0.46,
+            "synonym_f1_flip_rate": 0.03,
+            "f1_cfr": 0.43000000000000005,
+            "mean_independent_verifications": 21.04
+          },
+          {
+            "n": 6,
+            "queries": 100,
+            "mean_modified_tokens": 3.61,
+            "factual_f1_flip_rate": 0.52,
+            "synonym_f1_flip_rate": 0.02,
+            "f1_cfr": 0.5,
+            "mean_independent_verifications": 36.81
+          },
+          {
+            "n": 7,
+            "queries": 100,
+            "mean_modified_tokens": 3.9,
+            "factual_f1_flip_rate": 0.56,
+            "synonym_f1_flip_rate": 0.05,
+            "f1_cfr": 0.51,
+            "mean_independent_verifications": 66.24
+          },
+          {
+            "n": 8,
+            "queries": 100,
+            "mean_modified_tokens": 4.2,
+            "factual_f1_flip_rate": 0.59,
+            "synonym_f1_flip_rate": 0.06,
+            "f1_cfr": 0.53,
+            "mean_independent_verifications": 122.29
+          },
+          {
+            "n": 9,
+            "queries": 100,
+            "mean_modified_tokens": 4.45,
+            "factual_f1_flip_rate": 0.62,
+            "synonym_f1_flip_rate": 0.06,
+            "f1_cfr": 0.56,
+            "mean_independent_verifications": 226.04
+          },
+          {
+            "n": 10,
+            "queries": 100,
+            "mean_modified_tokens": 4.34,
+            "factual_f1_flip_rate": 0.7,
+            "synonym_f1_flip_rate": 0.06,
+            "f1_cfr": 0.6399999999999999,
+            "mean_independent_verifications": 384.94
+          }
+        ],
+        "reflow": [
+          {
+            "n": 1,
+            "queries": 100,
+            "mean_modified_tokens": 1.0,
+            "factual_f1_flip_rate": 0.18,
+            "synonym_f1_flip_rate": 0.02,
+            "f1_cfr": 0.16,
+            "mean_independent_verifications": 1.0
+          },
+          {
+            "n": 2,
+            "queries": 100,
+            "mean_modified_tokens": 1.71,
+            "factual_f1_flip_rate": 0.25,
+            "synonym_f1_flip_rate": 0.03,
+            "f1_cfr": 0.22,
+            "mean_independent_verifications": 1.66
+          },
+          {
+            "n": 3,
+            "queries": 100,
+            "mean_modified_tokens": 2.31,
+            "factual_f1_flip_rate": 0.29,
+            "synonym_f1_flip_rate": 0.01,
+            "f1_cfr": 0.27999999999999997,
+            "mean_independent_verifications": 2.27
+          },
+          {
+            "n": 4,
+            "queries": 100,
+            "mean_modified_tokens": 2.86,
+            "factual_f1_flip_rate": 0.31,
+            "synonym_f1_flip_rate": 0.02,
+            "f1_cfr": 0.29,
+            "mean_independent_verifications": 2.86
+          },
+          {
+            "n": 5,
+            "queries": 100,
+            "mean_modified_tokens": 3.31,
+            "factual_f1_flip_rate": 0.33,
+            "synonym_f1_flip_rate": 0.03,
+            "f1_cfr": 0.30000000000000004,
+            "mean_independent_verifications": 3.31
+          },
+          {
+            "n": 6,
+            "queries": 100,
+            "mean_modified_tokens": 3.76,
+            "factual_f1_flip_rate": 0.35,
+            "synonym_f1_flip_rate": 0.04,
+            "f1_cfr": 0.31,
+            "mean_independent_verifications": 3.76
+          },
+          {
+            "n": 7,
+            "queries": 100,
+            "mean_modified_tokens": 4.15,
+            "factual_f1_flip_rate": 0.34,
+            "synonym_f1_flip_rate": 0.04,
+            "f1_cfr": 0.30000000000000004,
+            "mean_independent_verifications": 4.15
+          },
+          {
+            "n": 8,
+            "queries": 100,
+            "mean_modified_tokens": 4.44,
+            "factual_f1_flip_rate": 0.34,
+            "synonym_f1_flip_rate": 0.05,
+            "f1_cfr": 0.29000000000000004,
+            "mean_independent_verifications": 4.44
+          },
+          {
+            "n": 9,
+            "queries": 100,
+            "mean_modified_tokens": 4.72,
+            "factual_f1_flip_rate": 0.34,
+            "synonym_f1_flip_rate": 0.05,
+            "f1_cfr": 0.29000000000000004,
+            "mean_independent_verifications": 4.72
+          },
+          {
+            "n": 10,
+            "queries": 100,
+            "mean_modified_tokens": 4.95,
+            "factual_f1_flip_rate": 0.37,
+            "synonym_f1_flip_rate": 0.05,
+            "f1_cfr": 0.32,
+            "mean_independent_verifications": 4.95
+          }
+        ]
+      }
+    }
+  }
+}

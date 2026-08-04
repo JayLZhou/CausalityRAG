@@ -26,8 +26,14 @@ def main() -> None:
     args = parser.parse_args()
 
     data = json.loads(args.input.read_text(encoding="utf-8"))
-    if data.get("schema") != "causalityrag.prefix_answer_frontier.aggregate.v1":
+    schema = data.get("schema")
+    schemas = {
+        "causalityrag.prefix_answer_frontier.aggregate.v1": ("answer_cfr", "Ans-CFR (%)"),
+        "causalityrag.prefix_f1_frontier.aggregate.v1": ("f1_cfr", "F1-CFR (%)"),
+    }
+    if schema not in schemas:
         raise ValueError("unexpected aggregate schema")
+    metric_field, metric_label = schemas[schema]
 
     plt.rcParams.update({
         "font.family": "serif",
@@ -44,7 +50,7 @@ def main() -> None:
     for method in ("exhaustive", "reflow"):
         curve = data["macro_average"][method]
         x_values = [float(row["mean_independent_verifications"]) for row in curve]
-        y_values = [100.0 * float(row["answer_cfr"]) for row in curve]
+        y_values = [100.0 * float(row[metric_field]) for row in curve]
         sizes = [bubble_area(float(row["mean_modified_tokens"])) for row in curve]
         axis.plot(
             x_values,
@@ -81,7 +87,7 @@ def main() -> None:
 
     axis.set_xscale("log")
     axis.set_xlabel("Independent reader verifications (log scale)")
-    axis.set_ylabel("Ans-CFR (%)")
+    axis.set_ylabel(metric_label)
     axis.grid(True, which="major", color="#D8DEE3", linewidth=0.55, alpha=0.9)
     axis.grid(True, which="minor", axis="x", color="#E8ECEF", linewidth=0.4, alpha=0.7)
     axis.set_axisbelow(True)

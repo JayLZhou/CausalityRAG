@@ -169,17 +169,18 @@ def main() -> None:
         raise ValueError(f"missing {len(missing)} prefix queries: {missing[:3]}")
 
     if args.prepare_only:
-        counts = {"exhaustive": [], "reflow": []}
+        values = {
+            method: {n: [] for n in range(1, args.max_n + 1)}
+            for method in ("exhaustive", "reflow")
+        }
         for item in prepared:
             for n in range(1, args.max_n + 1):
                 original = item["prefix_row"]["prefixes"][str(n)]
                 exhaustive = original["exhaustive"]
-                counts["exhaustive"].append(
-                    exhaustive_verifications(
-                        n,
-                        len(exhaustive["selected_ids"]),
-                        bool(exhaustive["factual_f1_flip"]),
-                    )
+                exhaustive_calls = exhaustive_verifications(
+                    n,
+                    len(exhaustive["selected_ids"]),
+                    bool(exhaustive["factual_f1_flip"]),
                 )
                 prefix = item["ranked_ids"][:n]
                 candidates = sorted_frontier_candidates(
@@ -190,15 +191,51 @@ def main() -> None:
                         item["target"],
                     )
                 )
-                selected = tuple(sorted(original["reflow"]["selected_ids"]))
-                counts["reflow"].append(reflow_verifications(candidates, selected))
-        print(json.dumps({
+                reflow = original["reflow"]
+                selected = tuple(sorted(reflow["selected_ids"]))
+                reflow_calls = reflow_verifications(candidates, selected)
+                for method, calls in (
+                    ("exhaustive", exhaustive_calls),
+                    ("reflow", reflow_calls),
+                ):
+                    row = original[method]
+                    values[method][n].append({
+                        "n_modified_tokens": int(row["n_modified_tokens"]),
+                        "factual_f1_flip": bool(row["factual_f1_flip"]),
+                        "synonym_f1_flip": bool(row["synonym_f1_flip"]),
+                        "independent_verifications": calls,
+                    })
+        methods = {}
+        for method, by_n in values.items():
+            methods[method] = []
+            for n, rows in by_n.items():
+                factual = statistics.fmean(row["factual_f1_flip"] for row in rows)
+                control = statistics.fmean(row["synonym_f1_flip"] for row in rows)
+                methods[method].append({
+                    "n": n,
+                    "queries": len(rows),
+                    "mean_modified_tokens": statistics.fmean(
+                        row["n_modified_tokens"] for row in rows
+                    ),
+                    "factual_f1_flip_rate": factual,
+                    "synonym_f1_flip_rate": control,
+                    "f1_cfr": factual - control,
+                    "mean_independent_verifications": statistics.fmean(
+                        row["independent_verifications"] for row in rows
+                    ),
+                })
+        summary = {
+            "schema": "causalityrag.prefix_f1_frontier.v1",
             "queries": len(prepared),
             "max_n": args.max_n,
-            "mean_independent_verifications": {
-                method: statistics.fmean(values) for method, values in counts.items()
-            },
-        }, indent=2))
+            "f1_cfr": "factual F1 correctness-flip rate minus same-position synonym F1 correctness-flip rate",
+            "enumeration_accounting": "independent logical reader verifications without cross-method cache sharing",
+            "methods": methods,
+        }
+        Path(args.summary_out).write_text(
+            json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+        )
+        print(json.dumps(summary, indent=2))
         return
 
     target_path = Path(args.out)
