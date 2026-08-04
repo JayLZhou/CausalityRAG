@@ -311,9 +311,10 @@ def main() -> None:
         }
         if aligned != {identifier}:
             raise ValueError(f"misaligned query {identifier}: {aligned}")
+        cache_k = int(unit_row.get("top_k", args.k))
         units = {
             str(unit["unit_id"]): unit
-            for unit in units_from_cache_row(record, unit_row, k=args.k)
+            for unit in units_from_cache_row(record, unit_row, k=cache_k)
         }
         clean_answer = str(reflow.get("clean_answer", ""))
         gold_answer = str(record.get("answer", ""))
