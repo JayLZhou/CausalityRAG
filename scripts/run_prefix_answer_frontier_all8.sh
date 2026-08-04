@@ -8,13 +8,20 @@ MODEL=/data1/yujia/models/Qwen2.5-7B-Instruct
 LOG_DIR="$ROOT/prefix_answer_frontier_logs"
 mkdir -p "$LOG_DIR"
 
-wait_for_gpus() {
+wait_for_gpu() {
   while true; do
     mapfile -t used < <(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits)
-    if [[ ${#used[@]} -ge 2 && ${used[0]} -lt 2000 && ${used[1]} -lt 2000 ]]; then
+    local candidate=-1
+    if [[ ${#used[@]} -ge 1 && ${used[0]} -lt 2000 ]]; then
+      candidate=0
+    elif [[ ${#used[@]} -ge 2 && ${used[1]} -lt 2000 ]]; then
+      candidate=1
+    fi
+    if [[ $candidate -ge 0 ]]; then
       sleep 60
       mapfile -t confirmed < <(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits)
-      if [[ ${confirmed[0]} -lt 2000 && ${confirmed[1]} -lt 2000 ]]; then
+      if [[ ${confirmed[$candidate]} -lt 2000 ]]; then
+        SELECTED_GPU=$candidate
         return
       fi
     fi
@@ -33,7 +40,7 @@ start_server() {
     --port "$port" \
     --dtype bfloat16 \
     --max-model-len 8192 \
-    --gpu-memory-utilization 0.82 \
+    --gpu-memory-utilization 0.55 \
     --max-num-seqs 128 \
     --enable-chunked-prefill \
     --trust-remote-code \
@@ -97,22 +104,15 @@ run_lane() {
   done
 }
 
-wait_for_gpus
-SERVER_ONE=$(start_server 0 8011)
-SERVER_TWO=$(start_server 1 8012)
+SELECTED_GPU=-1
+wait_for_gpu
+SERVER_ONE=$(start_server "$SELECTED_GPU" 8011)
 cleanup() {
-  kill "$SERVER_ONE" "$SERVER_TWO" 2>/dev/null || true
+  kill "$SERVER_ONE" 2>/dev/null || true
 }
 trap cleanup EXIT
 wait_for_server 8011
-wait_for_server 8012
-
-run_lane 8011 hotpotqa timeqa finqa qasper &
-LANE_ONE=$!
-run_lane 8012 2wiki musique pubmedqa quartz &
-LANE_TWO=$!
-wait "$LANE_ONE"
-wait "$LANE_TWO"
+run_lane 8011 hotpotqa 2wiki timeqa musique finqa pubmedqa qasper quartz
 
 SUMMARY_ARGS=()
 for dataset in hotpotqa 2wiki timeqa musique finqa pubmedqa qasper quartz; do
