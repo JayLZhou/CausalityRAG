@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from causalityrag.contribution_graph import contribution_graph_edges
 from causalityrag.flow_contract import breakpoint_price_cuts, remaining_contribution_flow
 from causalityrag.io import load_records, record_id
-from causalityrag.reader import ReaderClient, answers_exact_match
+from causalityrag.reader import ReaderClient, answer_token_f1, answers_exact_match
 from causalityrag.revision import apply_token_replacements
 from causalityrag.shared_replacement_pool import (
     FrozenSharedReplacementPool,
@@ -49,6 +49,30 @@ def incident_scores(
     return scores
 
 
+def clean_is_eligible(success_metric: str, clean_answer: str, gold_answer: str) -> bool:
+    if success_metric == "answer-change":
+        return bool(clean_answer.strip())
+    if success_metric == "f1-cfr":
+        return (
+            bool(gold_answer.strip())
+            and answer_token_f1(clean_answer, gold_answer) >= 1.0 - 1e-12
+        )
+    raise ValueError(f"unsupported success metric: {success_metric}")
+
+
+def intervention_succeeds(
+    success_metric: str,
+    clean_answer: str,
+    edited_answer: str,
+    gold_answer: str,
+) -> bool:
+    if success_metric == "answer-change":
+        return not answers_exact_match(clean_answer, edited_answer)
+    if success_metric == "f1-cfr":
+        return answer_token_f1(edited_answer, gold_answer) < 1.0 - 1e-12
+    raise ValueError(f"unsupported success metric: {success_metric}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", required=True)
@@ -62,6 +86,17 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=64)
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--seed", type=int, default=20260803)
+    parser.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Report the number of eligible frozen micro-instances without reader calls.",
+    )
+    parser.add_argument(
+        "--success-metric",
+        choices=("answer-change", "f1-cfr"),
+        default="answer-change",
+        help="Predicate used by both exhaustive search and ReFlow verification.",
+    )
     parser.add_argument("--llm-base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--llm-model", default="qwen2.5-7b")
     args = parser.parse_args()
@@ -78,6 +113,10 @@ def main() -> None:
         if query_id != str(unit_row.get("id", "")) or query_id != str(graph_row.get("id", "")):
             raise ValueError(f"misaligned query {query_id}")
         if graph_row.get("status") != "ok":
+            continue
+        clean = str(graph_row.get("clean_answer", graph_row.get("target_answer", "")))
+        gold = str(record.get("answer", graph_row.get("gold_answer", "")))
+        if not clean_is_eligible(args.success_metric, clean, gold):
             continue
         all_units = units_from_cache_row(record, unit_row, k=args.k)
         by_id = {
@@ -103,8 +142,33 @@ def main() -> None:
         frontier = breakpoint_price_cuts(domain_units, source, interactions, target)
         if not frontier.get("candidates"):
             continue
-        prepared.append((query_id, record, graph_row, domain_units, source, interactions, target, frontier))
+        prepared.append(
+            (
+                query_id,
+                record,
+                graph_row,
+                domain_units,
+                source,
+                interactions,
+                target,
+                frontier,
+                clean,
+                gold,
+            )
+        )
     prepared.sort(key=lambda item: stable_key(args.seed, item[0]))
+    if args.prepare_only:
+        print(
+            json.dumps(
+                {
+                    "success_metric": args.success_metric,
+                    "domain_size": args.domain_size,
+                    "available_micro_instances": len(prepared),
+                },
+                indent=2,
+            )
+        )
+        return
     prepared = prepared[: args.n_queries]
     if len(prepared) != args.n_queries:
         raise ValueError(f"only {len(prepared)} valid oracle micro-instances")
@@ -115,18 +179,37 @@ def main() -> None:
         str(row["id"]): row
         for row in (load_records(str(target_path)) if target_path.exists() else [])
     }
+    incompatible = [
+        query_id
+        for query_id, row in completed.items()
+        if row.get("success_metric", "answer-change") != args.success_metric
+    ]
+    if incompatible:
+        raise ValueError(
+            f"output contains {len(incompatible)} rows from another success metric; use a fresh path"
+        )
     reader = ReaderClient(base_url=args.llm_base_url, model=args.llm_model)
     write_lock = threading.Lock()
 
     def evaluate(item: tuple) -> dict:
-        query_id, record, graph_row, domain_units, source, interactions, target, frontier = item
+        (
+            query_id,
+            record,
+            graph_row,
+            domain_units,
+            source,
+            interactions,
+            target,
+            frontier,
+            clean,
+            gold,
+        ) = item
         if query_id in completed:
             return completed[query_id]
         by_id = {str(unit["unit_id"]): unit for unit in domain_units}
-        clean = str(graph_row.get("clean_answer", graph_row.get("target_answer", "")))
         answer_cache = {}
 
-        def execute_subset(selected: tuple[str, ...]) -> tuple[str, bool]:
+        def execute_subset(selected: tuple[str, ...]) -> tuple[str, bool, float | None]:
             key = tuple(sorted(selected))
             if key in answer_cache:
                 return answer_cache[key]
@@ -143,7 +226,12 @@ def main() -> None:
             if revision["n_failed_edits"] or revision["n_edits"] != len(key):
                 raise ValueError(f"failed frozen edit for {query_id}: {key}")
             answer = reader.answer(str(record.get("question", "")), revision["edited_contexts"])
-            result = (answer, not answers_exact_match(clean, answer))
+            edited_f1 = answer_token_f1(answer, gold) if gold else None
+            result = (
+                answer,
+                intervention_succeeds(args.success_metric, clean, answer, gold),
+                edited_f1,
+            )
             answer_cache[key] = result
             return result
 
@@ -163,6 +251,7 @@ def main() -> None:
         reflow_calls = 0
         reflow_set = None
         reflow_flip = False
+        reflow_edited_f1 = None
         candidates = sorted(
             frontier["candidates"],
             key=lambda candidate: (
@@ -174,7 +263,9 @@ def main() -> None:
         for candidate in candidates:
             selected = tuple(sorted(str(value) for value in candidate["selected_ids"]))
             reflow_calls += 1
-            if execute_subset(selected)[1]:
+            _, succeeds, edited_f1 = execute_subset(selected)
+            reflow_edited_f1 = edited_f1
+            if succeeds:
                 reflow_set = list(selected)
                 reflow_flip = True
                 break
@@ -183,6 +274,9 @@ def main() -> None:
         reflow_size = len(reflow_set or [])
         row = {
             "id": query_id,
+            "success_metric": args.success_metric,
+            "clean_f1": answer_token_f1(clean, gold) if gold else None,
+            "reflow_edited_f1": reflow_edited_f1,
             "domain_ids": sorted(by_id),
             "domain_size": args.domain_size,
             "oracle_feasible": bool(optimum_sets),
@@ -218,6 +312,12 @@ def main() -> None:
     comparable = [row for row in feasible if row["reflow_flip"]]
     summary = {
         "schema": "causalityrag.restricted_domain_oracle.v1",
+        "success_metric": args.success_metric,
+        "query_condition": (
+            "clean token-F1 equals 1; edited token-F1 is below 1"
+            if args.success_metric == "f1-cfr"
+            else "edited answer differs from the clean answer under normalized exact match"
+        ),
         "queries": len(rows),
         "domain_size": args.domain_size,
         "domain_policy": "top positive incident-capacity eligible tokens; frozen before reader execution",
