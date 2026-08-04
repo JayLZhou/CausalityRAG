@@ -154,23 +154,46 @@ def main() -> None:
             raise RuntimeError(f"invalid frozen query manifest for {dataset}")
         require_complete_jsonl(units, expected_ids)
 
-        frontier = base / "methods/reflow/frontier_top5_1000.jsonl"
-        require_complete_jsonl(frontier, expected_ids)
+        audit = base / "audits/final_top10pool_k5"
+        audit.mkdir(parents=True, exist_ok=True)
+        reflow_result_candidates = (
+            base / "methods/reflow/results_top5_1000.jsonl",
+            audit / "reflow_1000_v2.jsonl",
+        )
+        reflow_results = next(
+            (path for path in reflow_result_candidates if path.is_file()),
+            reflow_result_candidates[0],
+        )
+        baseline_results = audit / "baselines_1000.jsonl"
+        need_reflow = not complete_jsonl(reflow_results, expected_ids)
+        need_baselines = not complete_jsonl(baseline_results, expected_ids)
+
+        frontier_candidates = (
+            base / "methods/reflow/frontier_top5_1000.jsonl",
+            audit / "reflow_frontier_1000.jsonl",
+        )
+        frontier = next(
+            (path for path in frontier_candidates if path.is_file()),
+            frontier_candidates[0],
+        )
+        if need_reflow:
+            require_complete_jsonl(frontier, expected_ids)
         score_paths = {
             method: base / "methods/baselines" / filename
             for method, filename in SCORE_FILES.items()
         }
-        for score_path in score_paths.values():
-            require_complete_jsonl(score_path, expected_ids)
-        pool, pool_sha = require_frozen_pool(
-            base / "replacements/shared_pool_top10_v1"
-        )
+        if need_baselines:
+            for score_path in score_paths.values():
+                require_complete_jsonl(score_path, expected_ids)
+        pool = None
+        pool_sha = ""
+        if need_reflow or need_baselines:
+            pool, pool_sha = require_frozen_pool(
+                base / "replacements/shared_pool_top10_v1"
+            )
 
-        audit = base / "audits/final_top10pool_k5"
-        audit.mkdir(parents=True, exist_ok=True)
-        reflow_results = base / "methods/reflow/results_top5_1000.jsonl"
         reflow_summary = base / "methods/reflow/results_top5_1000.summary.json"
-        if not (complete_jsonl(reflow_results, expected_ids) and reflow_summary.is_file()):
+        if need_reflow:
             run([
                 args.python,
                 "scripts/evaluate_reflow.py",
@@ -190,9 +213,8 @@ def main() -> None:
             ], cwd=repo)
         require_complete_jsonl(reflow_results, expected_ids)
 
-        baseline_results = audit / "baselines_1000.jsonl"
         baseline_summary = audit / "baselines_1000.summary.json"
-        if not (complete_jsonl(baseline_results, expected_ids) and baseline_summary.is_file()):
+        if need_baselines:
             command = [
                 args.python,
                 "scripts/evaluate_matched_budget_baselines.py",
