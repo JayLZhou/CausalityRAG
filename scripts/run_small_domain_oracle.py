@@ -223,7 +223,14 @@ def main() -> None:
         "domain_policy": "top positive incident-capacity eligible tokens; frozen before reader execution",
         "oracle_feasible_queries": len(feasible),
         "reflow_feasible_queries": sum(bool(row["reflow_flip"]) for row in rows),
+        "comparable_queries": len(comparable),
         "exact_optimum_match_rate": sum(bool(row["exact_match"]) for row in feasible) / max(1, len(feasible)),
+        "mean_optimum_size": statistics.fmean(
+            row["optimum_size"] for row in comparable
+        ) if comparable else None,
+        "mean_reflow_size": statistics.fmean(
+            row["reflow_size"] for row in comparable
+        ) if comparable else None,
         "mean_additive_gap": statistics.fmean(
             row["reflow_size"] - row["optimum_size"] for row in comparable
         ) if comparable else None,
