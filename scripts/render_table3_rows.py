@@ -30,13 +30,13 @@ METHODS = (
 )
 METRICS = (
     ("Ans-FR", "answer", False),
-    ("F1-CFR", "f1", False),
-    ("EM-CFR", "em", False),
-    ("Acc-CFR", "acc", False),
-    ("Ans-EFR", "answer", True),
-    ("F1-CEFR", "f1", True),
-    ("EM-CEFR", "em", True),
-    ("Acc-CEFR", "acc", True),
+    ("F1-FR", "f1", False),
+    ("EM-FR", "em", False),
+    ("Acc-FR", "acc", False),
+    ("Ans-CFR", "answer", True),
+    ("F1-CFR", "f1", True),
+    ("EM-CFR", "em", True),
+    ("Acc-CFR", "acc", True),
 )
 PUBMEDQA_METRICS = tuple(
     row for row in METRICS if row[1] != "acc"
