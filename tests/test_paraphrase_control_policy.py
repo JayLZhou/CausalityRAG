@@ -1,6 +1,12 @@
+import json
+
 from causalityrag.paraphrase_control import excluded_from_paraphrase_control
 from scripts.build_paraphrase_control_pool import equivalent_rendering
-from scripts.evaluate_paraphrase_controls import evaluate_selected
+from scripts.evaluate_paraphrase_controls import (
+    answer_with_retries,
+    evaluate_selected,
+    load_completed_rows,
+)
 
 
 class _Reader:
@@ -10,6 +16,18 @@ class _Reader:
     def answer(self, question: str, contexts: list[dict]) -> str:
         self.calls += 1
         return contexts[0]["text"]
+
+
+class _FlakyReader:
+    def __init__(self, failures: int) -> None:
+        self.failures = failures
+        self.calls = 0
+
+    def answer(self, question: str, contexts: list[str]) -> str:
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise TimeoutError("transient")
+        return "recovered"
 
 
 def test_numeric_and_date_units_are_excluded_from_paraphrase_control() -> None:
@@ -99,3 +117,31 @@ def test_mixed_selection_only_paraphrases_non_numeric_token() -> None:
     assert result["n_modified_tokens"] == 1
     assert result["edited_answer"] == "1998 doctor"
     assert reader.calls == 1
+
+
+def test_reader_timeout_is_retried() -> None:
+    reader = _FlakyReader(failures=2)
+    answer = answer_with_retries(
+        reader,
+        "q",
+        ["context"],
+        attempts=3,
+        retry_delay=0,
+    )
+    assert answer == "recovered"
+    assert reader.calls == 3
+
+
+def test_completed_query_rows_are_resumed(tmp_path) -> None:
+    path = tmp_path / "partial.jsonl"
+    rows = [
+        {"index": 0, "id": "q0", "value": "old"},
+        {"index": 0, "id": "q0", "value": "latest"},
+        {"index": 1, "id": "wrong", "value": "ignore"},
+    ]
+    path.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows) + "{truncated",
+        encoding="utf-8",
+    )
+    completed = load_completed_rows(str(path), ["q0", "q1"])
+    assert completed == {0: {"index": 0, "id": "q0", "value": "latest"}}

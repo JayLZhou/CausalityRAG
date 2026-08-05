@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 import sys
+import time
+import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
@@ -43,6 +45,53 @@ def load_pool(path: str) -> dict[str, dict]:
     return pool
 
 
+def answer_with_retries(
+    reader: ReaderClient,
+    question: str,
+    contexts: list[str],
+    *,
+    attempts: int,
+    retry_delay: float,
+) -> str:
+    """Retry transient reader failures without masking protocol errors."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return reader.answer(question, contexts)
+        except (TimeoutError, urllib.error.URLError, ConnectionError, OSError):
+            if attempt == attempts:
+                raise
+            time.sleep(retry_delay * attempt)
+    raise AssertionError("unreachable")
+
+
+def load_completed_rows(path: str, expected_ids: list[str]) -> dict[int, dict]:
+    """Load query-level checkpoints, ignoring a possibly truncated final line."""
+    completed: dict[int, dict] = {}
+    if not os.path.isfile(path):
+        return completed
+    with open(path, encoding="utf-8") as source:
+        for line in source:
+            try:
+                row = json.loads(line)
+                index = int(row["index"])
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                continue
+            if not 0 <= index < len(expected_ids):
+                continue
+            if str(row.get("id", "")) != expected_ids[index]:
+                continue
+            completed[index] = row
+    return completed
+
+
+def write_rows(path: str, rows: list[dict]) -> None:
+    temporary = path + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as output:
+        for row in rows:
+            output.write(json.dumps(row, ensure_ascii=False) + "\n")
+    os.replace(temporary, path)
+
+
 def evaluate_selected(
     *,
     record: dict,
@@ -54,6 +103,8 @@ def evaluate_selected(
     reader: ReaderClient,
     seed: int,
     k: int,
+    reader_attempts: int = 3,
+    reader_retry_delay: float = 2.0,
 ) -> dict:
     if not selected:
         return {"status": "no_selected_tokens", "reader_called": False}
@@ -114,7 +165,13 @@ def evaluate_selected(
             "excluded_numeric_date_ids": excluded,
             "edits": revision["edits"],
         }
-    edited = reader.answer(str(record.get("question", "")), revision["edited_contexts"])
+    edited = answer_with_retries(
+        reader,
+        str(record.get("question", "")),
+        revision["edited_contexts"],
+        attempts=reader_attempts,
+        retry_delay=reader_retry_delay,
+    )
     if not edited.strip():
         return {
             "status": "invalid_empty_answer",
@@ -279,6 +336,8 @@ def main() -> None:
     parser.add_argument("--replacement-seed", type=int, default=0)
     parser.add_argument("--llm-base-url", default="")
     parser.add_argument("--llm-model", default="")
+    parser.add_argument("--reader-attempts", type=int, default=3)
+    parser.add_argument("--reader-retry-delay", type=float, default=2.0)
     args = parser.parse_args()
 
     actual_sha = file_sha256(args.paraphrase_pool)
@@ -297,6 +356,17 @@ def main() -> None:
     )
     lock = Lock()
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    expected_ids = [record_id(record) for record in records]
+    completed_rows = load_completed_rows(args.out, expected_ids)
+    if completed_rows:
+        write_rows(
+            args.out,
+            [completed_rows[index] for index in sorted(completed_rows)],
+        )
+        print(
+            f"[resume] {len(completed_rows)}/{len(records)} completed queries",
+            flush=True,
+        )
 
     def run(index: int) -> dict:
         record = records[index]
@@ -336,6 +406,8 @@ def main() -> None:
                 reader=reader,
                 seed=args.replacement_seed,
                 k=args.k,
+                reader_attempts=args.reader_attempts,
+                reader_retry_delay=args.reader_retry_delay,
             )
             for name, selected in selections.items()
         }
@@ -351,19 +423,19 @@ def main() -> None:
                 output.write(json.dumps(row, ensure_ascii=False) + "\n")
         return row
 
-    rows = []
+    rows = list(completed_rows.values())
+    missing_indices = [
+        index for index in range(len(records)) if index not in completed_rows
+    ]
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = [executor.submit(run, index) for index in range(len(records))]
+        futures = [executor.submit(run, index) for index in missing_indices]
         for completed, future in enumerate(as_completed(futures), start=1):
             rows.append(future.result())
-            if completed % 100 == 0:
-                print(f"[{completed}/{len(futures)}]", flush=True)
+            total_completed = len(completed_rows) + completed
+            if total_completed % 100 == 0 or completed == len(futures):
+                print(f"[{total_completed}/{len(records)}]", flush=True)
     rows.sort(key=lambda row: row["index"])
-    temporary = args.out + ".tmp"
-    with open(temporary, "w", encoding="utf-8") as output:
-        for row in rows:
-            output.write(json.dumps(row, ensure_ascii=False) + "\n")
-    os.replace(temporary, args.out)
+    write_rows(args.out, rows)
     summary = {
         **summarize(rows),
         "paraphrase_pool": os.path.abspath(args.paraphrase_pool),
