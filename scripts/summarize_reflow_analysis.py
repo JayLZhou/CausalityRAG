@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from causalityrag.reader import answer_token_f1, answers_exact_match
 
 
-DATASETS = ("hotpotqa", "timeqa", "finqa", "musique", "quartz", "qasper", "2wiki", "pubmedqa")
+DATASETS = ("hotpotqa", "timeqa", "finqa", "musique", "quartz", "triviaqa", "2wiki", "pubmedqa")
 
 
 def iter_jsonl(path: Path):

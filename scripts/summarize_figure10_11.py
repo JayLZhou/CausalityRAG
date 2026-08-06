@@ -16,7 +16,7 @@ DATASETS = (
     "finqa",
     "musique",
     "quartz",
-    "qasper",
+    "triviaqa",
     "2wiki",
     "pubmedqa",
 )
@@ -26,19 +26,19 @@ DISPLAY_NAMES = {
     "finqa": "FinQA",
     "musique": "MuSiQue",
     "quartz": "QuARTz",
-    "qasper": "QASPER",
+    "triviaqa": "TriviaQA",
     "2wiki": "2Wiki",
     "pubmedqa": "PubMedQA",
 }
 MAIN_DATASETS = ("hotpotqa", "2wiki", "musique", "timeqa")
-APPENDIX_DATASETS = ("finqa", "quartz", "qasper", "pubmedqa")
+APPENDIX_DATASETS = ("finqa", "quartz", "triviaqa", "pubmedqa")
 POOL_SHA = {
     "hotpotqa": "5f161ed2405becbda7cd39517d1d1291c562574a404c975e42f2d91ad8b31bef",
     "timeqa": "01f19f09fe2842006b036823ca820d649ce14fd23d41a74793f7f21f62fe8b44",
     "finqa": "e2276863d19c5c4f9148016eef4550128a4516baaa039e1e36e62db03ccdadb6",
     "musique": "335bc1027e62c72973c97f57f4b20fc769601b16698411b42be2dd3319eac31e",
     "quartz": "724115a67b2b8af90f74cfaeea47270e0412f7250b75a66d421f232d6cd148e6",
-    "qasper": "810179ebf125c8c92b2773619cebe736bbeee71725c0aa12069ba1b0a56004c1",
+    "triviaqa": "3703c4fa8e05a41b6d67f2dc247705d14b410867f56fe6ad8cf918c521d14d0f",
     "2wiki": "968488f69f032fbea66405b385fe8c227ce92c018632812d6d6486ddfe2be19d",
     "pubmedqa": "08e69f1c60106def06f66e2d3c20551628e8a7478f47e2ba98b9a6015cd0e655",
 }

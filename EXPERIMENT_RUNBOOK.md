@@ -1,7 +1,7 @@
 # Eight-Dataset Evaluation Runbook
 
-This runbook freezes the protocol for HotpotQA, TimeQA, FinQA, MuSiQue, CUAD,
-Qasper, 2WikiMultiHopQA, and PubMedQA. HotpotQA is complete; the same contract
+This runbook freezes the protocol for HotpotQA, TimeQA, FinQA, MuSiQue,
+QuaRTz, TriviaQA, 2WikiMultiHopQA, and PubMedQA. HotpotQA is complete; the same contract
 is used for the remaining seven datasets.
 
 ## Fixed Protocol
@@ -43,8 +43,8 @@ dataset manifest.
 | TimeQA | `/data1/yujia/RAGData/timeqa/questions/timeqa.json` | `/data1/yujia/RAGData/timeqa/corpus/timeqa_corpus.json` | 2,613 valid source rows |
 | FinQA | `/data1/yujia/RAGData/finqa/questions/finqa.json` | `/data1/yujia/RAGData/finqa/corpus/finqa_corpus.json` | Skip 13 empty-gold rows occurring in the first 1,000 raw rows |
 | MuSiQue | `/data1/yujia/RAGData/musique/questions/musique.json` | `/data1/yujia/RAGData/musique/corpus/musique_corpus.json` | All 1,000 rows are answerable |
-| CUAD | `/data1/yujia/RAGData/cuad/questions/cuad.json` | `/data1/yujia/RAGData/cuad/corpus/cuad_corpus.json` | Full contracts must be chunked before retrieval |
-| Qasper | `/data1/yujia/RAGData/qasper/questions/qasper.json` | `/data1/yujia/RAGData/qasper/corpus/qasper_corpus.json` | Long sections must be chunked |
+| QuaRTz | `/data1/yujia/RAGData/quartz/questions/quartz.json` | `/data1/yujia/RAGData/quartz/corpus/quartz_corpus.json` | Preserve the benchmark's binary comparison labels |
+| TriviaQA | `/data1/yujia/RAGData/triviaqa/prepared/questions_1000.jsonl` | `/data1/yujia/RAGData/triviaqa/prepared/corpus.jsonl` | Frozen Wikipedia-dev subset: 1,000 queries and 1,537 linked evidence documents |
 | 2Wiki | `/data1/yujia/RAGData/2wiki/questions/2wikimultihopqa.json` | `/data1/yujia/RAGData/2wiki/corpus/2wikimultihopqa_corpus.json` | Rebuild top-10; the existing artifact is top-5 only |
 | PubMedQA | `/data1/yujia/RAGData/pubmedqa/questions/pubmedqa.json` | `/data1/yujia/RAGData/pubmedqa/corpus/pubmedqa_corpus.json` | Preserve yes/no/maybe labels verbatim |
 
@@ -137,8 +137,8 @@ Run a 10-query end-to-end smoke test before each 1,000-query job.
 3. TimeQA: temporal values and multi-answer strings.
 4. MuSiQue: multi-hop transfer with exactly 1,000 answerable rows.
 5. FinQA: numeric answers and explicit empty-gold filtering.
-6. Qasper: longer scientific sections.
-7. CUAD: most expensive corpus preparation and longest source documents.
+6. TriviaQA: open-domain Wikipedia evidence and alias-rich answers.
+7. QuaRTz: short scientific comparisons and binary answer normalization.
 
 ## Mandatory Preflight
 

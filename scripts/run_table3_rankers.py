@@ -10,10 +10,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from causalityrag.io import load_records, record_id
 
 
-DATASETS = ("timeqa", "finqa", "musique", "quartz", "qasper", "2wiki", "pubmedqa")
+DATASETS = ("timeqa", "finqa", "musique", "quartz", "triviaqa", "2wiki", "pubmedqa")
 METHODS = ("attention", "gradient_x_input", "integrated_gradients", "mirage", "arc_jsd")
 FILENAMES = {
     "attention": "attention_top5_1000.jsonl",

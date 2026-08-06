@@ -1,4 +1,4 @@
-"""Find the baseline token budget required to match ReFlow's Acc-CFR."""
+"""Find the baseline token budget required to match ReFlow's Acc-FR."""
 
 from __future__ import annotations
 
@@ -14,6 +14,10 @@ from causalityrag.reader import answers_match
 
 
 METHODS = ("mirage", "arc_jsd")
+METHOD_ALIASES = {
+    "mirage": ("mirage", "MIRAGE"),
+    "arc_jsd": ("arc_jsd", "ARC-JSD"),
+}
 
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -48,12 +52,24 @@ def summarize_dataset(base: Path, sweep_name: str) -> dict[str, Any]:
 
     methods: dict[str, Any] = {
         "reflow": {
-            "target_acc_cfr": target,
+            "target_acc_fr": target,
             "mean_modified_tokens": reflow_mean,
         }
     }
     for method in METHODS:
-        curve = sweep["methods"][method]
+        source_name = next(
+            (
+                alias
+                for alias in METHOD_ALIASES[method]
+                if alias in sweep["methods"]
+            ),
+            None,
+        )
+        if source_name is None:
+            raise KeyError(
+                f"missing {method} curve; available={sorted(sweep['methods'])}"
+            )
+        curve = sweep["methods"][source_name]
         budgets = sorted(int(value) for value in curve)
         matched_budget = next(
             (
@@ -76,7 +92,7 @@ def summarize_dataset(base: Path, sweep_name: str) -> dict[str, Any]:
                 "status": "not_reached",
                 "max_tested_budget": max(budgets),
                 "best_top_k": best_budget,
-                "best_acc_cfr": float(best_point["acc_cfr"]),
+                "best_acc_fr": float(best_point["acc_cfr"]),
                 "best_mean_modified_tokens": float(
                     best_point["mean_modified_tokens"]
                 ),
@@ -91,7 +107,7 @@ def summarize_dataset(base: Path, sweep_name: str) -> dict[str, Any]:
         methods[method] = {
             "status": "matched",
             "minimum_top_k": matched_budget,
-            "acc_cfr": float(point["acc_cfr"]),
+            "acc_fr": float(point["acc_cfr"]),
             "executed_queries": int(point["executed_queries"]),
             "mean_modified_tokens": float(point["mean_modified_tokens"]),
             "token_ratio_over_reflow": (
@@ -100,13 +116,13 @@ def summarize_dataset(base: Path, sweep_name: str) -> dict[str, Any]:
         }
         if previous_budget is not None:
             methods[method]["previous_top_k"] = previous_budget
-            methods[method]["previous_acc_cfr"] = float(
+            methods[method]["previous_acc_fr"] = float(
                 curve[str(previous_budget)]["acc_cfr"]
             )
     return {
         "queries": int(sweep["queries"]),
         "clean_acc_queries": len(clean_ids),
-        "reflow_acc_cfr_target": target,
+        "reflow_acc_fr_target": target,
         "methods": methods,
     }
 
@@ -122,11 +138,11 @@ def main() -> None:
     root = Path(args.out_root)
     datasets = [value.strip() for value in args.datasets.split(",") if value.strip()]
     output = {
-        "schema": "reflow.baseline_budget_to_match_acc_cfr.v1",
-        "metric": "Acc-CFR",
+        "schema": "reflow.baseline_budget_to_match_acc_fr.v2",
+        "metric": "Acc-FR",
         "matching_rule": (
-            "smallest fixed baseline top-k whose Acc-CFR is at least ReFlow's "
-            "Table 3 Acc-CFR on the identical clean-accuracy population"
+            "smallest fixed baseline top-k whose Acc-FR is at least ReFlow's "
+            "Table 3 Acc-FR on the identical clean-accuracy population"
         ),
         "datasets": {
             dataset: summarize_dataset(root / dataset, args.sweep_name)

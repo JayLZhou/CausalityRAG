@@ -22,7 +22,7 @@ DATASETS = (
     "finqa",
     "musique",
     "quartz",
-    "qasper",
+    "triviaqa",
     "2wiki",
     "pubmedqa",
 )

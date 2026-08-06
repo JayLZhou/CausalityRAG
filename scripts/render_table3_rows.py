@@ -15,7 +15,7 @@ DATASETS = (
     ("finqa", "FinQA", "FinQAMetricRows"),
     ("musique", "MuSiQue", "MuSiQueMetricRows"),
     ("quartz", "QuaRTz", "QuartzMetricRows"),
-    ("qasper", "Qasper", "QasperMetricRows"),
+    ("triviaqa", "TriviaQA", "TriviaQAMetricRows"),
     ("2wiki", "2Wiki", "TwoWikiMetricRows"),
     ("pubmedqa", "PubMedQA", "PubMedQAMetricRows"),
 )
