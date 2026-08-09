@@ -41,6 +41,9 @@ METRICS = (
 PUBMEDQA_METRICS = tuple(
     row for row in METRICS if row[1] != "acc"
 )
+QUARTZ_METRICS = tuple(
+    row for row in METRICS if row[1] in {"answer", "f1"}
+)
 FACTUAL_KEYS = {
     "answer": "answer_flip_ratio",
     "f1": "f1_flip_ratio",
@@ -116,6 +119,13 @@ def cells(values: list[float], *, adjusted: bool) -> list[str]:
 
 def dataset_paths(root: Path, dataset: str) -> tuple[Path, Path]:
     base = root / dataset
+    repaired = base / "choice_postprocess_v1"
+    repaired_candidates = (
+        repaired / "factual_metrics_1000.json",
+        repaired / "control/summary.json",
+    )
+    if dataset == "quartz" and (repaired / "COMPLETE").is_file():
+        return repaired_candidates
     factual_candidates = (
         base / "audits/final_top10pool_k5/factual_metrics_1000.json",
         base / "factual_metrics_1000.json",
@@ -132,7 +142,12 @@ def dataset_paths(root: Path, dataset: str) -> tuple[Path, Path]:
 
 
 def render_dataset(root: Path, dataset: str, label: str, macro: str) -> str:
-    metrics = PUBMEDQA_METRICS if dataset == "pubmedqa" else METRICS
+    if dataset == "quartz":
+        metrics = QUARTZ_METRICS
+    elif dataset == "pubmedqa":
+        metrics = PUBMEDQA_METRICS
+    else:
+        metrics = METRICS
     factual_path, control_path = dataset_paths(root, dataset)
     if not factual_path.is_file() or not control_path.is_file():
         lines = [f"\\newcommand{{\\{macro}}}{{%", f"  \\multirow{{{len(metrics)}}}{{*}}{{{label}}}"]
