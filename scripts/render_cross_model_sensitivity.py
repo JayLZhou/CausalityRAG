@@ -109,12 +109,6 @@ def control_record(row: dict) -> dict:
     return methods["reflow"]
 
 
-def factual_executed(row: dict) -> bool:
-    return row.get("evaluation_status") in {"verified_flip", "verified_no_flip"} or bool(
-        row.get("reader_calls", 0)
-    )
-
-
 def graph_coverage(summary: dict) -> tuple[int, int, float]:
     total = int(summary.get("records", summary.get("rows", summary.get("queries", 0))))
     ok = int(summary.get(
@@ -145,15 +139,20 @@ def summarize_dataset(model: ModelSpec, dataset: str) -> dict:
     factual_path, control_path, graph_path = artifact_paths(model, dataset)
     factual_rows = {str(row["id"]): row for row in iter_jsonl(factual_path)}
     control_rows = {str(row["id"]): row for row in iter_jsonl(control_path)}
-    paired: list[tuple[dict, dict]] = []
-    for query_id in factual_rows.keys() & control_rows.keys():
-        factual = factual_rows[query_id]
-        control = control_record(control_rows[query_id])
-        if factual_executed(factual) and control.get("status") == "evaluated":
-            paired.append((factual, control))
+    if factual_rows.keys() != control_rows.keys():
+        missing_control = sorted(factual_rows.keys() - control_rows.keys())
+        missing_factual = sorted(control_rows.keys() - factual_rows.keys())
+        raise ValueError(
+            f"factual/control query mismatch for {model.key}/{dataset}: "
+            f"missing_control={missing_control[:3]} missing_factual={missing_factual[:3]}"
+        )
+    paired = [
+        (factual_rows[query_id], control_record(control_rows[query_id]))
+        for query_id in factual_rows
+    ]
 
     if not paired:
-        raise ValueError(f"no paired factual/control executions for {model.key}/{dataset}")
+        raise ValueError(f"no paired factual/control records for {model.key}/{dataset}")
 
     ans_deltas = [
         int(bool(factual.get("verified_flip"))) - int(bool(control.get("answer_flip")))
@@ -316,8 +315,14 @@ def main() -> None:
     result = {
         "schema": "causalityrag.cross_model_sensitivity.v1",
         "metric_contract": {
-            "ans_cfr": "paired factual answer flip minus paired synonym-control answer flip",
-            "f1_cfr": "same paired difference restricted to queries with clean token-F1 equal to one",
+            "ans_cfr": (
+                "paired factual answer flip minus paired synonym-control answer flip "
+                "over all query records; unsupported or unexecuted interventions contribute zero"
+            ),
+            "f1_cfr": (
+                "same paired difference restricted to queries with clean token-F1 equal to one; "
+                "unsupported or unexecuted interventions contribute zero"
+            ),
             "mean_modified_tokens": "mean final attempted intervention size over all 1,000 queries",
             "main_aggregation": "per-dataset paired queries for four representative datasets",
             "appendix_aggregation": "per-dataset paired queries for all eight datasets",

@@ -11,7 +11,7 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
 
-def test_summarize_dataset_uses_paired_executions(tmp_path: Path) -> None:
+def test_summarize_dataset_uses_all_query_pairs(tmp_path: Path) -> None:
     base = tmp_path / "hotpotqa"
     write_jsonl(
         base / "factual/results.jsonl",
@@ -35,7 +35,7 @@ def test_summarize_dataset_uses_paired_executions(tmp_path: Path) -> None:
                 "n_modified_tokens": 4,
             },
             {
-                "id": "unpaired",
+                "id": "no_op_control",
                 "clean_answer": "gamma",
                 "gold_answer": "gamma",
                 "edited_answer": "wrong",
@@ -61,7 +61,7 @@ def test_summarize_dataset_uses_paired_executions(tmp_path: Path) -> None:
                 },
             },
             {
-                "id": "unpaired",
+                "id": "no_op_control",
                 "methods": {"reflow": {"status": "missing_paraphrase"}},
             },
         ],
@@ -73,10 +73,10 @@ def test_summarize_dataset_uses_paired_executions(tmp_path: Path) -> None:
 
     summary = summarize_dataset(ModelSpec("m", "Model", "M", tmp_path, "sweep"), "hotpotqa")
 
-    assert summary["paired_queries"] == 2
-    assert summary["f1_clean_paired_queries"] == 2
-    assert summary["ans_cfr"] == 0.0
-    assert summary["f1_cfr"] == 0.0
+    assert summary["paired_queries"] == 3
+    assert summary["f1_clean_paired_queries"] == 3
+    assert summary["ans_cfr"] == 1 / 3
+    assert summary["f1_cfr"] == 1 / 3
     assert summary["mean_modified_tokens"] == 4.0
     assert summary["graph_coverage"] == 2 / 3
 
