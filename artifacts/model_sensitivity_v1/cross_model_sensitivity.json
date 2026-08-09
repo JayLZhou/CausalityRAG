@@ -1,0 +1,1017 @@
+{
+  "schema": "causalityrag.cross_model_sensitivity.v1",
+  "metric_contract": {
+    "ans_cfr": "paired factual answer flip minus paired synonym-control answer flip",
+    "f1_cfr": "same paired difference restricted to queries with clean token-F1 equal to one",
+    "mean_modified_tokens": "mean final attempted intervention size over all 1,000 queries",
+    "main_aggregation": "per-dataset paired queries for four representative datasets",
+    "appendix_aggregation": "per-dataset paired queries for all eight datasets",
+    "diagnostic": "unweighted dataset macros are retained in JSON but not plotted"
+  },
+  "models": [
+    {
+      "key": "qwen2.5-7b",
+      "label": "Qwen2.5-7B",
+      "short_label": "Qwen2.5",
+      "layout": "default",
+      "root": "/data1/yujia/CausalityRAG/out",
+      "datasets": [
+        {
+          "dataset": "hotpotqa",
+          "queries": 1000,
+          "paired_queries": 866,
+          "f1_clean_paired_queries": 347,
+          "ans_cfr": 0.5057736720554272,
+          "f1_cfr": 0.6512968299711815,
+          "ans_delta_sum": 438,
+          "f1_delta_sum": 226,
+          "mean_modified_tokens": 2.663,
+          "graph_ok": 999,
+          "graph_total": 1000,
+          "graph_coverage": 0.999,
+          "mean_graph_seconds": null,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/hotpotqa/audits/final_top10pool_k5/reflow_1000_v2.jsonl",
+              "sha256": "44d4f7813329cc1f16ff7a89387c1afaa5e5812ee8cf8858eba1cf97353c9e7f"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/hotpotqa/controls/paraphrase_results_top5_1000_v2.jsonl",
+              "sha256": "24bdef6b42f2a81872385adcc60b6dd2ed3349dd70269e06735af5acb7072329"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/hotpotqa/graphs/contribution_graph_token_label_1000.summary.json",
+              "sha256": "4e43e3708b99ca62745b84299f31d7583af5fd615c8b3d51fee2b8fbf5520373"
+            }
+          }
+        },
+        {
+          "dataset": "timeqa",
+          "queries": 1000,
+          "paired_queries": 922,
+          "f1_clean_paired_queries": 292,
+          "ans_cfr": 0.6561822125813449,
+          "f1_cfr": 0.7705479452054794,
+          "ans_delta_sum": 605,
+          "f1_delta_sum": 225,
+          "mean_modified_tokens": 1.502,
+          "graph_ok": 933,
+          "graph_total": 1000,
+          "graph_coverage": 0.933,
+          "mean_graph_seconds": null,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/timeqa/methods/reflow/results_top5_1000.jsonl",
+              "sha256": "2a429b4819005ddb385dd3206fe7f0cbb9729a04fe6b25a028f1119aef945197"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/timeqa/controls/paraphrase_results_top5_1000_v2.jsonl",
+              "sha256": "882f7ff42827efd97a1214d330ad4a149083bfdf9ddb024bb97f0787391df1b5"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/timeqa/graphs/contribution_graph_top5_1000.summary.json",
+              "sha256": "4ec17cc7d952a5fe060d939eebc90cad3ad5e7add10e634722294f3823c3c756"
+            }
+          }
+        },
+        {
+          "dataset": "finqa",
+          "queries": 1000,
+          "paired_queries": 332,
+          "f1_clean_paired_queries": 40,
+          "ans_cfr": 0.6054216867469879,
+          "f1_cfr": 0.525,
+          "ans_delta_sum": 201,
+          "f1_delta_sum": 21,
+          "mean_modified_tokens": 2.977,
+          "graph_ok": 922,
+          "graph_total": 1000,
+          "graph_coverage": 0.922,
+          "mean_graph_seconds": null,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/finqa/methods/reflow/results_top5_1000.jsonl",
+              "sha256": "5f5f742e81f3d84b66b2ee1e6451e6a77760c775132205fce944929ddcbd0e41"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/finqa/controls/paraphrase_results_top5_1000_v2.jsonl",
+              "sha256": "1d0222dbe393baa7a64a7a412b24bee70c85751d3baa39d9b385393082541fdc"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/finqa/graphs/contribution_graph_top5_1000.summary.json",
+              "sha256": "c88eb75c310478f0594e51b3b3a35cd80422c85d4eb3d708ebac0afafd2d95cc"
+            }
+          }
+        },
+        {
+          "dataset": "musique",
+          "queries": 1000,
+          "paired_queries": 712,
+          "f1_clean_paired_queries": 85,
+          "ans_cfr": 0.6095505617977528,
+          "f1_cfr": 0.7176470588235294,
+          "ans_delta_sum": 434,
+          "f1_delta_sum": 61,
+          "mean_modified_tokens": 1.803,
+          "graph_ok": 957,
+          "graph_total": 1000,
+          "graph_coverage": 0.957,
+          "mean_graph_seconds": null,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/musique/methods/reflow/results_top5_1000.jsonl",
+              "sha256": "44dcdd9adad6477fbb0a73b9e1c7538f05da819736d8d43850b372f02db0a4d2"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/musique/controls/paraphrase_results_top5_1000_v2.jsonl",
+              "sha256": "eb2c5af1517d67021bfd9af0cefca9a35272811581f4ba39a3f9ad04e75aa938"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/musique/graphs/contribution_graph_top5_1000.summary.json",
+              "sha256": "d3c91ce829967e5251dc5fd6149eca480886dd76e5fb874a84b4b848f40285e4"
+            }
+          }
+        },
+        {
+          "dataset": "quartz",
+          "queries": 1000,
+          "paired_queries": 958,
+          "f1_clean_paired_queries": 691,
+          "ans_cfr": 0.325678496868476,
+          "f1_cfr": 0.31693198263386396,
+          "ans_delta_sum": 312,
+          "f1_delta_sum": 219,
+          "mean_modified_tokens": 5.164,
+          "graph_ok": 958,
+          "graph_total": 1000,
+          "graph_coverage": 0.958,
+          "mean_graph_seconds": null,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/quartz/methods/reflow/results_top5_1000.jsonl",
+              "sha256": "78df1c56636d99fddb7188dcc41e926cb0a782c58cabe53c479b3dc08c80d797"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/quartz/controls/paraphrase_results_top5_1000_v2.jsonl",
+              "sha256": "5b7f9afd21a76a4076681d677411b2349e61aa70d282cad8556f8697fc667d3b"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/quartz/methods/reflow/frontier_top5_1000.jsonl",
+              "sha256": "e9b233e6f2086e34f12d3e331d41afa672ec0a50df655b20629bcc57e004ad24"
+            }
+          }
+        },
+        {
+          "dataset": "triviaqa",
+          "queries": 1000,
+          "paired_queries": 968,
+          "f1_clean_paired_queries": 636,
+          "ans_cfr": 0.5134297520661157,
+          "f1_cfr": 0.5628930817610063,
+          "ans_delta_sum": 497,
+          "f1_delta_sum": 358,
+          "mean_modified_tokens": 5.566,
+          "graph_ok": 970,
+          "graph_total": 1000,
+          "graph_coverage": 0.97,
+          "mean_graph_seconds": 11.954,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/triviaqa/methods/reflow/results_top5_1000.jsonl",
+              "sha256": "6a48b9a08735d59a390305d06873e50802d18a9092bd6a956b75283519619d12"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/triviaqa/controls/paraphrase_results_top5_1000.jsonl",
+              "sha256": "bb6dc7b47a807a34775f790e719e55079e4785d3d250cfa26615ea1e16eaf20f"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/triviaqa/graphs/contribution_graph_top5_1000.summary.json",
+              "sha256": "64a0df36dfb00979df362672e5169f71ad92ee94867eb7a6ef3e20b5299e5852"
+            }
+          }
+        },
+        {
+          "dataset": "2wiki",
+          "queries": 1000,
+          "paired_queries": 931,
+          "f1_clean_paired_queries": 278,
+          "ans_cfr": 0.5832438238453276,
+          "f1_cfr": 0.7050359712230215,
+          "ans_delta_sum": 543,
+          "f1_delta_sum": 196,
+          "mean_modified_tokens": 2.996,
+          "graph_ok": 986,
+          "graph_total": 1000,
+          "graph_coverage": 0.986,
+          "mean_graph_seconds": null,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/2wiki/methods/reflow/results_top5_1000.jsonl",
+              "sha256": "b0d21d413b28e4d324e835fed382a01d2bba493b35adaa4def83a62de9b91420"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/2wiki/controls/paraphrase_results_top5_1000_v2.jsonl",
+              "sha256": "af93cb9f4df7317a55f54fae18a00eee15adbcbc6a53a52377675bfed733a268"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/2wiki/graphs/contribution_graph_top5_1000.summary.json",
+              "sha256": "a70a5a05f8fc6e8a40dfcb3d112073bf79c9fbd71acb1f50401dbad261b16bc4"
+            }
+          }
+        },
+        {
+          "dataset": "pubmedqa",
+          "queries": 1000,
+          "paired_queries": 912,
+          "f1_clean_paired_queries": 65,
+          "ans_cfr": 0.24671052631578946,
+          "f1_cfr": 0.5076923076923077,
+          "ans_delta_sum": 225,
+          "f1_delta_sum": 33,
+          "mean_modified_tokens": 2.268,
+          "graph_ok": 998,
+          "graph_total": 1000,
+          "graph_coverage": 0.998,
+          "mean_graph_seconds": null,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/pubmedqa/methods/reflow/results_top5_1000.jsonl",
+              "sha256": "ace44792c929d57ded6171aa61d020d9a62adc2081454ff4ade576b1ec24e7e8"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/pubmedqa/controls/paraphrase_results_top5_1000_v2.jsonl",
+              "sha256": "2691d236bc08afa2b0d5ff4b08d459256fa93dc118e3a25fc465040337dce0c0"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/pubmedqa/methods/reflow/frontier_top5_1000.jsonl",
+              "sha256": "3e4e120beffea9c24441c15b187c40efc03ba3ff37c2ddbbb36e7d7ddc1a2372"
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "ans_cfr": 0.4931071049840933,
+        "f1_cfr": 0.5501232539030403,
+        "mean_modified_tokens": 3.117375,
+        "graph_coverage": 0.965375,
+        "paired_queries": 6601,
+        "f1_clean_paired_queries": 2434,
+        "dataset_macro_ans_cfr": 0.5057488415346527,
+        "dataset_macro_f1_cfr": 0.5946306471637988
+      }
+    },
+    {
+      "key": "llama3.1-8b",
+      "label": "Llama-3.1-8B",
+      "short_label": "Llama",
+      "layout": "sweep",
+      "root": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b",
+      "datasets": [
+        {
+          "dataset": "hotpotqa",
+          "queries": 1000,
+          "paired_queries": 411,
+          "f1_clean_paired_queries": 179,
+          "ans_cfr": 0.6180048661800487,
+          "f1_cfr": 0.7597765363128491,
+          "ans_delta_sum": 254,
+          "f1_delta_sum": 136,
+          "mean_modified_tokens": 4.058,
+          "graph_ok": 998,
+          "graph_total": 1000,
+          "graph_coverage": 0.998,
+          "mean_graph_seconds": 6.005,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/hotpotqa/factual/results.jsonl",
+              "sha256": "035ad87cf66ca7474658b77c01ecb4c10caf83ee34ca09ebfaea7c93641776eb"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/hotpotqa/synonym/results.jsonl",
+              "sha256": "e893b58f9d6863ebc15a53f92c445631129aaafd5f2c98a5f0ed50806e4d432d"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/hotpotqa/graph/summary.json",
+              "sha256": "1715fa93d69bc3d405f28a9dec282cb0b5d52377ee0f9757eddf89e0e3007bcc"
+            }
+          }
+        },
+        {
+          "dataset": "timeqa",
+          "queries": 1000,
+          "paired_queries": 593,
+          "f1_clean_paired_queries": 221,
+          "ans_cfr": 0.6627318718381113,
+          "f1_cfr": 0.7692307692307693,
+          "ans_delta_sum": 393,
+          "f1_delta_sum": 170,
+          "mean_modified_tokens": 2.157,
+          "graph_ok": 1000,
+          "graph_total": 1000,
+          "graph_coverage": 1.0,
+          "mean_graph_seconds": 4.998,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/timeqa/factual/results.jsonl",
+              "sha256": "4334559d56817ad5427cc3d751d5676d5cd9092ab0e3ded0675543ca4f4e0d56"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/timeqa/synonym/results.jsonl",
+              "sha256": "5b2a2394e9133bbb1e78d387e424e860244011276b890274a2fc536577cfaf17"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/timeqa/graph/summary.json",
+              "sha256": "61983564d54598f5ce3a2c3015561597bc5f7b9e0e9b0d761a289d8715915bb3"
+            }
+          }
+        },
+        {
+          "dataset": "finqa",
+          "queries": 1000,
+          "paired_queries": 36,
+          "f1_clean_paired_queries": 1,
+          "ans_cfr": 0.6666666666666666,
+          "f1_cfr": 1.0,
+          "ans_delta_sum": 24,
+          "f1_delta_sum": 1,
+          "mean_modified_tokens": 3.9,
+          "graph_ok": 1000,
+          "graph_total": 1000,
+          "graph_coverage": 1.0,
+          "mean_graph_seconds": 15.185,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/finqa/factual/results.jsonl",
+              "sha256": "073771e39a319d1e45e7975f870f20e9c7819d8876e018bb8144cd38e8732cf9"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/finqa/synonym/results.jsonl",
+              "sha256": "ba075253cc35697aa48e0062e44b47da81a4e4ec191f3ef605d027cc9684a64b"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/finqa/graph/summary.json",
+              "sha256": "91d0f23fba537f867a1a564113ee5143f9fc97b28ff42fdef53ea110be4bf69e"
+            }
+          }
+        },
+        {
+          "dataset": "musique",
+          "queries": 1000,
+          "paired_queries": 374,
+          "f1_clean_paired_queries": 68,
+          "ans_cfr": 0.6042780748663101,
+          "f1_cfr": 0.6470588235294118,
+          "ans_delta_sum": 226,
+          "f1_delta_sum": 44,
+          "mean_modified_tokens": 2.41,
+          "graph_ok": 1000,
+          "graph_total": 1000,
+          "graph_coverage": 1.0,
+          "mean_graph_seconds": 6.663,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/musique/factual/results.jsonl",
+              "sha256": "e8b554c58de1bd287700668ddd4008158e0e2fe78e3e406aabb60330dd3a40f0"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/musique/synonym/results.jsonl",
+              "sha256": "2b4b2307613ea3bddc986be530f2dc1d902ad30a80361e1e94d2a24da51fb4b4"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/musique/graph/summary.json",
+              "sha256": "3c5e0ba5eab803628f95c4edd03709856f26209c992bf151a77e5daabaa4c91d"
+            }
+          }
+        },
+        {
+          "dataset": "quartz",
+          "queries": 1000,
+          "paired_queries": 968,
+          "f1_clean_paired_queries": 462,
+          "ans_cfr": 0.3140495867768595,
+          "f1_cfr": 0.3961038961038961,
+          "ans_delta_sum": 304,
+          "f1_delta_sum": 183,
+          "mean_modified_tokens": 4.438,
+          "graph_ok": 999,
+          "graph_total": 1000,
+          "graph_coverage": 0.999,
+          "mean_graph_seconds": 2.885,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/quartz/factual/results.jsonl",
+              "sha256": "c8248217a2632f2ca3d285065ab6664e8b8601ffa670b4b609fe43a3932c7570"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/quartz/synonym/results.jsonl",
+              "sha256": "d05c22883596b433049dc5a2ffaf8955e32e30eef06e6f2d9370fa291669c867"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/quartz/graph/summary.json",
+              "sha256": "68d80fe15b4c0e6598ac0c79e945d196395527a05f0b3c9e4d4d9a9a44675fe5"
+            }
+          }
+        },
+        {
+          "dataset": "triviaqa",
+          "queries": 1000,
+          "paired_queries": 304,
+          "f1_clean_paired_queries": 192,
+          "ans_cfr": 0.6414473684210527,
+          "f1_cfr": 0.7135416666666666,
+          "ans_delta_sum": 195,
+          "f1_delta_sum": 137,
+          "mean_modified_tokens": 9.445,
+          "graph_ok": 1000,
+          "graph_total": 1000,
+          "graph_coverage": 1.0,
+          "mean_graph_seconds": 14.839,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/triviaqa/factual/results.jsonl",
+              "sha256": "9fb5e97aa8856bda917b45a2730d574c1440af882a6b0cf69653321c72d529ff"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/triviaqa/synonym/results.jsonl",
+              "sha256": "db3d8fc11cbc07be8d821aa47dfdc063e3125b206d72641da32f41e6cb810c38"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/triviaqa/graph/summary.json",
+              "sha256": "dd69fa3c8abca6f620fe815c6cf6cc456c7ed01dc63a3b73f8e63ee8130fb750"
+            }
+          }
+        },
+        {
+          "dataset": "2wiki",
+          "queries": 1000,
+          "paired_queries": 402,
+          "f1_clean_paired_queries": 175,
+          "ans_cfr": 0.7288557213930348,
+          "f1_cfr": 0.84,
+          "ans_delta_sum": 293,
+          "f1_delta_sum": 147,
+          "mean_modified_tokens": 5.171,
+          "graph_ok": 1000,
+          "graph_total": 1000,
+          "graph_coverage": 1.0,
+          "mean_graph_seconds": 5.923,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/2wiki/factual/results.jsonl",
+              "sha256": "6c11fe577a29bdd574c04dabda9aa1cc5e430ebf163c2a5b3344de1e6d8f2c0d"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/2wiki/synonym/results.jsonl",
+              "sha256": "dae992a5a317db8e9d6a2e57144d9d7b3f46ba3df20ccce293a80591b40f5c3e"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/2wiki/graph/summary.json",
+              "sha256": "569810221116d2ee8708f5f8c661826386f4f47eba4b6821faa4b4571df17488"
+            }
+          }
+        },
+        {
+          "dataset": "pubmedqa",
+          "queries": 1000,
+          "paired_queries": 113,
+          "f1_clean_paired_queries": 84,
+          "ans_cfr": 0.168141592920354,
+          "f1_cfr": 0.16666666666666666,
+          "ans_delta_sum": 19,
+          "f1_delta_sum": 14,
+          "mean_modified_tokens": 5.132,
+          "graph_ok": 1000,
+          "graph_total": 1000,
+          "graph_coverage": 1.0,
+          "mean_graph_seconds": 11.783,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/pubmedqa/factual/results.jsonl",
+              "sha256": "55701f5ce5a7167a95657a38ee8bd8b69cd98c0b2ec7ed3fc4c5249a7df5c3b0"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/pubmedqa/synonym/results.jsonl",
+              "sha256": "596f3e7d29b9b6c3a3cd3f72498efd9e3197f848d162a34d1c53801fc4d84aec"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/llama3.1-8b/pubmedqa/graph/summary.json",
+              "sha256": "2175bccb79e57975aabade7c0e5f7105853effb4cce46f00707499bd5296d9d3"
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "ans_cfr": 0.5335832552327398,
+        "f1_cfr": 0.6020260492040521,
+        "mean_modified_tokens": 4.588875,
+        "graph_coverage": 0.999625,
+        "paired_queries": 3201,
+        "f1_clean_paired_queries": 1382,
+        "dataset_macro_ans_cfr": 0.5505219686328047,
+        "dataset_macro_f1_cfr": 0.6615472948137825
+      }
+    },
+    {
+      "key": "mistral-nemo-12b",
+      "label": "Mistral-Nemo-12B",
+      "short_label": "Mistral",
+      "layout": "sweep",
+      "root": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b",
+      "datasets": [
+        {
+          "dataset": "hotpotqa",
+          "queries": 1000,
+          "paired_queries": 372,
+          "f1_clean_paired_queries": 172,
+          "ans_cfr": 0.6639784946236559,
+          "f1_cfr": 0.7209302325581395,
+          "ans_delta_sum": 247,
+          "f1_delta_sum": 124,
+          "mean_modified_tokens": 4.52,
+          "graph_ok": 995,
+          "graph_total": 1000,
+          "graph_coverage": 0.995,
+          "mean_graph_seconds": 9.153,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/hotpotqa/factual/results.jsonl",
+              "sha256": "a51738d8c37082eaec6011fc0d493c88685d242ad6966ce0d767f2e169ac07e7"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/hotpotqa/synonym/results.jsonl",
+              "sha256": "0f8936f89f7979cd24af1b98e1ad1006826cd3dda862a1e7458d5c23af62e5c5"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/hotpotqa/graph/summary.json",
+              "sha256": "910a31a560e902cf5b8d877e5a522f261ddfa652e850f060b8a5cbe9cc432e34"
+            }
+          }
+        },
+        {
+          "dataset": "timeqa",
+          "queries": 1000,
+          "paired_queries": 553,
+          "f1_clean_paired_queries": 203,
+          "ans_cfr": 0.7305605786618445,
+          "f1_cfr": 0.7980295566502463,
+          "ans_delta_sum": 404,
+          "f1_delta_sum": 162,
+          "mean_modified_tokens": 2.414,
+          "graph_ok": 990,
+          "graph_total": 1000,
+          "graph_coverage": 0.99,
+          "mean_graph_seconds": 7.42,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/timeqa/factual/results.jsonl",
+              "sha256": "81ebd04e973fb865cb809719fa237d8b377c11f0af911aafb2b956a9ab30ce08"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/timeqa/synonym/results.jsonl",
+              "sha256": "cee8e62aa1422d6f3323006c924bc85145b6042035651efa65d95a7d02b27cf1"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/timeqa/graph/summary.json",
+              "sha256": "47c071b6724bd92a1d24e5c26ba577ba4cd92784b6c1570340437ce53009f5a3"
+            }
+          }
+        },
+        {
+          "dataset": "finqa",
+          "queries": 1000,
+          "paired_queries": 53,
+          "f1_clean_paired_queries": 5,
+          "ans_cfr": 0.7547169811320755,
+          "f1_cfr": 0.6,
+          "ans_delta_sum": 40,
+          "f1_delta_sum": 3,
+          "mean_modified_tokens": 4.469,
+          "graph_ok": 980,
+          "graph_total": 1000,
+          "graph_coverage": 0.98,
+          "mean_graph_seconds": 23.643,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/finqa/factual/results.jsonl",
+              "sha256": "f20886e659222672cc4223c4d313eae0169a371416dc3c56f9093c69d189b755"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/finqa/synonym/results.jsonl",
+              "sha256": "d3f67e6d7b0204828181d2bea40a0ef94c839b061d10f18cc4aba8c3fe387312"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/finqa/graph/summary.json",
+              "sha256": "5aaf9772d6d00127d14349d7ccb8a591bd12c3ab90c2f574d7849b24540e56e2"
+            }
+          }
+        },
+        {
+          "dataset": "musique",
+          "queries": 1000,
+          "paired_queries": 351,
+          "f1_clean_paired_queries": 77,
+          "ans_cfr": 0.6581196581196581,
+          "f1_cfr": 0.7402597402597403,
+          "ans_delta_sum": 231,
+          "f1_delta_sum": 57,
+          "mean_modified_tokens": 2.935,
+          "graph_ok": 991,
+          "graph_total": 1000,
+          "graph_coverage": 0.991,
+          "mean_graph_seconds": 10.543,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/musique/factual/results.jsonl",
+              "sha256": "961a0bee4bc48681a2bb512a1898e464020f61645191fd8282ca315ec68e6cc9"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/musique/synonym/results.jsonl",
+              "sha256": "ef1aadb18c858509a51d8c2bed100bee37481c000428a34d8f332ad6bce705fe"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/musique/graph/summary.json",
+              "sha256": "fce83e245d688f46aabfd2fc8bec3d06832215d67bedee849dc730b354bc74a2"
+            }
+          }
+        },
+        {
+          "dataset": "quartz",
+          "queries": 1000,
+          "paired_queries": 836,
+          "f1_clean_paired_queries": 539,
+          "ans_cfr": 0.25478468899521534,
+          "f1_cfr": 0.29684601113172543,
+          "ans_delta_sum": 213,
+          "f1_delta_sum": 160,
+          "mean_modified_tokens": 3.18,
+          "graph_ok": 1000,
+          "graph_total": 1000,
+          "graph_coverage": 1.0,
+          "mean_graph_seconds": 3.798,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/quartz/factual/results.jsonl",
+              "sha256": "d4b6cedddeec7b5251b076ab546d75f8c0e4fe7e2df7be777721b4d94c4aff21"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/quartz/synonym/results.jsonl",
+              "sha256": "96bba02c65ac4e4130139d6b92e7d67ae1c95550860da21d838b1e0bd403e888"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/quartz/graph/summary.json",
+              "sha256": "8d5957e01a946e9c6ffc65a573e3a1a8d070be12df063aa88ac8457065b032a9"
+            }
+          }
+        },
+        {
+          "dataset": "triviaqa",
+          "queries": 1000,
+          "paired_queries": 230,
+          "f1_clean_paired_queries": 142,
+          "ans_cfr": 0.7304347826086957,
+          "f1_cfr": 0.8098591549295775,
+          "ans_delta_sum": 168,
+          "f1_delta_sum": 115,
+          "mean_modified_tokens": 12.038,
+          "graph_ok": 998,
+          "graph_total": 1000,
+          "graph_coverage": 0.998,
+          "mean_graph_seconds": 26.455,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/triviaqa/factual/results.jsonl",
+              "sha256": "9ec99656771c3bae517ec547d9c9dc91c5689e8e1cdc6120845518344f092798"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/triviaqa/synonym/results.jsonl",
+              "sha256": "f2e6b2c0896241d2319c42678a3ea2acab62c42e1b08b8edba00e21d784e7188"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/triviaqa/graph/summary.json",
+              "sha256": "b92035e4d44da28c40f6d3acd8569c25f50160c32315fbd647ae0d65743c3d94"
+            }
+          }
+        },
+        {
+          "dataset": "2wiki",
+          "queries": 1000,
+          "paired_queries": 400,
+          "f1_clean_paired_queries": 128,
+          "ans_cfr": 0.6675,
+          "f1_cfr": 0.7578125,
+          "ans_delta_sum": 267,
+          "f1_delta_sum": 97,
+          "mean_modified_tokens": 5.797,
+          "graph_ok": 987,
+          "graph_total": 1000,
+          "graph_coverage": 0.987,
+          "mean_graph_seconds": 8.838,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/2wiki/factual/results.jsonl",
+              "sha256": "22530be3c478d03bb438275b110c93aea0200fe6a8ff05072c110ac1baf91f7a"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/2wiki/synonym/results.jsonl",
+              "sha256": "4f0eb92ec215d51175fc17db445c791875b9b6810e22672d56d56e1944b19c70"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/2wiki/graph/summary.json",
+              "sha256": "22fb5557f84b4e34b25f92ce001dda239f5faba43f069b01e2b25853a7475a62"
+            }
+          }
+        },
+        {
+          "dataset": "pubmedqa",
+          "queries": 1000,
+          "paired_queries": 105,
+          "f1_clean_paired_queries": 68,
+          "ans_cfr": 0.08571428571428572,
+          "f1_cfr": 0.058823529411764705,
+          "ans_delta_sum": 9,
+          "f1_delta_sum": 4,
+          "mean_modified_tokens": 4.829,
+          "graph_ok": 1000,
+          "graph_total": 1000,
+          "graph_coverage": 1.0,
+          "mean_graph_seconds": 16.418,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/pubmedqa/factual/results.jsonl",
+              "sha256": "c2e46a8c448d174b341cf15b0a251f7b140ca9c1f7b3f60e0b3de37e72a38c18"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/pubmedqa/synonym/results.jsonl",
+              "sha256": "0490360fd3a37c548f335736b3f07743ee97fb9fe7c95621bc79d73658431d8d"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/mistral-nemo-12b/pubmedqa/graph/summary.json",
+              "sha256": "69ba90a30796ec56859a251dd414cf47e04517c118c7bbe90ac78bf60acf8ab3"
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "ans_cfr": 0.5444827586206896,
+        "f1_cfr": 0.5412293853073463,
+        "mean_modified_tokens": 5.02275,
+        "graph_coverage": 0.992625,
+        "paired_queries": 2900,
+        "f1_clean_paired_queries": 1334,
+        "dataset_macro_ans_cfr": 0.5682261837319288,
+        "dataset_macro_f1_cfr": 0.5978200906176492
+      }
+    },
+    {
+      "key": "qwen3-4b",
+      "label": "Qwen3-4B",
+      "short_label": "Qwen3",
+      "layout": "sweep",
+      "root": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b",
+      "datasets": [
+        {
+          "dataset": "hotpotqa",
+          "queries": 1000,
+          "paired_queries": 325,
+          "f1_clean_paired_queries": 154,
+          "ans_cfr": 0.6307692307692307,
+          "f1_cfr": 0.6948051948051948,
+          "ans_delta_sum": 205,
+          "f1_delta_sum": 107,
+          "mean_modified_tokens": 3.303,
+          "graph_ok": 989,
+          "graph_total": 1000,
+          "graph_coverage": 0.989,
+          "mean_graph_seconds": 5.611,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/hotpotqa/factual/results.jsonl",
+              "sha256": "5f02e6d4a44e9e1f9065a04fa4a443da6e928f1eeff1e9aeeb34f5550a8e2dc9"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/hotpotqa/synonym/results.jsonl",
+              "sha256": "160534642719a5ba4c81019a91b0ab3c6e6b6ce13185afc6a3a38229043feb63"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/hotpotqa/graph/summary.json",
+              "sha256": "52a151c96115b2ce0b8f8c2152017e32e2710d73067a9423ed97ac3d7725954a"
+            }
+          }
+        },
+        {
+          "dataset": "timeqa",
+          "queries": 1000,
+          "paired_queries": 411,
+          "f1_clean_paired_queries": 148,
+          "ans_cfr": 0.7226277372262774,
+          "f1_cfr": 0.8040540540540541,
+          "ans_delta_sum": 297,
+          "f1_delta_sum": 119,
+          "mean_modified_tokens": 1.946,
+          "graph_ok": 968,
+          "graph_total": 1000,
+          "graph_coverage": 0.968,
+          "mean_graph_seconds": 4.344,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/timeqa/factual/results.jsonl",
+              "sha256": "fbcc0dfb5cdfa09e32e5b1f145f06799848c1c433025c639ede6fe9a548bb97f"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/timeqa/synonym/results.jsonl",
+              "sha256": "2b24561e80d831c5fb74bb97b678724fa926f2414688c9014b1ac6e4534ea9db"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/timeqa/graph/summary.json",
+              "sha256": "b5879d0251faeee709a7b536c66e98799cc62997c0d5750eb7ec7bd9a91f92e8"
+            }
+          }
+        },
+        {
+          "dataset": "finqa",
+          "queries": 1000,
+          "paired_queries": 71,
+          "f1_clean_paired_queries": 1,
+          "ans_cfr": 0.28169014084507044,
+          "f1_cfr": 0.0,
+          "ans_delta_sum": 20,
+          "f1_delta_sum": 0,
+          "mean_modified_tokens": 3.338,
+          "graph_ok": 985,
+          "graph_total": 1000,
+          "graph_coverage": 0.985,
+          "mean_graph_seconds": 12.704,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/finqa/factual/results.jsonl",
+              "sha256": "c2a3255475d795cb787a9ed4f8f63bf6c0e47a38658503c9c1dee19a35599bda"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/finqa/synonym/results.jsonl",
+              "sha256": "0b747d658767ad907dd4f570804243133a48402e5b3253be707e8c571886da9a"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/finqa/graph/summary.json",
+              "sha256": "cfaae88cc18a21653518fa4531298723e7bbdeaa09604a7d2225a06b6e63d227"
+            }
+          }
+        },
+        {
+          "dataset": "musique",
+          "queries": 1000,
+          "paired_queries": 257,
+          "f1_clean_paired_queries": 61,
+          "ans_cfr": 0.6498054474708171,
+          "f1_cfr": 0.639344262295082,
+          "ans_delta_sum": 167,
+          "f1_delta_sum": 39,
+          "mean_modified_tokens": 2.683,
+          "graph_ok": 962,
+          "graph_total": 1000,
+          "graph_coverage": 0.962,
+          "mean_graph_seconds": 6.692,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/musique/factual/results.jsonl",
+              "sha256": "100ed133f9fd330a3771626f8fc8f3f43807c02f03a2192b723cfd4129907722"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/musique/synonym/results.jsonl",
+              "sha256": "75176853d10a6995ef046f031cf79fd686c7d73a7ac8b4ba58ec12dee27de6b2"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/musique/graph/summary.json",
+              "sha256": "edf1e8e084f1bc50084caa781b92d25453e6b5deeb06ca9224e24737e33a55df"
+            }
+          }
+        },
+        {
+          "dataset": "quartz",
+          "queries": 1000,
+          "paired_queries": 882,
+          "f1_clean_paired_queries": 708,
+          "ans_cfr": 0.1564625850340136,
+          "f1_cfr": 0.1652542372881356,
+          "ans_delta_sum": 138,
+          "f1_delta_sum": 117,
+          "mean_modified_tokens": 4.249,
+          "graph_ok": 980,
+          "graph_total": 1000,
+          "graph_coverage": 0.98,
+          "mean_graph_seconds": 2.679,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/quartz/factual/results.jsonl",
+              "sha256": "6d7be3f64c6f3f11bf0bc44fc7c2c825200d7dba94ca157a7288f550b5b4126a"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/quartz/synonym/results.jsonl",
+              "sha256": "fea89e4d0cfff925cc098f01f5fe180c82c6c7d3133b89c4d4fd2967a964e789"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/quartz/graph/summary.json",
+              "sha256": "15671d49c1d84884fa5f0e96ce859c74573a8be1a25f504c4571482d80506b98"
+            }
+          }
+        },
+        {
+          "dataset": "triviaqa",
+          "queries": 1000,
+          "paired_queries": 269,
+          "f1_clean_paired_queries": 173,
+          "ans_cfr": 0.6319702602230484,
+          "f1_cfr": 0.7109826589595376,
+          "ans_delta_sum": 170,
+          "f1_delta_sum": 123,
+          "mean_modified_tokens": 5.133,
+          "graph_ok": 986,
+          "graph_total": 1000,
+          "graph_coverage": 0.986,
+          "mean_graph_seconds": 16.156,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/triviaqa/factual/results.jsonl",
+              "sha256": "57e894a43e701719474ff7939067d78c54a5233f8b3ea400f94d4917d25bfb11"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/triviaqa/synonym/results.jsonl",
+              "sha256": "afc99e63e12e202a3771aff0709f929de01aaa7bb138b495d754dedf2e7b5dae"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/triviaqa/graph/summary.json",
+              "sha256": "64c4ee2c68c98157d70213b81780af8c7336a0ffef51a3db666a576e81e2e2f9"
+            }
+          }
+        },
+        {
+          "dataset": "2wiki",
+          "queries": 1000,
+          "paired_queries": 306,
+          "f1_clean_paired_queries": 131,
+          "ans_cfr": 0.6895424836601307,
+          "f1_cfr": 0.7938931297709924,
+          "ans_delta_sum": 211,
+          "f1_delta_sum": 104,
+          "mean_modified_tokens": 4.191,
+          "graph_ok": 995,
+          "graph_total": 1000,
+          "graph_coverage": 0.995,
+          "mean_graph_seconds": 5.396,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/2wiki/factual/results.jsonl",
+              "sha256": "9e5516038b51a41b0688a6b75409a29ea042f737569f83bca95995409baaa504"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/2wiki/synonym/results.jsonl",
+              "sha256": "3aded70a80c145b952f0f87fb65a760d4624d500821afd79ce2eda8a54308a5e"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/2wiki/graph/summary.json",
+              "sha256": "5b2f5eed9d971fff2ad7ecfb78a081df77e6dad69d319ba25132ee73fb249291"
+            }
+          }
+        },
+        {
+          "dataset": "pubmedqa",
+          "queries": 1000,
+          "paired_queries": 52,
+          "f1_clean_paired_queries": 38,
+          "ans_cfr": 0.23076923076923078,
+          "f1_cfr": 0.3157894736842105,
+          "ans_delta_sum": 12,
+          "f1_delta_sum": 12,
+          "mean_modified_tokens": 7.05,
+          "graph_ok": 995,
+          "graph_total": 1000,
+          "graph_coverage": 0.995,
+          "mean_graph_seconds": 12.992,
+          "artifacts": {
+            "factual": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/pubmedqa/factual/results.jsonl",
+              "sha256": "e1c5525445f0e2c70488062791e25472b551a5a7c6535bb163b3dfcd6e50dc08"
+            },
+            "control": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/pubmedqa/synonym/results.jsonl",
+              "sha256": "e15e8fd2bd3c5b2bc92a7c9a4e57f01c6c647f656d42cf4ec6bb603f86f96ddc"
+            },
+            "graph_summary": {
+              "path": "/data1/yujia/CausalityRAG/out/model_sensitivity_v1/qwen3-4b/pubmedqa/graph/summary.json",
+              "sha256": "a0eb0ed96fd7eb6db0484624a869bf9125d16e7d7b7ad2b4083cc6007e08714d"
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "ans_cfr": 0.4741546832491255,
+        "f1_cfr": 0.4391796322489392,
+        "mean_modified_tokens": 3.986625,
+        "graph_coverage": 0.9825,
+        "paired_queries": 2573,
+        "f1_clean_paired_queries": 1414,
+        "dataset_macro_ans_cfr": 0.4992046394997274,
+        "dataset_macro_f1_cfr": 0.5155153763571508
+      }
+    }
+  ]
+}
