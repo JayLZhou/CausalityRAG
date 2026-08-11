@@ -125,6 +125,7 @@ def dataset_payload(root: Path, dataset: str) -> dict[str, Any]:
 
     if len(valid_counts) + invalid_clean != 1000:
         raise ValueError(f"{dataset}: valid/invalid clean partition is incomplete")
+    quartiles = statistics.quantiles(valid_counts, n=4, method="inclusive")
     return {
         "dataset": dataset,
         "label": DATASET_LABELS[dataset],
@@ -138,6 +139,11 @@ def dataset_payload(root: Path, dataset: str) -> dict[str, Any]:
         "mean_edited_tokens_valid_clean": (
             statistics.fmean(valid_counts) if valid_counts else 0.0
         ),
+        "min_edited_tokens_valid_clean": min(valid_counts),
+        "q1_edited_tokens_valid_clean": quartiles[0],
+        "median_edited_tokens_valid_clean": statistics.median(valid_counts),
+        "q3_edited_tokens_valid_clean": quartiles[2],
+        "max_edited_tokens_valid_clean": max(valid_counts),
         "median_edited_tokens_all_1000": reflow_audit["median"],
         "p95_edited_tokens_all_1000": reflow_audit["p95"],
         "max_edited_tokens_all_1000": reflow_audit["max"],
@@ -201,6 +207,18 @@ def render_tex(payload: dict[str, Any]) -> str:
         f"{{{float(row['mean_edited_tokens_valid_clean']):.3f}}}"
         for row in rows
     )
+    for position, row in enumerate(rows, start=1):
+        macro = DATASET_MACROS[row["dataset"]]
+        lines.append(
+            f"\\def\\TableThree{macro}TokenBoxplot{{"
+            f"draw position={position},"
+            f"lower whisker={float(row['min_edited_tokens_valid_clean']):.3f},"
+            f"lower quartile={float(row['q1_edited_tokens_valid_clean']):.3f},"
+            f"median={float(row['median_edited_tokens_valid_clean']):.3f},"
+            f"upper quartile={float(row['q3_edited_tokens_valid_clean']):.3f},"
+            f"upper whisker={float(row['max_edited_tokens_valid_clean']):.3f}"
+            "}"
+        )
     lines.append("")
     return "\n".join(lines)
 

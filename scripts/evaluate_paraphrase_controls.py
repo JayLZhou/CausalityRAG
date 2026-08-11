@@ -14,6 +14,13 @@ from threading import Lock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from causalityrag.evaluation_metrics import (
+    answer_changed,
+    clean_correct,
+    correctness_lost,
+    gold_answer_spec,
+    valid_answer,
+)
 from causalityrag.io import gold_answers, load_records, record_id
 from causalityrag.paraphrase_control import excluded_from_paraphrase_control
 from causalityrag.reader import (
@@ -116,7 +123,7 @@ def evaluate_selected(
     reader_mode = getattr(reader, "reader_mode", "short_answer")
     clean_answer_raw = clean_answer
     gold_answer_raw = gold_answer
-    accepted_gold_answers_raw = gold_answers(record)
+    accepted_gold_answers_raw = gold_answers(record) or [gold_answer_raw]
     try:
         clean_answer = canonicalize_reader_answer(
             question,
@@ -324,6 +331,7 @@ def evaluate_selected(
 def summarize(
     rows: list[dict],
     *,
+    dataset: str = "",
     reader_mode: str | None = None,
 ) -> dict:
     mode = (
@@ -331,19 +339,19 @@ def summarize(
         or os.environ.get("CAUSALITYRAG_READER_MODE", "short_answer")
     ).strip().lower()
 
-    def accuracy_match(left: str, right: str) -> bool:
-        if mode == "quartz":
-            return answers_exact_match(left, right)
-        return answers_match(left, right)
-
     def valid_method(method: dict) -> bool:
         return bool(method.get("reader_called")) and not str(
             method.get("status", "")
-        ).startswith("protocol_violation")
+        ).startswith("protocol_violation") and valid_answer(
+            method.get("edited_answer", "")
+        )
 
-    def aliases(parent: dict) -> list[str]:
-        values = parent.get("gold_answers") or [parent.get("gold_answer", "")]
-        return [str(value) for value in values if str(value).strip()]
+    def invalid_method(method: dict) -> bool:
+        status = str(method.get("status", ""))
+        called = bool(method.get("reader_called"))
+        return status.startswith("protocol_violation") or (
+            called and not valid_answer(method.get("edited_answer", ""))
+        )
 
     def valid_clean(parent: dict) -> bool:
         status = str(parent.get("evaluation_status", ""))
@@ -352,19 +360,6 @@ def summarize(
             and not status.startswith("protocol_violation_invalid_clean")
             and status != "invalid_clean_answer"
         )
-
-    def best_f1(answer: str, parent: dict) -> float:
-        accepted = aliases(parent)
-        return max(
-            (answer_token_f1(answer, gold) for gold in accepted),
-            default=0.0,
-        )
-
-    def any_em(answer: str, parent: dict) -> bool:
-        return any(answers_exact_match(answer, gold) for gold in aliases(parent))
-
-    def any_acc(answer: str, parent: dict) -> bool:
-        return any(accuracy_match(answer, gold) for gold in aliases(parent))
 
     method_names = sorted({
         name for row in rows for name in row.get("methods", {})
@@ -386,61 +381,90 @@ def summarize(
             for parent, method in pairs
             if valid_clean(parent)
         ]
-        f1_clean_correct = [
+        answer_population = [
             (parent, method)
             for parent, method in valid_clean_pairs
-            if best_f1(str(parent.get("clean_answer", "")), parent)
-            >= 1.0 - 1e-12
+            if not invalid_method(method)
+        ]
+        f1_clean_correct = [
+            (parent, method)
+            for parent, method in answer_population
+            if clean_correct(
+                "f1",
+                parent.get("clean_answer", ""),
+                gold_answer_spec(parent, dataset),
+                reader_mode=mode,
+            )
         ]
         em_clean_correct = [
             (parent, method)
-            for parent, method in valid_clean_pairs
-            if any_em(str(parent.get("clean_answer", "")), parent)
+            for parent, method in answer_population
+            if clean_correct(
+                "em",
+                parent.get("clean_answer", ""),
+                gold_answer_spec(parent, dataset),
+                reader_mode=mode,
+            )
         ]
         acc_clean_correct = [
             (parent, method)
-            for parent, method in valid_clean_pairs
-            if any_acc(str(parent.get("clean_answer", "")), parent)
+            for parent, method in answer_population
+            if clean_correct(
+                "acc",
+                parent.get("clean_answer", ""),
+                gold_answer_spec(parent, dataset),
+                reader_mode=mode,
+            )
         ]
-
-        def valid_correct(population: list[tuple[dict, dict]]) -> list[tuple[dict, dict]]:
-            return [
-                (parent, method)
-                for parent, method in population
-                if valid_method(method)
-                and str(method.get("edited_answer", "")).strip()
-            ]
-
-        valid_f1_correct = valid_correct(f1_clean_correct)
-        valid_em_correct = valid_correct(em_clean_correct)
-        valid_acc_correct = valid_correct(acc_clean_correct)
         f1_flips = sum(
-            best_f1(str(method.get("edited_answer", "")), parent)
-            < 1.0 - 1e-12
-            for parent, method in valid_f1_correct
+            valid_method(method)
+            and correctness_lost(
+                "f1",
+                parent.get("clean_answer", ""),
+                method.get("edited_answer", ""),
+                gold_answer_spec(parent, dataset),
+                reader_mode=mode,
+            )
+            for parent, method in f1_clean_correct
         )
         em_flips = sum(
-            not any_em(str(method.get("edited_answer", "")), parent)
-            for parent, method in valid_em_correct
+            valid_method(method)
+            and correctness_lost(
+                "em",
+                parent.get("clean_answer", ""),
+                method.get("edited_answer", ""),
+                gold_answer_spec(parent, dataset),
+                reader_mode=mode,
+            )
+            for parent, method in em_clean_correct
         )
         acc_flips = sum(
-            not any_acc(str(method.get("edited_answer", "")), parent)
-            for parent, method in valid_acc_correct
+            valid_method(method)
+            and correctness_lost(
+                "acc",
+                parent.get("clean_answer", ""),
+                method.get("edited_answer", ""),
+                gold_answer_spec(parent, dataset),
+                reader_mode=mode,
+            )
+            for parent, method in acc_clean_correct
         )
         answer_flips = sum(
-            bool(method.get("answer_flip"))
-            for parent, method in valid_clean_pairs
-            if valid_method(method)
-            and str(method.get("edited_answer", "")).strip()
+            valid_method(method)
+            and answer_changed(
+                parent.get("clean_answer", ""),
+                method.get("edited_answer", ""),
+            )
+            for parent, method in answer_population
         )
         methods[name] = {
             "queries": len(values),
             "executed_queries": len(executed),
             "valid_answer_queries": len(valid),
-            "answer_denominator_queries": len(valid_clean_pairs),
+            "answer_denominator_queries": len(answer_population),
             "answer_flips": answer_flips,
             "answer_flip_rate_itt": (
-                answer_flips / max(1, len(valid_clean_pairs))
+                answer_flips / max(1, len(answer_population))
             ),
             "f1_clean_correct_queries": len(f1_clean_correct),
             "em_clean_correct_queries": len(em_clean_correct),

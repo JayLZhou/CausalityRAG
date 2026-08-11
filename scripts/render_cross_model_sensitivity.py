@@ -14,7 +14,14 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.reader import MEDQA_CHOICES, answer_token_f1
+from causalityrag.evaluation_metrics import (
+    answer_changed,
+    correctness_lost,
+    gold_answer_spec,
+    gold_f1,
+    valid_answer,
+)
+from scripts.audit_table3_token_counts import reflow_policy_count
 from scripts.reprocess_quartz_choice_results import reprocess as reprocess_quartz
 
 
@@ -26,14 +33,14 @@ DATASETS = (
     ("quartz", "QuaRTz"),
     ("triviaqa", "TriviaQA"),
     ("2wiki", "2Wiki"),
-    ("medqa", "MedQA"),
+    ("popqa", "PopQA"),
 )
 
 MAIN_DATASETS = (
     ("hotpotqa", "Hotpot"),
     ("finqa", "FinQA"),
     ("triviaqa", "Trivia"),
-    ("medqa", "MedQA"),
+    ("popqa", "PopQA"),
 )
 
 
@@ -82,7 +89,11 @@ def artifact_paths(model: ModelSpec, dataset: str) -> tuple[Path, Path, Path]:
         return (
             base / "factual/results.jsonl",
             base / "synonym/results.jsonl",
-            base / "graph/summary.json",
+            first_existing((
+                base / "final/frontier.jsonl",
+                base / "final/graphs.summary.json",
+                base / "graph/summary.json",
+            )),
         )
     if model.layout != "default":
         raise ValueError(f"unknown layout: {model.layout}")
@@ -100,6 +111,7 @@ def artifact_paths(model: ModelSpec, dataset: str) -> tuple[Path, Path, Path]:
         )
     if dataset == "hotpotqa":
         factual = first_existing((
+            base / "methods/reflow/results_top5_1000.jsonl",
             base / "audits/final_top10pool_k5/reflow_1000_v2.jsonl",
             base / "audits/final_top10pool_k5/reflow_1000.jsonl",
         ))
@@ -126,6 +138,110 @@ def control_record(row: dict) -> dict:
     if "reflow" not in methods:
         raise KeyError(f"missing reflow control for query {row.get('id')}")
     return methods["reflow"]
+
+
+def accepted_answers(row: dict) -> list[str]:
+    values = row.get("gold_answers") or [row.get("gold_answer", "")]
+    return [str(value) for value in values if str(value).strip()]
+
+
+def valid_text(value: object) -> bool:
+    return valid_answer(value)
+
+
+def invalid_factual_answer(row: dict, gold_record: dict | None = None, dataset: str = "") -> bool:
+    status = str(row.get("evaluation_status", ""))
+    spec = gold_answer_spec(gold_record or row, dataset)
+    if not valid_text(row.get("clean_answer", "")) or not spec.is_valid:
+        return True
+    if status in {
+        "invalid_clean_answer",
+        "protocol_violation_invalid_clean_or_gold_answer",
+        "protocol_violation_invalid_reader_answer",
+    }:
+        return True
+    return int(row.get("reader_calls", 0)) > 0 and not valid_text(
+        row.get("edited_answer", "")
+    )
+
+
+def valid_clean_for_token_budget(row: dict) -> bool:
+    if "eligible" in row:
+        return bool(row.get("eligible"))
+    return (
+        valid_text(row.get("clean_answer", ""))
+        and bool(accepted_answers(row))
+        and str(row.get("evaluation_status", ""))
+        not in {
+            "invalid_clean_answer",
+            "protocol_violation_invalid_clean_or_gold_answer",
+        }
+    )
+
+
+def terminal_token_count(row: dict) -> int:
+    count, _ = reflow_policy_count(row)
+    if count is None:
+        raise ValueError(f"missing terminal token count for query {row.get('id')}")
+    return count
+
+
+def invalid_control_answer(row: dict) -> bool:
+    status = str(row.get("status", ""))
+    if status in {
+        "invalid_empty_answer",
+        "protocol_violation_invalid_clean_or_gold_answer",
+        "protocol_violation_invalid_reader_answer",
+    }:
+        return True
+    return bool(row.get("reader_called")) and not valid_text(
+        row.get("edited_answer", "")
+    )
+
+
+def best_gold_f1(
+    answer: object,
+    row: dict,
+    dataset: str = "",
+    gold_record: dict | None = None,
+) -> float:
+    return gold_f1(answer, gold_answer_spec(gold_record or row, dataset))
+
+
+def factual_answer_flip(row: dict, dataset: str) -> bool:
+    if "reader_calls" in row and int(row.get("reader_calls", 0)) <= 0:
+        return False
+    return answer_changed(
+        row.get("clean_answer", ""), row.get("edited_answer", "")
+    )
+
+
+def control_answer_flip(factual: dict, control: dict, dataset: str) -> bool:
+    if "reader_called" in control and not control.get("reader_called"):
+        return False
+    if not valid_text(control.get("edited_answer", "")):
+        return bool(control.get("answer_flip"))
+    return answer_changed(
+        factual.get("clean_answer", ""), control.get("edited_answer", "")
+    )
+
+
+def control_f1_flip(
+    factual: dict,
+    control: dict,
+    dataset: str,
+    gold_record: dict | None = None,
+) -> bool:
+    if "reader_called" in control and not control.get("reader_called"):
+        return False
+    if not valid_text(control.get("edited_answer", "")):
+        return bool(control.get("f1_flip"))
+    return correctness_lost(
+        "f1",
+        factual.get("clean_answer", ""),
+        control.get("edited_answer", ""),
+        gold_answer_spec(gold_record or factual, dataset),
+    )
 
 
 def graph_coverage(summary: dict) -> tuple[int, int, float]:
@@ -158,6 +274,8 @@ def summarize_dataset(
     model: ModelSpec,
     dataset: str,
     *,
+    retrieval_records: list[dict],
+    retrieval_path: Path | None = None,
     quartz_records: list[dict] | None = None,
 ) -> dict:
     factual_path, control_path, graph_path = artifact_paths(model, dataset)
@@ -215,6 +333,7 @@ def summarize_dataset(
 
     factual_rows = {str(row["id"]): row for row in factual_list}
     control_rows = {str(row["id"]): row for row in control_list}
+    retrieval_rows = {str(row["id"]): row for row in retrieval_records}
     if factual_rows.keys() != control_rows.keys():
         missing_control = sorted(factual_rows.keys() - control_rows.keys())
         missing_factual = sorted(control_rows.keys() - factual_rows.keys())
@@ -222,64 +341,86 @@ def summarize_dataset(
             f"factual/control query mismatch for {model.key}/{dataset}: "
             f"missing_control={missing_control[:3]} missing_factual={missing_factual[:3]}"
         )
-    paired = [
-        (factual_rows[query_id], control_record(control_rows[query_id]))
+    if factual_rows.keys() != retrieval_rows.keys():
+        raise ValueError(
+            f"factual/retrieval query mismatch for {model.key}/{dataset}"
+        )
+    all_pairs = [
+        (
+            factual_rows[query_id],
+            control_record(control_rows[query_id]),
+            retrieval_rows[query_id],
+        )
         for query_id in factual_rows
     ]
 
-    if not paired:
+    if not all_pairs:
         raise ValueError(f"no paired factual/control records for {model.key}/{dataset}")
-    if dataset == "medqa":
-        allowed = set(MEDQA_CHOICES)
-        for factual, control in paired:
-            query_id = str(factual.get("id", ""))
-            for field in ("clean_answer", "gold_answer", "edited_answer"):
-                value = str(factual.get(field, "")).strip().upper()
-                if value not in allowed:
-                    raise ValueError(
-                        f"invalid MedQA {field} for {model.key}/{query_id}: {value!r}"
-                    )
-            control_answer = str(control.get("edited_answer", "")).strip().upper()
-            if control_answer and control_answer not in allowed:
-                raise ValueError(
-                    f"invalid MedQA control answer for {model.key}/{query_id}: "
-                    f"{control_answer!r}"
-                )
+    paired = [
+        (factual, control, record)
+        for factual, control, record in all_pairs
+        if not invalid_factual_answer(factual, record, dataset)
+        and not invalid_control_answer(control)
+    ]
+    if not paired:
+        raise ValueError(
+            f"no valid factual/control answer pairs for {model.key}/{dataset}"
+        )
 
     ans_deltas = [
-        int(bool(factual.get("verified_flip"))) - int(bool(control.get("answer_flip")))
-        for factual, control in paired
+        int(factual_answer_flip(factual, dataset))
+        - int(control_answer_flip(factual, control, dataset))
+        for factual, control, _ in paired
     ]
     f1_pairs = [
-        (factual, control)
-        for factual, control in paired
-        if answer_token_f1(str(factual.get("clean_answer", "")), str(factual.get("gold_answer", ""))) == 1.0
+        (factual, control, record)
+        for factual, control, record in paired
+        if best_gold_f1(
+            factual.get("clean_answer", ""), factual, dataset, record
+        )
+        >= 1.0 - 1e-12
     ]
     f1_deltas = [
         int(
-            answer_token_f1(
-                str(factual.get("edited_answer", "")), str(factual.get("gold_answer", ""))
+            (
+                "reader_calls" not in factual
+                or int(factual.get("reader_calls", 0)) > 0
             )
-            < 1.0
+            and correctness_lost(
+                "f1",
+                factual.get("clean_answer", ""),
+                factual.get("edited_answer", ""),
+                gold_answer_spec(record, dataset),
+            )
         )
-        - int(bool(control.get("f1_flip")))
-        for factual, control in f1_pairs
+        - int(control_f1_flip(factual, control, dataset, record))
+        for factual, control, record in f1_pairs
     ]
 
     graph_ok, graph_total, coverage, mean_graph_seconds = load_graph_coverage(graph_path)
     all_factual = list(factual_rows.values())
+    token_budget_rows = [
+        row for row in all_factual if valid_clean_for_token_budget(row)
+    ]
+    token_counts = [terminal_token_count(row) for row in token_budget_rows]
+    if not token_counts:
+        raise ValueError(
+            f"no valid-clean token budgets for {model.key}/{dataset}"
+        )
     result = {
         "dataset": dataset,
         "queries": len(all_factual),
+        "raw_paired_queries": len(all_pairs),
         "paired_queries": len(paired),
+        "excluded_invalid_answer_pairs": len(all_pairs) - len(paired),
         "f1_clean_paired_queries": len(f1_pairs),
         "ans_cfr": statistics.fmean(ans_deltas),
         "f1_cfr": statistics.fmean(f1_deltas) if f1_deltas else None,
         "ans_delta_sum": sum(ans_deltas),
         "f1_delta_sum": sum(f1_deltas),
-        "mean_modified_tokens": statistics.fmean(
-            int(row.get("n_modified_tokens", 0)) for row in all_factual
-        ),
+        "token_budget_queries": len(token_counts),
+        "edited_token_sum": sum(token_counts),
+        "mean_modified_tokens": statistics.fmean(token_counts),
         "graph_ok": graph_ok,
         "graph_total": graph_total,
         "graph_coverage": coverage,
@@ -288,6 +429,10 @@ def summarize_dataset(
             "factual": {"path": str(factual_path), "sha256": sha256(factual_path)},
             "control": {"path": str(control_path), "sha256": sha256(control_path)},
             "graph_summary": {"path": str(graph_path), "sha256": sha256(graph_path)},
+            "retrieval": {
+                "path": str(retrieval_path) if retrieval_path else None,
+                "sha256": sha256(retrieval_path) if retrieval_path else None,
+            },
         },
     }
     if quartz_report is not None:
@@ -299,17 +444,17 @@ def aggregate_results(rows: list[dict]) -> dict:
     f1_rows = [row for row in rows if row["f1_cfr"] is not None]
     paired_queries = sum(row["paired_queries"] for row in rows)
     f1_queries = sum(row["f1_clean_paired_queries"] for row in rows)
-    total_queries = sum(row["queries"] for row in rows)
+    token_budget_queries = sum(row["token_budget_queries"] for row in rows)
     graph_total = sum(row["graph_total"] for row in rows)
     return {
         "ans_cfr": sum(row["ans_delta_sum"] for row in rows) / paired_queries,
         "f1_cfr": sum(row["f1_delta_sum"] for row in rows) / f1_queries,
-        "mean_modified_tokens": sum(
-            row["mean_modified_tokens"] * row["queries"] for row in rows
-        ) / total_queries,
+        "mean_modified_tokens": sum(row["edited_token_sum"] for row in rows)
+        / token_budget_queries,
         "graph_coverage": sum(row["graph_ok"] for row in rows) / graph_total,
         "paired_queries": paired_queries,
         "f1_clean_paired_queries": f1_queries,
+        "token_budget_queries": token_budget_queries,
         "dataset_macro_ans_cfr": statistics.fmean(row["ans_cfr"] for row in rows),
         "dataset_macro_f1_cfr": statistics.fmean(row["f1_cfr"] for row in f1_rows),
     }
@@ -386,6 +531,16 @@ def parse_model(value: str) -> ModelSpec:
     return ModelSpec(key, label, short_label, Path(root), layout)
 
 
+def parse_retrieval(value: str) -> tuple[str, Path]:
+    if "=" not in value:
+        raise argparse.ArgumentTypeError("retrieval must be DATASET=PATH")
+    dataset, path = value.split("=", 1)
+    dataset = dataset.strip().lower()
+    if dataset not in {name for name, _ in DATASETS}:
+        raise argparse.ArgumentTypeError(f"unsupported retrieval dataset: {dataset}")
+    return dataset, Path(path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", action="append", type=parse_model, required=True)
@@ -393,7 +548,18 @@ def main() -> None:
     parser.add_argument("--out-values-tex", type=Path, required=True)
     parser.add_argument("--out-appendix-tex", type=Path, required=True)
     parser.add_argument("--quartz-retrieval", type=Path)
+    parser.add_argument(
+        "--retrieval",
+        action="append",
+        type=parse_retrieval,
+        default=[],
+        help="frozen benchmark rows as DATASET=PATH; may be repeated",
+    )
     args = parser.parse_args()
+
+    retrieval_paths = dict(args.retrieval)
+    if len(retrieval_paths) != len(args.retrieval):
+        raise ValueError("duplicate --retrieval dataset")
 
     quartz_retrieval = args.quartz_retrieval
     if quartz_retrieval is None:
@@ -410,7 +576,29 @@ def main() -> None:
         raise FileNotFoundError(
             "QuaRTz frozen retrieval is required; pass --quartz-retrieval"
         )
-    quartz_records = list(iter_jsonl(quartz_retrieval))
+    retrieval_paths.setdefault("quartz", quartz_retrieval)
+    default_models = [model for model in args.model if model.layout == "default"]
+    for dataset, _ in DATASETS:
+        if dataset in retrieval_paths:
+            continue
+        candidate = next(
+            (
+                model.root / dataset / "retrieval/top10_1000.jsonl"
+                for model in default_models
+                if (model.root / dataset / "retrieval/top10_1000.jsonl").is_file()
+            ),
+            None,
+        )
+        if candidate is None:
+            raise FileNotFoundError(
+                f"frozen retrieval is required for {dataset}; pass --retrieval"
+            )
+        retrieval_paths[dataset] = candidate
+    retrieval_records = {
+        dataset: list(iter_jsonl(path))
+        for dataset, path in retrieval_paths.items()
+    }
+    quartz_records = retrieval_records["quartz"]
 
     rendered_models = []
     for model in args.model:
@@ -418,6 +606,8 @@ def main() -> None:
             summarize_dataset(
                 model,
                 dataset,
+                retrieval_records=retrieval_records[dataset],
+                retrieval_path=retrieval_paths[dataset],
                 quartz_records=quartz_records if dataset == "quartz" else None,
             )
             for dataset, _ in DATASETS
@@ -437,13 +627,22 @@ def main() -> None:
         "metric_contract": {
             "ans_cfr": (
                 "paired factual answer flip minus paired synonym-control answer flip "
-                "over all query records; unsupported or unexecuted interventions contribute zero"
+                "over valid answer pairs; invalid reader answers are excluded, while "
+                "unsupported or unexecuted interventions contribute zero; every "
+                "dataset uses the same gold-free normalized clean-versus-edited "
+                "answer mismatch"
             ),
             "f1_cfr": (
-                "same paired difference restricted to queries with clean token-F1 equal to one; "
+                "same paired difference restricted to queries whose clean answer has token-F1 "
+                "one under the benchmark gold protocol; PopQA and TriviaQA accept "
+                "any frozen alias, while TimeQA evaluates the full conjunctive answer; "
                 "unsupported or unexecuted interventions contribute zero"
             ),
-            "mean_modified_tokens": "mean final attempted intervention size over all 1,000 queries",
+            "mean_modified_tokens": (
+                "mean terminal attempted intervention size over valid-clean queries; "
+                "failed flips use their largest saved attempt and invalid clean answers "
+                "are excluded"
+            ),
             "main_aggregation": "per-dataset paired queries for four representative datasets",
             "appendix_aggregation": "per-dataset paired queries for all eight datasets",
             "diagnostic": "unweighted dataset macros are retained in JSON but not plotted",

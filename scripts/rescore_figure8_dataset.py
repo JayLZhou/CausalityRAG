@@ -13,10 +13,14 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.io import gold_answers, load_records, record_id
+from causalityrag.evaluation_metrics import (
+    gold_accuracy,
+    gold_answer_spec,
+    valid_answer,
+)
+from causalityrag.io import load_records, record_id
 from causalityrag.reader import ReaderProtocolError, canonicalize_reader_answer
 from scripts.audit_table3_token_counts import reflow_policy_count
-from scripts.evaluate_fixed_budget_acc import answer_is_correct
 from scripts.evaluate_reflow import valid_clean_answer
 
 
@@ -115,14 +119,6 @@ def discover_sources(
     return selected
 
 
-def canonical_answers(record: dict, reader_mode: str) -> list[str]:
-    question = str(record.get("question", ""))
-    return [
-        canonicalize_reader_answer(question, answer, reader_mode=reader_mode)
-        for answer in gold_answers(record)
-    ]
-
-
 def canonical_answer(record: dict, answer: object, reader_mode: str) -> str:
     return canonicalize_reader_answer(
         str(record.get("question", "")),
@@ -135,6 +131,7 @@ def prepare_population(
     records: list[dict],
     reflow_rows: list[dict],
     *,
+    dataset: str,
     reader_mode: str,
 ) -> tuple[dict[str, dict], dict]:
     records_by_id = {record_id(row): row for row in records}
@@ -147,47 +144,41 @@ def prepare_population(
     reflow_flips = 0
     for identifier, record in records_by_id.items():
         row = reflow_by_id[identifier]
-        question = str(record.get("question", ""))
         try:
-            accepted = canonical_answers(record, reader_mode)
             clean = canonical_answer(
                 record, row.get("clean_answer", ""), reader_mode
             )
         except ReaderProtocolError:
             continue
-        if not valid_clean_answer(clean) or not accepted:
+        spec = gold_answer_spec(record, dataset)
+        if not valid_clean_answer(clean) or not spec.is_valid:
             continue
-        if not any(
-            answer_is_correct(
-                question, clean, [gold], reader_mode=reader_mode
-            )
-            for gold in accepted
-        ):
+        if not gold_accuracy(clean, spec, reader_mode=reader_mode):
             continue
         population[identifier] = {
             "record": record,
-            "accepted": accepted,
+            "gold_spec": spec,
             "clean_answer": clean,
         }
 
         status = str(row.get("evaluation_status", ""))
-        if int(row.get("reader_calls", 0)) <= 0 or status.startswith(
-            "protocol_violation"
-        ):
+        called = int(row.get("reader_calls", 0)) > 0
+        if status.startswith("protocol_violation"):
             continue
-        try:
-            edited = canonical_answer(
-                record, row.get("edited_answer", ""), reader_mode
-            )
-        except ReaderProtocolError:
-            continue
-        if not valid_clean_answer(edited):
-            continue
+        edited = ""
+        if called:
+            try:
+                edited = canonical_answer(
+                    record, row.get("edited_answer", ""), reader_mode
+                )
+            except ReaderProtocolError:
+                continue
+            if not valid_answer(edited):
+                continue
         valid_reflow_rows.append(row)
         reflow_flips += int(
-            not answer_is_correct(
-                question, edited, accepted, reader_mode=reader_mode
-            )
+            called
+            and not gold_accuracy(edited, spec, reader_mode=reader_mode)
         )
 
     if not population or not valid_reflow_rows:
@@ -214,14 +205,20 @@ def rescore_entry(
     entry: dict,
     population_row: dict,
     *,
+    dataset: str,
     reader_mode: str,
 ) -> tuple[bool, bool, int]:
     status = str(entry.get("status", ""))
     if status.startswith("protocol_violation"):
         return False, False, 0
+    called = bool(entry.get("reader_called", bool(entry.get("edited_answer"))))
     edited_raw = str(entry.get("edited_answer", ""))
     if not edited_raw.strip():
-        return True, False, int(entry.get("n_modified_tokens", 0))
+        return (
+            not called,
+            False,
+            int(entry.get("n_modified_tokens", 0)),
+        )
     record = population_row["record"]
     try:
         edited = canonical_answer(record, edited_raw, reader_mode)
@@ -229,10 +226,9 @@ def rescore_entry(
         return False, False, 0
     if not valid_clean_answer(edited):
         return False, False, 0
-    flip = not answer_is_correct(
-        str(record.get("question", "")),
+    flip = not gold_accuracy(
         edited,
-        population_row["accepted"],
+        population_row["gold_spec"],
         reader_mode=reader_mode,
     )
     return True, flip, int(entry.get("n_modified_tokens", 0))
@@ -243,6 +239,7 @@ def rescore_sources(
     population: dict[str, dict],
     expected_ids: set[str],
     *,
+    dataset: str,
     reader_mode: str,
     allow_missing: bool = False,
 ) -> tuple[dict[str, dict[str, dict]], dict[str, dict]]:
@@ -296,7 +293,10 @@ def rescore_sources(
                     missing_ids.append(identifier)
                     continue
                 is_valid, flip, token_count = rescore_entry(
-                    entry, population_row, reader_mode=reader_mode
+                    entry,
+                    population_row,
+                    dataset=dataset,
+                    reader_mode=reader_mode,
                 )
                 if not is_valid:
                     continue
@@ -343,13 +343,17 @@ def main() -> None:
     if len(records) != args.n or len(reflow_rows) != args.n:
         raise ValueError("expected exactly --n retrieval and ReFlow rows")
     population, reflow = prepare_population(
-        records, reflow_rows, reader_mode=args.reader_mode
+        records,
+        reflow_rows,
+        dataset=args.dataset,
+        reader_mode=args.reader_mode,
     )
     selected = discover_sources(args.dataset_root, set(population))
     curves, sources = rescore_sources(
         selected,
         population,
         {record_id(row) for row in records},
+        dataset=args.dataset,
         reader_mode=args.reader_mode,
         allow_missing=args.allow_incomplete,
     )

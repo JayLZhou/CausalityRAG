@@ -51,6 +51,7 @@ def anchor_from_rows(
     input_path: Path,
     reflow_path: Path,
     *,
+    dataset: str,
     reader_mode: str,
 ) -> tuple[dict, dict]:
     records = load_records(input_path)[:1000]
@@ -60,6 +61,7 @@ def anchor_from_rows(
     _, anchor = prepare_population(
         records,
         reflow_rows,
+        dataset=dataset,
         reader_mode=reader_mode,
     )
     sources = {
@@ -199,11 +201,13 @@ def dataset_from_summaries(
     input_path: Path,
     reflow_path: Path,
     *,
+    dataset: str,
     reader_mode: str,
 ) -> dict:
     anchor, anchor_sources = anchor_from_rows(
         input_path,
         reflow_path,
+        dataset=dataset,
         reader_mode=reader_mode,
     )
     clean_queries = int(anchor["clean_acc_queries"])
@@ -290,12 +294,14 @@ def main() -> None:
         [args.quartz_summary],
         args.quartz_input,
         args.quartz_reflow,
+        dataset="quartz",
         reader_mode="quartz",
     )
     datasets["popqa"] = dataset_from_summaries(
         args.popqa_summary,
         args.popqa_input,
         args.popqa_reflow,
+        dataset="popqa",
         reader_mode="short_answer",
     )
     result = {

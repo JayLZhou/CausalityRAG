@@ -79,12 +79,13 @@ def test_rescore_excludes_invalid_answers_and_respects_aliases(
     )
 
     population, reflow_summary = prepare_population(
-        records, reflow, reader_mode="short_answer"
+        records, reflow, dataset="popqa", reader_mode="short_answer"
     )
     curves, _ = rescore_sources(
         discover_sources(tmp_path, set(population)),
         population,
         {"a", "b", "excluded-outside-clean-accuracy"},
+        dataset="popqa",
         reader_mode="short_answer",
     )
 
@@ -139,13 +140,16 @@ def test_rescore_refuses_missing_final_population_entries(tmp_path: Path) -> Non
             {"id": "b", "methods": {}},
         ],
     )
-    population, _ = prepare_population(records, reflow, reader_mode="short_answer")
+    population, _ = prepare_population(
+        records, reflow, dataset="hotpotqa", reader_mode="short_answer"
+    )
 
     with pytest.raises(ValueError, match="lacks mirage/1"):
         rescore_sources(
             discover_sources(tmp_path, set(population)),
             population,
             {"a", "b"},
+            dataset="hotpotqa",
             reader_mode="short_answer",
         )
 
@@ -153,6 +157,7 @@ def test_rescore_refuses_missing_final_population_entries(tmp_path: Path) -> Non
         discover_sources(tmp_path, set(population)),
         population,
         {"a", "b"},
+        dataset="hotpotqa",
         reader_mode="short_answer",
         allow_missing=True,
     )

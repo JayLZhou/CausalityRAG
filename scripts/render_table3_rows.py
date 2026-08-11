@@ -101,6 +101,28 @@ def metric_values(factual: dict, control: dict, metric: str, adjusted: bool) -> 
     return values
 
 
+def unified_metric_values(
+    unified: dict,
+    dataset: str,
+    metric: str,
+    adjusted: bool,
+) -> list[float]:
+    methods = unified["datasets"][dataset]["methods"]
+    scope = "cfr" if adjusted else "fr"
+
+    def value(name: str) -> float:
+        row = methods[name][scope][metric]
+        if int(row.get("denominator", 0)) <= 0:
+            raise ValueError(f"{dataset}/{name}/{scope}/{metric}: empty denominator")
+        return 100.0 * float(row["rate"])
+
+    values = [
+        statistics.fmean(value(f"random_seed{seed}") for seed in range(5))
+    ]
+    values.extend(value(name) for name, _ in METHODS[1:])
+    return values
+
+
 def cells(values: list[float], *, adjusted: bool) -> list[str]:
     palette = GREEN if adjusted else BLUE
     ordered = sorted(range(len(values)), key=lambda index: (values[index], index))
@@ -141,7 +163,14 @@ def dataset_paths(root: Path, dataset: str) -> tuple[Path, Path]:
     return factual, control
 
 
-def render_dataset(root: Path, dataset: str, label: str, macro: str) -> str:
+def render_dataset(
+    root: Path,
+    dataset: str,
+    label: str,
+    macro: str,
+    *,
+    unified: dict | None = None,
+) -> str:
     if dataset == "quartz":
         metrics = QUARTZ_METRICS
     elif dataset == "pubmedqa":
@@ -149,7 +178,9 @@ def render_dataset(root: Path, dataset: str, label: str, macro: str) -> str:
     else:
         metrics = METRICS
     factual_path, control_path = dataset_paths(root, dataset)
-    if not factual_path.is_file() or not control_path.is_file():
+    if unified is None and (
+        not factual_path.is_file() or not control_path.is_file()
+    ):
         lines = [f"\\newcommand{{\\{macro}}}{{%", f"  \\multirow{{{len(metrics)}}}{{*}}{{{label}}}"]
         for row_index, (row_label, _, _) in enumerate(metrics):
             suffix = " \\\\" if row_index < len(metrics) - 1 else ""
@@ -159,11 +190,15 @@ def render_dataset(root: Path, dataset: str, label: str, macro: str) -> str:
                 lines.append("  \\cmidrule(lr){2-9}")
         lines.append("}")
         return "\n".join(lines)
-    factual = load_json(factual_path)
-    control = load_json(control_path)
+    factual = load_json(factual_path) if unified is None else None
+    control = load_json(control_path) if unified is None else None
     lines = [f"\\newcommand{{\\{macro}}}{{%", f"  \\multirow{{{len(metrics)}}}{{*}}{{{label}}}"]
     for row_index, (row_label, metric, adjusted) in enumerate(metrics):
-        values = metric_values(factual, control, metric, adjusted)
+        values = (
+            unified_metric_values(unified, dataset, metric, adjusted)
+            if unified is not None
+            else metric_values(factual, control, metric, adjusted)
+        )
         rendered = cells(values, adjusted=adjusted)
         prefix = "  & " if row_index else "  & "
         suffix = " \\\\" if row_index < len(metrics) - 1 else ""
@@ -178,6 +213,7 @@ def render_dataset(root: Path, dataset: str, label: str, macro: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--metrics-root", required=True)
+    parser.add_argument("--unified-json", type=Path)
     parser.add_argument("--out", required=True)
     parser.add_argument(
         "--datasets",
@@ -186,12 +222,16 @@ def main() -> None:
     )
     args = parser.parse_args()
     root = Path(args.metrics_root)
+    unified = load_json(args.unified_json) if args.unified_json else None
+    if unified is not None:
+        if unified.get("schema") != "causalityrag.table3.unified.v1":
+            raise ValueError("unexpected unified Table 3 schema")
     requested = set(args.datasets)
     unknown = requested.difference(dataset for dataset, _, _ in DATASETS)
     if unknown:
         raise ValueError(f"unknown datasets: {sorted(unknown)}")
     rendered = "\n\n".join(
-        render_dataset(root, dataset, label, macro)
+        render_dataset(root, dataset, label, macro, unified=unified)
         for dataset, label, macro in DATASETS
         if dataset in requested
     )

@@ -20,6 +20,7 @@ def test_summarize_dataset_uses_all_query_pairs(tmp_path: Path) -> None:
         [
             {
                 "id": "a",
+                "eligible": True,
                 "clean_answer": "alpha",
                 "gold_answer": "alpha",
                 "edited_answer": "wrong",
@@ -29,6 +30,7 @@ def test_summarize_dataset_uses_all_query_pairs(tmp_path: Path) -> None:
             },
             {
                 "id": "b",
+                "eligible": True,
                 "clean_answer": "beta",
                 "gold_answer": "beta",
                 "edited_answer": "beta",
@@ -38,6 +40,7 @@ def test_summarize_dataset_uses_all_query_pairs(tmp_path: Path) -> None:
             },
             {
                 "id": "no_op_control",
+                "eligible": True,
                 "clean_answer": "gamma",
                 "gold_answer": "gamma",
                 "edited_answer": "wrong",
@@ -73,13 +76,22 @@ def test_summarize_dataset_uses_all_query_pairs(tmp_path: Path) -> None:
         json.dumps({"records": 3, "ok": 2, "avg_seconds": 1.25}), encoding="utf-8"
     )
 
-    summary = summarize_dataset(ModelSpec("m", "Model", "M", tmp_path, "sweep"), "hotpotqa")
+    summary = summarize_dataset(
+        ModelSpec("m", "Model", "M", tmp_path, "sweep"),
+        "hotpotqa",
+        retrieval_records=[
+            {"id": "a", "answer": "alpha"},
+            {"id": "b", "answer": "beta"},
+            {"id": "no_op_control", "answer": "gamma"},
+        ],
+    )
 
     assert summary["paired_queries"] == 3
     assert summary["f1_clean_paired_queries"] == 3
     assert summary["ans_cfr"] == 1 / 3
     assert summary["f1_cfr"] == 1 / 3
     assert summary["mean_modified_tokens"] == 4.0
+    assert summary["token_budget_queries"] == 3
     assert summary["graph_coverage"] == 2 / 3
 
 
@@ -90,7 +102,7 @@ def test_render_values_uses_dataset_level_results() -> None:
             "ans_cfr": 0.8 - index * 0.1,
             "f1_cfr": 0.6 - index * 0.1,
         }
-        for index, dataset in enumerate(("hotpotqa", "finqa", "triviaqa", "medqa"))
+        for index, dataset in enumerate(("hotpotqa", "finqa", "triviaqa", "popqa"))
     ]
     output = render_values([
         {
@@ -103,8 +115,158 @@ def test_render_values_uses_dataset_level_results() -> None:
     assert "\\CrossModelHotpotAnsCoordinates{(1,80.00)}" in output
     assert "\\CrossModelFinQAFOneCoordinates{(1,50.00)}" in output
     assert "\\CrossModelTriviaAnsCoordinates{(1,60.00)}" in output
-    assert "\\CrossModelMedQAAnsCoordinates{(1,50.00)}" in output
+    assert "\\CrossModelPopQAAnsCoordinates{(1,50.00)}" in output
     assert "CrossModelTokenCoordinates" not in output
+
+
+def test_popqa_aliases_and_invalid_answers_define_denominators(
+    tmp_path: Path,
+) -> None:
+    base = tmp_path / "popqa"
+    write_jsonl(
+        base / "factual/results.jsonl",
+        [
+            {
+                "id": "valid-alias",
+                "eligible": True,
+                "clean_answer": "accepted alias",
+                "gold_answer": "canonical",
+                "gold_answers": ["canonical", "accepted alias"],
+                "edited_answer": "wrong",
+                "evaluation_status": "verified_flip",
+                "reader_calls": 1,
+                "n_modified_tokens": 2,
+            },
+            {
+                "id": "invalid-factual",
+                "eligible": True,
+                "clean_answer": "canonical",
+                "gold_answers": ["canonical"],
+                "edited_answer": "",
+                "evaluation_status": "protocol_violation_invalid_reader_answer",
+                "reader_calls": 1,
+                "n_modified_tokens": 3,
+            },
+            {
+                "id": "invalid-control",
+                "eligible": True,
+                "clean_answer": "canonical",
+                "gold_answers": ["canonical"],
+                "edited_answer": "canonical",
+                "evaluation_status": "verified_no_flip",
+                "reader_calls": 1,
+                "n_modified_tokens": 4,
+            },
+        ],
+    )
+    write_jsonl(
+        base / "synonym/results.jsonl",
+        [
+            {
+                "id": "valid-alias",
+                "methods": {"reflow": {"status": "no_selected_tokens", "reader_called": False}},
+            },
+            {
+                "id": "invalid-factual",
+                "methods": {"reflow": {"status": "no_selected_tokens", "reader_called": False}},
+            },
+            {
+                "id": "invalid-control",
+                "methods": {
+                    "reflow": {
+                        "status": "invalid_empty_answer",
+                        "reader_called": True,
+                        "edited_answer": "",
+                    }
+                },
+            },
+        ],
+    )
+    (base / "graph").mkdir(parents=True)
+    (base / "graph/summary.json").write_text(
+        json.dumps({"records": 3, "ok": 3}), encoding="utf-8"
+    )
+
+    summary = summarize_dataset(
+        ModelSpec("m", "Model", "M", tmp_path, "sweep"),
+        "popqa",
+        retrieval_records=[
+            {
+                "id": "valid-alias",
+                "answer": "canonical",
+                "answers": ["canonical", "accepted alias"],
+            },
+            {"id": "invalid-factual", "answer": "canonical"},
+            {"id": "invalid-control", "answer": "canonical"},
+        ],
+    )
+
+    assert summary["raw_paired_queries"] == 3
+    assert summary["paired_queries"] == 1
+    assert summary["excluded_invalid_answer_pairs"] == 2
+    assert summary["f1_clean_paired_queries"] == 1
+    assert summary["ans_cfr"] == 1.0
+    assert summary["f1_cfr"] == 1.0
+    assert summary["token_budget_queries"] == 3
+    assert summary["mean_modified_tokens"] == 3.0
+
+
+def test_popqa_alias_switch_counts_for_ans_but_not_f1(
+    tmp_path: Path,
+) -> None:
+    base = tmp_path / "popqa"
+    write_jsonl(
+        base / "factual/results.jsonl",
+        [
+            {
+                "id": "alias-switch",
+                "eligible": True,
+                "clean_answer": "Conservative Party politician",
+                "gold_answer": "Conservative Party politician",
+                "gold_answers": ["Conservative Party politician", "politician"],
+                "edited_answer": "politician",
+                "evaluation_status": "verified_flip",
+                "reader_calls": 1,
+                "n_modified_tokens": 2,
+            }
+        ],
+    )
+    write_jsonl(
+        base / "synonym/results.jsonl",
+        [
+            {
+                "id": "alias-switch",
+                "methods": {
+                    "reflow": {
+                        "status": "evaluated",
+                        "reader_called": True,
+                        "edited_answer": "Conservative Party politician",
+                    }
+                },
+            }
+        ],
+    )
+    (base / "graph").mkdir(parents=True)
+    (base / "graph/summary.json").write_text(
+        json.dumps({"records": 1, "ok": 1}), encoding="utf-8"
+    )
+
+    summary = summarize_dataset(
+        ModelSpec("m", "Model", "M", tmp_path, "sweep"),
+        "popqa",
+        retrieval_records=[{
+            "id": "alias-switch",
+            "answer": "Conservative Party politician",
+            "answers": ["Conservative Party politician", "politician"],
+        }],
+    )
+
+    assert summary["paired_queries"] == 1
+    assert summary["f1_clean_paired_queries"] == 1
+    assert summary["ans_delta_sum"] == 1
+    assert summary["f1_delta_sum"] == 0
+    assert summary["ans_cfr"] == 1.0
+    assert summary["f1_cfr"] == 0.0
 
 
 def test_quartz_summary_refuses_same_choice_string_flips(tmp_path: Path) -> None:
@@ -164,5 +326,6 @@ def test_quartz_summary_refuses_same_choice_string_flips(tmp_path: Path) -> None
         summarize_dataset(
             ModelSpec("m", "Model", "M", tmp_path, "sweep"),
             "quartz",
+            retrieval_records=retrieval,
             quartz_records=retrieval,
         )
