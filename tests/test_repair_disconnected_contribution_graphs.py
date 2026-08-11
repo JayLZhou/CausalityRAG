@@ -1,6 +1,7 @@
 import json
 
 from scripts.repair_disconnected_contribution_graphs import (
+    load_graph_status_target_ids,
     load_target_ids,
     repair_graph_row,
     repair_selected_graph_row,
@@ -114,5 +115,24 @@ def test_load_target_ids_uses_only_explicit_no_frontier_status(tmp_path):
     assert load_target_ids(
         results,
         target_status="no_frontier_candidate",
+        expected_rows=3,
+    ) == ["target"]
+
+
+def test_load_graph_status_target_ids_selects_only_failed_graphs(tmp_path):
+    graphs = tmp_path / "graphs.jsonl"
+    rows = [
+        {"id": "ok", "status": "ok"},
+        {"id": "target", "status": "no_context_input_flow"},
+        {"id": "other", "status": "no_answer_support"},
+    ]
+    graphs.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    assert load_graph_status_target_ids(
+        graphs,
+        target_status="no_context_input_flow",
         expected_rows=3,
     ) == ["target"]

@@ -58,6 +58,29 @@ def load_target_ids(
     ]
 
 
+def load_graph_status_target_ids(
+    path: Path,
+    *,
+    target_status: str,
+    expected_rows: int,
+) -> list[str]:
+    rows = list(iter_records(path, limit=expected_rows))
+    if len(rows) != expected_rows:
+        raise ValueError(
+            f"expected {expected_rows} graph rows, got {len(rows)}"
+        )
+    identifiers = [record_id(row) for row in rows]
+    if any(not identifier for identifier in identifiers):
+        raise ValueError("every graph row must have a nonempty ID")
+    if len(set(identifiers)) != len(identifiers):
+        raise ValueError("graph IDs must be unique")
+    return [
+        identifier
+        for identifier, row in zip(identifiers, rows)
+        if str(row.get("status", "")) == target_status
+    ]
+
+
 def repair_graph_row(row: dict, eligible_ids: set[str]) -> tuple[dict, bool]:
     graph = dict(row.get("contribution_graph", {}))
     domain = {
@@ -149,17 +172,29 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--graphs", type=Path, required=True)
     parser.add_argument("--shared-pool", type=Path, required=True)
-    parser.add_argument("--target-results", type=Path, required=True)
+    parser.add_argument("--target-results", type=Path)
     parser.add_argument(
         "--target-status",
         default=DEFAULT_TARGET_STATUS,
         help="Only result rows with this evaluation_status may be repaired.",
+    )
+    parser.add_argument(
+        "--target-graph-status",
+        default="",
+        help=(
+            "Alternatively repair only graph rows with this status. Exactly "
+            "one of --target-results and --target-graph-status is required."
+        ),
     )
     parser.add_argument("--expected-pool-sha256", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--summary-out", type=Path, required=True)
     parser.add_argument("--n", type=int, default=1000)
     args = parser.parse_args()
+    if bool(args.target_results) == bool(args.target_graph_status):
+        parser.error(
+            "exactly one of --target-results and --target-graph-status is required"
+        )
 
     actual_pool_sha = file_sha256(str(args.shared_pool))
     if actual_pool_sha != args.expected_pool_sha256:
@@ -168,15 +203,26 @@ def main() -> None:
             f"expected {args.expected_pool_sha256}, got {actual_pool_sha}"
         )
     eligible_ids = load_eligible_ids(args.shared_pool)
-    target_id_order = load_target_ids(
-        args.target_results,
-        target_status=args.target_status,
-        expected_rows=args.n,
-    )
+    if args.target_results is not None:
+        target_id_order = load_target_ids(
+            args.target_results,
+            target_status=args.target_status,
+            expected_rows=args.n,
+        )
+        target_status = args.target_status
+        target_selector = "result_status"
+    else:
+        target_id_order = load_graph_status_target_ids(
+            args.graphs,
+            target_status=args.target_graph_status,
+            expected_rows=args.n,
+        )
+        target_status = args.target_graph_status
+        target_selector = "graph_status"
     target_ids = set(target_id_order)
     if not target_ids:
         raise ValueError(
-            f"no result rows have evaluation_status={args.target_status!r}"
+            f"no rows match {target_selector}={target_status!r}"
         )
     rows = []
     repaired_ids = []
@@ -224,7 +270,8 @@ def main() -> None:
     summary = {
         "schema": "causalityrag.contribution_graph_connectivity_repair.v1",
         "queries": len(rows),
-        "target_status": args.target_status,
+        "target_selector": target_selector,
+        "target_status": target_status,
         "target_queries": len(target_ids),
         "repaired_queries": len(repaired_ids),
         "repaired_ids": [
@@ -243,8 +290,16 @@ def main() -> None:
         "repair_policy": "strongest_endpoint_bottleneck_bridge",
         "source_graphs": str(args.graphs.resolve()),
         "source_graphs_sha256": file_sha256(str(args.graphs)),
-        "source_results": str(args.target_results.resolve()),
-        "source_results_sha256": file_sha256(str(args.target_results)),
+        "source_results": (
+            str(args.target_results.resolve())
+            if args.target_results is not None
+            else None
+        ),
+        "source_results_sha256": (
+            file_sha256(str(args.target_results))
+            if args.target_results is not None
+            else None
+        ),
         "shared_pool": str(args.shared_pool.resolve()),
         "shared_pool_sha256": actual_pool_sha,
         "out": str(args.out.resolve()),
