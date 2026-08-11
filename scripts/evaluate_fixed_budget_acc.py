@@ -14,8 +14,13 @@ from threading import Lock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.io import load_records, record_id
-from causalityrag.reader import ReaderClient, answers_match
+from causalityrag.io import gold_answers, load_records, record_id
+from causalityrag.reader import (
+    ReaderClient,
+    ReaderProtocolError,
+    canonicalize_reader_answer,
+    reader_answers_match,
+)
 from causalityrag.revision import apply_token_replacements
 from causalityrag.shared_replacement_pool import (
     FrozenSharedReplacementPool,
@@ -54,6 +59,72 @@ def reflow_set(frontier_row: dict, budget: int, eligible: set[str]) -> list[str]
     return min(candidates)[-1] if candidates else []
 
 
+def answer_is_correct(
+    question: str,
+    answer: str,
+    accepted_answers: list[str],
+    *,
+    reader_mode: str,
+) -> bool:
+    return any(
+        reader_answers_match(
+            question,
+            answer,
+            accepted,
+            reader_mode=reader_mode,
+        )
+        for accepted in accepted_answers
+    )
+
+
+def rescore_seeded_entry(
+    entry: dict,
+    *,
+    question: str,
+    accepted_gold_answers: list[str],
+    reader_mode: str,
+) -> dict:
+    rescored = dict(entry)
+    edited_answer_raw = str(entry.get("edited_answer", ""))
+    try:
+        edited_answer = canonicalize_reader_answer(
+            question,
+            edited_answer_raw,
+            reader_mode=reader_mode,
+        )
+    except ReaderProtocolError as exc:
+        return {
+            **rescored,
+            "edited_answer": edited_answer_raw,
+            "status": "protocol_violation_invalid_reader_answer",
+            "acc_flip": False,
+            "protocol_error": str(exc),
+            "rescored_from_seed": True,
+        }
+    if not valid_clean_answer(edited_answer):
+        return {
+            **rescored,
+            "edited_answer": edited_answer,
+            "status": "protocol_violation_invalid_reader_answer",
+            "acc_flip": False,
+            "protocol_error": "invalid empty or non-answer reader output",
+            "rescored_from_seed": True,
+        }
+    acc_flip = not answer_is_correct(
+        question,
+        edited_answer,
+        accepted_gold_answers,
+        reader_mode=reader_mode,
+    )
+    return {
+        **rescored,
+        "edited_answer": edited_answer,
+        "status": "acc_flip" if acc_flip else "acc_preserved",
+        "acc_flip": acc_flip,
+        "rescored_from_seed": True,
+    }
+
+
 def evaluate_query(
     record: dict,
     units_row: dict,
@@ -69,18 +140,56 @@ def evaluate_query(
     seed_row: dict | None = None,
 ) -> dict:
     identifier = record_id(record)
-    clean_answer = str(frontier_row.get("clean_answer", ""))
-    gold_answer = str(record.get("answer") or record.get("gold_answer", ""))
+    question = str(record.get("question", ""))
+    reader_mode = getattr(reader, "reader_mode", "short_answer")
+    clean_answer_raw = str(frontier_row.get("clean_answer", ""))
+    accepted_gold_answers_raw = gold_answers(record)
+    try:
+        clean_answer = canonicalize_reader_answer(
+            question,
+            clean_answer_raw,
+            reader_mode=reader_mode,
+        )
+        accepted_gold_answers = [
+            canonicalize_reader_answer(
+                question,
+                answer,
+                reader_mode=reader_mode,
+            )
+            for answer in accepted_gold_answers_raw
+        ]
+    except ReaderProtocolError as exc:
+        return {
+            "index": int(frontier_row.get("index", -1)),
+            "id": identifier,
+            "clean_answer": clean_answer_raw,
+            "gold_answer": str(record.get("answer", "")),
+            "gold_answers": accepted_gold_answers_raw,
+            "clean_acc": False,
+            "methods": {},
+            "reader_calls": 0,
+            "evaluation_status": (
+                "protocol_violation_invalid_clean_or_gold_answer"
+            ),
+            "protocol_error": str(exc),
+        }
     clean_acc = bool(
         valid_clean_answer(clean_answer)
-        and gold_answer.strip()
-        and answers_match(clean_answer, gold_answer)
+        and accepted_gold_answers
+        and answer_is_correct(
+            question,
+            clean_answer,
+            accepted_gold_answers,
+            reader_mode=reader_mode,
+        )
     )
     result = {
         "index": int(frontier_row.get("index", -1)),
         "id": identifier,
         "clean_answer": clean_answer,
-        "gold_answer": gold_answer,
+        "clean_answer_raw": clean_answer_raw,
+        "gold_answer": str(record.get("answer", "")),
+        "gold_answers": accepted_gold_answers,
         "clean_acc": clean_acc,
         "methods": {},
         "reader_calls": 0,
@@ -111,7 +220,7 @@ def evaluate_query(
             for budget in budgets
         }
 
-    answer_cache: dict[tuple[str, ...], tuple[str, list[dict]]] = {}
+    answer_cache: dict[tuple[str, ...], dict] = {}
     reader_calls = 0
     for method, budget_sets in method_sets.items():
         method_results = {}
@@ -120,7 +229,12 @@ def evaluate_query(
                 seed_row or {}
             ).get("methods", {}).get(method, {}).get(str(budget))
             if seeded is not None and seeded.get("edited_answer"):
-                method_results[str(budget)] = seeded
+                method_results[str(budget)] = rescore_seeded_entry(
+                    seeded,
+                    question=question,
+                    accepted_gold_answers=accepted_gold_answers,
+                    reader_mode=reader_mode,
+                )
                 continue
             selected = budget_sets[budget]
             if not selected:
@@ -134,7 +248,10 @@ def evaluate_query(
                 continue
             cache_key = tuple(sorted(selected))
             if cache_key in answer_cache:
-                edited_answer, edits = answer_cache[cache_key]
+                cached = answer_cache[cache_key]
+                edited_answer = str(cached.get("edited_answer", ""))
+                edits = list(cached.get("edits", []))
+                protocol_error = str(cached.get("protocol_error", ""))
                 reader_called = False
             else:
                 pool_rows = pool.require(selected)
@@ -165,15 +282,45 @@ def evaluate_query(
                         "edits": revision["edits"],
                     }
                     continue
-                edited_answer = reader.answer(
-                    str(record.get("question", "")),
-                    revision["edited_contexts"],
-                )
                 edits = list(revision["edits"])
-                answer_cache[cache_key] = (edited_answer, edits)
                 reader_calls += 1
                 reader_called = True
-            acc_flip = not answers_match(edited_answer, gold_answer)
+                try:
+                    edited_answer = reader.answer(
+                        question,
+                        revision["edited_contexts"],
+                    )
+                    protocol_error = (
+                        "invalid empty or non-answer reader output"
+                        if not valid_clean_answer(edited_answer)
+                        else ""
+                    )
+                except ReaderProtocolError as exc:
+                    edited_answer = ""
+                    protocol_error = str(exc)
+                answer_cache[cache_key] = {
+                    "edited_answer": edited_answer,
+                    "edits": edits,
+                    "protocol_error": protocol_error,
+                }
+            if protocol_error:
+                method_results[str(budget)] = {
+                    "status": "protocol_violation_invalid_reader_answer",
+                    "selected_ids": selected,
+                    "n_modified_tokens": len(selected),
+                    "edited_answer": edited_answer,
+                    "reader_called": reader_called,
+                    "acc_flip": False,
+                    "edits": edits,
+                    "protocol_error": protocol_error,
+                }
+                continue
+            acc_flip = not answer_is_correct(
+                question,
+                edited_answer,
+                accepted_gold_answers,
+                reader_mode=reader_mode,
+            )
             method_results[str(budget)] = {
                 "status": "acc_flip" if acc_flip else "acc_preserved",
                 "selected_ids": selected,
@@ -207,15 +354,25 @@ def summarize(rows: list[dict], budgets: list[int]) -> dict:
                 for row in clean_acc_rows
             ]
             executed = [entry for entry in entries if entry.get("edited_answer")]
+            invalid = [
+                entry
+                for entry in entries
+                if str(entry.get("status", "")).startswith(
+                    "protocol_violation"
+                )
+            ]
+            valid = [entry for entry in entries if entry not in invalid]
             flips = sum(bool(entry.get("acc_flip")) for entry in entries)
             budget_results[key] = {
                 "clean_acc_queries": len(clean_acc_rows),
                 "executed_queries": len(executed),
+                "valid_answer_queries": len(valid),
+                "protocol_violations": len(invalid),
                 "acc_flip_count": flips,
-                "acc_cfr": flips / max(1, len(clean_acc_rows)),
+                "acc_cfr": flips / max(1, len(valid)),
                 "mean_modified_tokens": (
-                    sum(int(entry.get("n_modified_tokens", 0)) for entry in entries)
-                    / max(1, len(clean_acc_rows))
+                    sum(int(entry.get("n_modified_tokens", 0)) for entry in valid)
+                    / max(1, len(valid))
                 ),
             }
         methods[method] = budget_results

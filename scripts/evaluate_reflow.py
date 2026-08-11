@@ -219,6 +219,27 @@ def evaluate_query(
                 "protocol_error": str(exc),
             })
             break
+        if not valid_clean_answer(edited_answer):
+            attempts.append({
+                **candidate,
+                "selected_ids": selected_ids,
+                "selected_tokens": [
+                    str(by_id[unit_id].get("text", ""))
+                    for unit_id in selected_ids
+                ],
+                "n_edits": int(revision["n_edits"]),
+                "edits": revision["edits"],
+                "edited_answer": edited_answer,
+                "reader_called": True,
+                "answer_changed": False,
+                "candidate_status": (
+                    "protocol_violation_invalid_reader_answer"
+                ),
+                "protocol_error": (
+                    "invalid empty or non-answer reader output"
+                ),
+            })
+            break
         changed = not reader_answers_exact_match(
             question,
             clean_answer,
@@ -295,14 +316,24 @@ def evaluate_query(
 
 def summarize(rows: list[dict]) -> dict:
     eligible = [row for row in rows if row.get("eligible")]
-    executed = [row for row in eligible if int(row.get("reader_calls", 0)) > 0]
-    flips = [row for row in eligible if row.get("verified_flip")]
-    clean_correct = [row for row in eligible if row.get("clean_correct")]
+    valid_answers = [
+        row
+        for row in eligible
+        if row.get("evaluation_status")
+        != "protocol_violation_invalid_reader_answer"
+    ]
+    executed = [
+        row for row in valid_answers if int(row.get("reader_calls", 0)) > 0
+    ]
+    flips = [row for row in valid_answers if row.get("verified_flip")]
+    clean_correct = [
+        row for row in valid_answers if row.get("clean_correct")
+    ]
     flip_sizes = [
         int(row.get("n_modified_tokens", 0)) for row in flips
     ]
     all_sizes = [
-        int(row.get("n_modified_tokens", 0)) for row in rows
+        int(row.get("n_modified_tokens", 0)) for row in valid_answers
     ]
     statuses = sorted({
         str(row.get("evaluation_status", "")) for row in rows
@@ -310,12 +341,13 @@ def summarize(rows: list[dict]) -> dict:
     return {
         "queries": len(rows),
         "eligible_queries": len(eligible),
-        "answer_denominator_queries": len(eligible),
+        "answer_denominator_queries": len(valid_answers),
+        "valid_answer_queries": len(valid_answers),
         "executed_queries": len(executed),
         "verified_flips": len(flips),
         "raw_flip_rate": len(flips) / max(1, len(rows)),
-        "answer_flip_rate": len(flips) / max(1, len(eligible)),
-        "eligible_flip_rate": len(flips) / max(1, len(eligible)),
+        "answer_flip_rate": len(flips) / max(1, len(valid_answers)),
+        "eligible_flip_rate": len(flips) / max(1, len(valid_answers)),
         "executed_flip_rate": len(flips) / max(1, len(executed)),
         "clean_correct_queries": len(clean_correct),
         "clean_correct_flips": sum(
@@ -394,6 +426,13 @@ def main() -> None:
     )
     lock = Lock()
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    expected_ids = {record_id(record) for record in records}
+    existing = {}
+    if os.path.isfile(args.out):
+        for row in load_records(args.out):
+            identifier = str(row.get("id", ""))
+            if identifier in expected_ids:
+                existing[identifier] = row
 
     def run(item: tuple[dict, dict, dict]) -> dict:
         row = evaluate_query(
@@ -408,18 +447,24 @@ def main() -> None:
                 output.write(json.dumps(row, ensure_ascii=False) + "\n")
         return row
 
-    rows = []
+    rows = list(existing.values())
+    pending = [
+        item
+        for item in zip(records, unit_rows, frontier_rows)
+        if record_id(item[0]) not in existing
+    ]
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = [
             executor.submit(run, item)
-            for item in zip(records, unit_rows, frontier_rows)
+            for item in pending
         ]
         for completed, future in enumerate(as_completed(futures), start=1):
             rows.append(future.result())
             if completed % 100 == 0:
                 partial = summarize(rows)
                 print(
-                    f"[{completed}/{len(futures)}] "
+                    f"[{completed}/{len(futures)} new; "
+                    f"{len(rows)}/{len(records)} total] "
                     f"flip={partial['verified_flips']} "
                     f"calls={partial['reader_calls']}",
                     flush=True,
