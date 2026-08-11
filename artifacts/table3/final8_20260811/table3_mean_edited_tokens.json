@@ -1,5 +1,5 @@
 {
-  "schema": "causalityrag.table3_mean_edited_tokens.v1",
+  "schema": "causalityrag.table3_mean_edited_tokens.v2",
   "table3_datasets": [
     "hotpotqa",
     "timeqa",
@@ -10,14 +10,14 @@
     "2wiki",
     "popqa"
   ],
-  "population": "all 1,000 frozen queries per dataset",
+  "population": "queries with a valid clean answer in each dataset",
   "token_count_contract": {
     "verified_flip": "actual token count at the verified-flip attempt",
     "failed_flip": "largest saved terminal attempted token count",
-    "invalid_clean_or_no_attempt": "zero",
+    "invalid_clean": "excluded from both numerator and denominator",
     "baselines": "all Table 3 baselines use ReFlow's exact per-query terminal budget, so every method has the same dataset mean"
   },
-  "diagnostic_population": "valid-clean-only means are retained for audit and are not plotted",
+  "diagnostic_population": "all-1,000-query means retain invalid-clean rows as zero only for audit",
   "datasets": [
     {
       "dataset": "hotpotqa",
@@ -25,6 +25,7 @@
       "queries": 1000,
       "valid_clean_queries": 989,
       "invalid_clean_queries": 11,
+      "edited_token_sum_valid_clean": 2664,
       "executed_queries": 989,
       "verified_flips": 941,
       "mean_edited_tokens_all_1000": 2.664,
@@ -49,6 +50,7 @@
       "queries": 1000,
       "valid_clean_queries": 995,
       "invalid_clean_queries": 5,
+      "edited_token_sum_valid_clean": 1566,
       "executed_queries": 995,
       "verified_flips": 930,
       "mean_edited_tokens_all_1000": 1.566,
@@ -73,6 +75,7 @@
       "queries": 1000,
       "valid_clean_queries": 992,
       "invalid_clean_queries": 8,
+      "edited_token_sum_valid_clean": 3051,
       "executed_queries": 992,
       "verified_flips": 843,
       "mean_edited_tokens_all_1000": 3.051,
@@ -97,6 +100,7 @@
       "queries": 1000,
       "valid_clean_queries": 965,
       "invalid_clean_queries": 35,
+      "edited_token_sum_valid_clean": 1830,
       "executed_queries": 965,
       "verified_flips": 920,
       "mean_edited_tokens_all_1000": 1.83,
@@ -121,6 +125,7 @@
       "queries": 1000,
       "valid_clean_queries": 1000,
       "invalid_clean_queries": 0,
+      "edited_token_sum_valid_clean": 5321,
       "executed_queries": 1000,
       "verified_flips": 402,
       "mean_edited_tokens_all_1000": 5.321,
@@ -145,6 +150,7 @@
       "queries": 1000,
       "valid_clean_queries": 979,
       "invalid_clean_queries": 21,
+      "edited_token_sum_valid_clean": 5576,
       "executed_queries": 979,
       "verified_flips": 754,
       "mean_edited_tokens_all_1000": 5.576,
@@ -169,6 +175,7 @@
       "queries": 1000,
       "valid_clean_queries": 994,
       "invalid_clean_queries": 6,
+      "edited_token_sum_valid_clean": 3007,
       "executed_queries": 994,
       "verified_flips": 896,
       "mean_edited_tokens_all_1000": 3.007,
@@ -193,6 +200,7 @@
       "queries": 1000,
       "valid_clean_queries": 998,
       "invalid_clean_queries": 2,
+      "edited_token_sum_valid_clean": 2083,
       "executed_queries": 998,
       "verified_flips": 979,
       "mean_edited_tokens_all_1000": 2.083,
@@ -212,5 +220,9 @@
       "baseline_results_sha256": "51e7569bb065816adcb840403bf7e8d0cb23fea1b35cb83edd5f821e1fa07a92"
     }
   ],
-  "unweighted_dataset_macro_mean": 3.13725
+  "unweighted_dataset_macro_mean_valid_clean": 3.1710512736016354,
+  "pooled_valid_clean_token_sum": 25098,
+  "pooled_valid_clean_queries": 7912,
+  "pooled_valid_clean_mean": 3.1721435793731043,
+  "diagnostic_unweighted_dataset_macro_mean_all_1000": 3.13725
 }

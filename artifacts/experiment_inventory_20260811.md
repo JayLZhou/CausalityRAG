@@ -12,7 +12,7 @@ hyperparameter experiments. The main benchmark suite is:
 - Table 3 mean edited-token audit and bar-chart data: complete.
 - Query-level token contract: a verified flip uses its verified attempt;
   a failed flip uses the largest saved terminal attempt; an invalid clean
-  answer with no intervention call contributes zero.
+  answer is excluded from both the token numerator and query denominator.
 - Ans-FR population: valid clean answers only. A valid-clean query with an
   unsupported or unexecuted intervention remains in the denominator as zero.
 - PopQA correctness: matching any gold alias is correct; a correctness flip
@@ -21,18 +21,20 @@ hyperparameter experiments. The main benchmark suite is:
 Final output root:
 `/data1/yujia/CausalityRAG/out_table3_final8_20260811`.
 
-Mean edited tokens over all 1,000 queries:
+Mean edited tokens over valid-clean queries:
 
-| Dataset | Mean |
-| --- | ---: |
-| HQA | 2.664 |
-| TQA | 1.566 |
-| FQA | 3.051 |
-| MSQ | 1.830 |
-| QTZ | 5.321 |
-| TrQA | 5.576 |
-| 2Wiki | 3.007 |
-| PopQA | 2.083 |
+| Dataset | Token sum | Valid clean | Mean |
+| --- | ---: | ---: | ---: |
+| HQA | 2,664 | 989 | 2.694 |
+| TQA | 1,566 | 995 | 1.574 |
+| FQA | 3,051 | 992 | 3.076 |
+| MSQ | 1,830 | 965 | 1.896 |
+| QTZ | 5,321 | 1,000 | 5.321 |
+| TrQA | 5,576 | 979 | 5.696 |
+| 2Wiki | 3,007 | 994 | 3.025 |
+| PopQA | 2,083 | 998 | 2.087 |
+
+Across all eight datasets, the pooled value is `25,098 / 7,912 = 3.1721`.
 
 ## Measured but not final for the current suite
 
