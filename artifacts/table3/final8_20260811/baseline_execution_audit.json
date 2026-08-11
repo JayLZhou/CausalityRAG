@@ -1,0 +1,402 @@
+{
+  "schema": "causalityrag.table3_baseline_execution_audit.v1",
+  "datasets": [
+    {
+      "dataset": "hotpotqa",
+      "valid_clean_queries": 989,
+      "violations": [],
+      "violation_query_methods": 0,
+      "violation_queries": 0,
+      "status_histograms": {
+        "random_seed0": {
+          "verified_flip": 254,
+          "verified_no_flip": 735
+        },
+        "random_seed1": {
+          "verified_flip": 259,
+          "verified_no_flip": 730
+        },
+        "random_seed2": {
+          "verified_flip": 261,
+          "verified_no_flip": 728
+        },
+        "random_seed3": {
+          "verified_flip": 253,
+          "verified_no_flip": 736
+        },
+        "random_seed4": {
+          "verified_flip": 261,
+          "verified_no_flip": 728
+        },
+        "attention": {
+          "verified_flip": 358,
+          "verified_no_flip": 631
+        },
+        "gradient_x_input": {
+          "verified_flip": 518,
+          "verified_no_flip": 471
+        },
+        "integrated_gradients": {
+          "verified_flip": 533,
+          "verified_no_flip": 456
+        },
+        "mirage": {
+          "verified_flip": 458,
+          "verified_no_flip": 531
+        },
+        "arc_jsd": {
+          "verified_flip": 480,
+          "verified_no_flip": 509
+        }
+      }
+    },
+    {
+      "dataset": "timeqa",
+      "valid_clean_queries": 995,
+      "violations": [],
+      "violation_query_methods": 0,
+      "violation_queries": 0,
+      "status_histograms": {
+        "random_seed0": {
+          "verified_flip": 87,
+          "verified_no_flip": 908
+        },
+        "random_seed1": {
+          "verified_flip": 67,
+          "verified_no_flip": 928
+        },
+        "random_seed2": {
+          "verified_flip": 83,
+          "verified_no_flip": 912
+        },
+        "random_seed3": {
+          "verified_flip": 84,
+          "verified_no_flip": 911
+        },
+        "random_seed4": {
+          "verified_flip": 76,
+          "verified_no_flip": 919
+        },
+        "attention": {
+          "verified_flip": 129,
+          "verified_no_flip": 866
+        },
+        "gradient_x_input": {
+          "verified_flip": 453,
+          "verified_no_flip": 542
+        },
+        "integrated_gradients": {
+          "verified_flip": 490,
+          "verified_no_flip": 505
+        },
+        "mirage": {
+          "verified_flip": 704,
+          "verified_no_flip": 291
+        },
+        "arc_jsd": {
+          "verified_flip": 760,
+          "verified_no_flip": 235
+        }
+      }
+    },
+    {
+      "dataset": "finqa",
+      "valid_clean_queries": 992,
+      "violations": [],
+      "violation_query_methods": 0,
+      "violation_queries": 0,
+      "status_histograms": {
+        "random_seed0": {
+          "verified_flip": 215,
+          "verified_no_flip": 777
+        },
+        "random_seed1": {
+          "verified_flip": 215,
+          "verified_no_flip": 777
+        },
+        "random_seed2": {
+          "verified_flip": 212,
+          "verified_no_flip": 780
+        },
+        "random_seed3": {
+          "verified_flip": 188,
+          "verified_no_flip": 804
+        },
+        "random_seed4": {
+          "verified_flip": 207,
+          "verified_no_flip": 785
+        },
+        "attention": {
+          "verified_flip": 281,
+          "verified_no_flip": 711
+        },
+        "gradient_x_input": {
+          "verified_flip": 345,
+          "verified_no_flip": 647
+        },
+        "integrated_gradients": {
+          "verified_flip": 400,
+          "verified_no_flip": 592
+        },
+        "mirage": {
+          "verified_flip": 430,
+          "verified_no_flip": 562
+        },
+        "arc_jsd": {
+          "verified_flip": 598,
+          "verified_no_flip": 394
+        }
+      }
+    },
+    {
+      "dataset": "musique",
+      "valid_clean_queries": 965,
+      "violations": [],
+      "violation_query_methods": 0,
+      "violation_queries": 0,
+      "status_histograms": {
+        "random_seed0": {
+          "verified_flip": 98,
+          "verified_no_flip": 867
+        },
+        "random_seed1": {
+          "verified_flip": 82,
+          "verified_no_flip": 883
+        },
+        "random_seed2": {
+          "verified_flip": 89,
+          "verified_no_flip": 876
+        },
+        "random_seed3": {
+          "verified_flip": 98,
+          "verified_no_flip": 867
+        },
+        "random_seed4": {
+          "verified_flip": 96,
+          "verified_no_flip": 869
+        },
+        "attention": {
+          "verified_flip": 167,
+          "verified_no_flip": 798
+        },
+        "gradient_x_input": {
+          "verified_flip": 417,
+          "verified_no_flip": 548
+        },
+        "integrated_gradients": {
+          "verified_flip": 450,
+          "verified_no_flip": 515
+        },
+        "mirage": {
+          "verified_flip": 572,
+          "verified_no_flip": 393
+        },
+        "arc_jsd": {
+          "verified_flip": 686,
+          "verified_no_flip": 279
+        }
+      }
+    },
+    {
+      "dataset": "quartz",
+      "valid_clean_queries": 1000,
+      "violations": [],
+      "violation_query_methods": 0,
+      "violation_queries": 0,
+      "status_histograms": {
+        "random_seed0": {
+          "verified_flip": 120,
+          "verified_no_flip": 880
+        },
+        "random_seed1": {
+          "verified_flip": 121,
+          "verified_no_flip": 879
+        },
+        "random_seed2": {
+          "verified_flip": 128,
+          "verified_no_flip": 872
+        },
+        "random_seed3": {
+          "verified_flip": 117,
+          "verified_no_flip": 883
+        },
+        "random_seed4": {
+          "verified_flip": 103,
+          "verified_no_flip": 897
+        },
+        "attention": {
+          "verified_flip": 184,
+          "verified_no_flip": 816
+        },
+        "gradient_x_input": {
+          "protocol_violation_invalid_reader_answer": 1,
+          "verified_flip": 205,
+          "verified_no_flip": 794
+        },
+        "integrated_gradients": {
+          "verified_flip": 216,
+          "verified_no_flip": 784
+        },
+        "mirage": {
+          "protocol_violation_invalid_reader_answer": 1,
+          "verified_flip": 208,
+          "verified_no_flip": 791
+        },
+        "arc_jsd": {
+          "protocol_violation_invalid_reader_answer": 1,
+          "verified_flip": 239,
+          "verified_no_flip": 760
+        }
+      }
+    },
+    {
+      "dataset": "triviaqa",
+      "valid_clean_queries": 979,
+      "violations": [],
+      "violation_query_methods": 0,
+      "violation_queries": 0,
+      "status_histograms": {
+        "random_seed0": {
+          "verified_flip": 23,
+          "verified_no_flip": 956
+        },
+        "random_seed1": {
+          "verified_flip": 30,
+          "verified_no_flip": 949
+        },
+        "random_seed2": {
+          "verified_flip": 24,
+          "verified_no_flip": 955
+        },
+        "random_seed3": {
+          "verified_flip": 31,
+          "verified_no_flip": 948
+        },
+        "random_seed4": {
+          "verified_flip": 33,
+          "verified_no_flip": 946
+        },
+        "attention": {
+          "verified_flip": 78,
+          "verified_no_flip": 901
+        },
+        "gradient_x_input": {
+          "verified_flip": 221,
+          "verified_no_flip": 758
+        },
+        "integrated_gradients": {
+          "verified_flip": 243,
+          "verified_no_flip": 736
+        },
+        "mirage": {
+          "verified_flip": 306,
+          "verified_no_flip": 673
+        },
+        "arc_jsd": {
+          "verified_flip": 229,
+          "verified_no_flip": 750
+        }
+      }
+    },
+    {
+      "dataset": "2wiki",
+      "valid_clean_queries": 994,
+      "violations": [],
+      "violation_query_methods": 0,
+      "violation_queries": 0,
+      "status_histograms": {
+        "random_seed0": {
+          "verified_flip": 78,
+          "verified_no_flip": 916
+        },
+        "random_seed1": {
+          "verified_flip": 84,
+          "verified_no_flip": 910
+        },
+        "random_seed2": {
+          "verified_flip": 95,
+          "verified_no_flip": 899
+        },
+        "random_seed3": {
+          "verified_flip": 83,
+          "verified_no_flip": 911
+        },
+        "random_seed4": {
+          "verified_flip": 81,
+          "verified_no_flip": 913
+        },
+        "attention": {
+          "verified_flip": 138,
+          "verified_no_flip": 856
+        },
+        "gradient_x_input": {
+          "verified_flip": 522,
+          "verified_no_flip": 472
+        },
+        "integrated_gradients": {
+          "verified_flip": 572,
+          "verified_no_flip": 422
+        },
+        "mirage": {
+          "verified_flip": 636,
+          "verified_no_flip": 358
+        },
+        "arc_jsd": {
+          "verified_flip": 588,
+          "verified_no_flip": 406
+        }
+      }
+    },
+    {
+      "dataset": "popqa",
+      "valid_clean_queries": 998,
+      "violations": [],
+      "violation_query_methods": 0,
+      "violation_queries": 0,
+      "status_histograms": {
+        "random_seed0": {
+          "verified_flip": 53,
+          "verified_no_flip": 945
+        },
+        "random_seed1": {
+          "verified_flip": 48,
+          "verified_no_flip": 950
+        },
+        "random_seed2": {
+          "verified_flip": 58,
+          "verified_no_flip": 940
+        },
+        "random_seed3": {
+          "verified_flip": 34,
+          "verified_no_flip": 964
+        },
+        "random_seed4": {
+          "verified_flip": 47,
+          "verified_no_flip": 951
+        },
+        "attention": {
+          "verified_flip": 151,
+          "verified_no_flip": 847
+        },
+        "gradient_x_input": {
+          "verified_flip": 434,
+          "verified_no_flip": 564
+        },
+        "integrated_gradients": {
+          "verified_flip": 469,
+          "verified_no_flip": 529
+        },
+        "mirage": {
+          "verified_flip": 600,
+          "verified_no_flip": 398
+        },
+        "arc_jsd": {
+          "verified_flip": 558,
+          "verified_no_flip": 440
+        }
+      }
+    }
+  ],
+  "violation_query_methods": 0,
+  "violation_queries": 0
+}

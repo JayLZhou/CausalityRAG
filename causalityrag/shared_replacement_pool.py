@@ -13,6 +13,24 @@ EDITABLE_POS = {"NOUN", "PROPN", "VERB", "ADJ", "ADV", "NUM"}
 NON_SEMANTIC_TYPES = {"STOPWORD"}
 
 
+def _is_person_initial_fragment(unit: dict) -> bool:
+    """Return whether a unit is only an initial inside a person entity."""
+
+    if str(unit.get("type", "")).upper() != "PERSON":
+        return False
+    try:
+        entity_token_count = int(unit.get("entity_token_count") or 0)
+    except (TypeError, ValueError):
+        return False
+    letters = str(unit.get("text", "")).strip().replace(".", "")
+    return (
+        entity_token_count > 1
+        and 1 <= len(letters) <= 4
+        and letters.isalpha()
+        and letters.isupper()
+    )
+
+
 def is_editable_unit(unit: dict) -> bool:
     """Return whether a token belongs to the shared editable domain."""
 
@@ -22,6 +40,7 @@ def is_editable_unit(unit: dict) -> bool:
         and any(character.isalnum() for character in token)
         and str(unit.get("pos", "")).upper() in EDITABLE_POS
         and str(unit.get("type", "")).upper() not in NON_SEMANTIC_TYPES
+        and not _is_person_initial_fragment(unit)
     )
 
 

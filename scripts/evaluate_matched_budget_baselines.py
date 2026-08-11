@@ -13,8 +13,13 @@ from threading import Lock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.io import load_records, record_id
-from causalityrag.reader import ReaderClient, answers_exact_match
+from causalityrag.io import gold_answers, load_records, record_id
+from causalityrag.reader import (
+    ReaderClient,
+    ReaderProtocolError,
+    canonicalize_reader_answer,
+    reader_answers_exact_match,
+)
 from causalityrag.revision import apply_token_replacements
 from causalityrag.shared_replacement_pool import (
     FrozenSharedReplacementPool,
@@ -54,6 +59,12 @@ def ranked_ids(row: dict) -> list[str]:
             seen.add(normalized)
             result.append(normalized)
     return result
+
+
+def completed_ranked_ids(row: dict, eligible_ids: list[str]) -> list[str]:
+    eligible = set(eligible_ids)
+    scored = [unit_id for unit_id in ranked_ids(row) if unit_id in eligible]
+    return scored + [unit_id for unit_id in eligible_ids if unit_id not in scored]
 
 
 def random_ranked_ids(
@@ -100,15 +111,64 @@ def evaluate_query(
     k: int,
 ) -> dict:
     query_id = record_id(record)
-    clean_answer = str(reflow_row.get("clean_answer", ""))
-    gold_answer = str(record.get("answer", ""))
+    question = str(record.get("question", ""))
+    reader_mode = getattr(reader, "reader_mode", "short_answer")
+    clean_answer_raw = str(reflow_row.get("clean_answer", ""))
+    gold_answer_raw = str(record.get("answer", ""))
+    accepted_gold_answers_raw = gold_answers(record)
     budget = int(reflow_row.get("n_modified_tokens", 0))
+    try:
+        clean_answer = canonicalize_reader_answer(
+            question,
+            clean_answer_raw,
+            reader_mode=reader_mode,
+        )
+        gold_answer = canonicalize_reader_answer(
+            question,
+            gold_answer_raw,
+            reader_mode=reader_mode,
+        )
+        accepted_gold_answers = [
+            canonicalize_reader_answer(
+                question,
+                answer,
+                reader_mode=reader_mode,
+            )
+            for answer in accepted_gold_answers_raw
+        ]
+    except ReaderProtocolError as exc:
+        return {
+            "index": int(reflow_row.get("index", -1)),
+            "id": query_id,
+            "clean_answer": clean_answer_raw,
+            "gold_answer": gold_answer_raw,
+            "gold_answers": accepted_gold_answers_raw,
+            "clean_correct": False,
+            "matched_token_budget": budget,
+            "budget_source": "reflow_terminal",
+            "replacement_seed": replacement_seed,
+            "methods": {},
+            "reader_calls": 0,
+            "evaluation_status": "protocol_violation_invalid_clean_or_gold_answer",
+            "protocol_error": str(exc),
+        }
     base = {
         "index": int(reflow_row.get("index", -1)),
         "id": query_id,
         "clean_answer": clean_answer,
         "gold_answer": gold_answer,
-        "clean_correct": answers_exact_match(clean_answer, gold_answer),
+        "gold_answers": accepted_gold_answers,
+        "clean_answer_raw": clean_answer_raw,
+        "gold_answer_raw": gold_answer_raw,
+        "clean_correct": any(
+            reader_answers_exact_match(
+                question,
+                clean_answer,
+                accepted,
+                reader_mode=reader_mode,
+            )
+            for accepted in accepted_gold_answers
+        ),
         "matched_token_budget": budget,
         "budget_source": "reflow_terminal",
         "replacement_seed": replacement_seed,
@@ -133,13 +193,21 @@ def evaluate_query(
     eligible_ids = sorted(
         unit_id for unit_id in by_id if pool.is_eligible(unit_id)
     )
-    rankings = {
+    scored_rankings = {
         name: [
             unit_id
             for unit_id in ranked_ids(row)
             if unit_id in by_id and pool.is_eligible(unit_id)
         ]
         for name, row in score_rows.items()
+    }
+    rankings = {
+        name: completed_ranked_ids(score_rows[name], eligible_ids)
+        for name in scored_rankings
+    }
+    ranking_completion = {
+        name: ranking[len(scored_rankings[name]) :]
+        for name, ranking in rankings.items()
     }
     rankings.update({
         f"random_seed{seed}": random_ranked_ids(
@@ -153,14 +221,18 @@ def evaluate_query(
     methods = {}
     reader_calls = 0
     for method, ranking in rankings.items():
+        scored_count = len(scored_rankings.get(method, ranking))
+        completion_ids = ranking_completion.get(method, [])
         if len(ranking) < budget:
             methods[method] = {
-                "status": "insufficient_ranked_tokens",
+                "status": "insufficient_eligible_tokens",
                 "matched_token_budget": budget,
                 "selected_ids": [],
                 "n_modified_tokens": 0,
                 "verified_flip": False,
                 "reader_called": False,
+                "scored_ranked_tokens": scored_count,
+                "ranking_completion_used": bool(completion_ids),
             }
             continue
         selected_ids = ranking[:budget]
@@ -191,13 +263,40 @@ def evaluate_query(
                 "edits": revision["edits"],
                 "verified_flip": False,
                 "reader_called": False,
+                "scored_ranked_tokens": scored_count,
+                "ranking_completion_used": any(
+                    unit_id in completion_ids for unit_id in selected_ids
+                ),
             }
             continue
-        edited_answer = reader.answer(
-            str(record.get("question", "")),
-            revision["edited_contexts"],
+        try:
+            edited_answer = reader.answer(
+                question,
+                revision["edited_contexts"],
+            )
+        except ReaderProtocolError as exc:
+            reader_calls += 1
+            methods[method] = {
+                "status": "protocol_violation_invalid_reader_answer",
+                "matched_token_budget": budget,
+                "selected_ids": selected_ids,
+                "n_modified_tokens": int(revision["n_edits"]),
+                "edits": revision["edits"],
+                "verified_flip": False,
+                "reader_called": True,
+                "protocol_error": str(exc),
+                "scored_ranked_tokens": scored_count,
+                "ranking_completion_used": any(
+                    unit_id in completion_ids for unit_id in selected_ids
+                ),
+            }
+            continue
+        changed = not reader_answers_exact_match(
+            question,
+            clean_answer,
+            edited_answer,
+            reader_mode=reader_mode,
         )
-        changed = not answers_exact_match(clean_answer, edited_answer)
         reader_calls += 1
         methods[method] = {
             "status": "verified_flip" if changed else "verified_no_flip",
@@ -211,6 +310,10 @@ def evaluate_query(
             "edited_answer": edited_answer,
             "verified_flip": changed,
             "reader_called": True,
+            "scored_ranked_tokens": scored_count,
+            "ranking_completion_used": any(
+                unit_id in completion_ids for unit_id in selected_ids
+            ),
         }
     return {
         **base,
@@ -231,16 +334,36 @@ def summarize(rows: list[dict]) -> dict:
             for row in rows
             if name in row.get("methods", {})
         ]
+        token_counts = []
+        for row in rows:
+            method = row.get("methods", {}).get(name)
+            budget = int(row.get("matched_token_budget", 0))
+            if not isinstance(method, dict) or method.get("n_modified_tokens") is None:
+                if budget == 0:
+                    token_counts.append(0)
+                    continue
+                raise ValueError(
+                    f"missing {name} token count for positive-budget query "
+                    f"{row.get('id', '<unknown>')} (budget={budget})"
+                )
+            count = int(method["n_modified_tokens"])
+            if count < 0:
+                raise ValueError(
+                    f"negative {name} token count for query "
+                    f"{row.get('id', '<unknown>')}: {count}"
+                )
+            token_counts.append(count)
         executed = [row for row in results if row.get("reader_called")]
         flips = [row for row in executed if row.get("verified_flip")]
         methods[name] = {
             "available_queries": len(results),
             "executed_queries": len(executed),
+            "token_count_queries": len(token_counts),
+            "zero_token_queries": sum(count == 0 for count in token_counts),
             "verified_flips": len(flips),
             "flip_rate": len(flips) / max(1, len(executed)),
             "mean_modified_tokens": (
-                sum(int(row.get("n_modified_tokens", 0)) for row in executed)
-                / max(1, len(executed))
+                sum(token_counts) / max(1, len(token_counts))
             ),
         }
     return {
@@ -331,9 +454,31 @@ def main() -> None:
                 output.write(json.dumps(row, ensure_ascii=False) + "\n")
         return row
 
-    rows = []
+    expected_ids = {record_id(record) for record in records}
+    existing_by_id = {}
+    if os.path.isfile(args.out):
+        for row in load_records(args.out):
+            identifier = str(row.get("id", ""))
+            if identifier not in expected_ids:
+                raise ValueError(
+                    f"existing output contains an unexpected query id: {identifier}"
+                )
+            existing_by_id[identifier] = row
+
+    pending_indices = [
+        index
+        for index, record in enumerate(records)
+        if record_id(record) not in existing_by_id
+    ]
+    rows = list(existing_by_id.values())
+    if existing_by_id:
+        print(
+            f"[resume] recovered={len(existing_by_id)} "
+            f"pending={len(pending_indices)}",
+            flush=True,
+        )
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = [executor.submit(run, index) for index in range(len(records))]
+        futures = [executor.submit(run, index) for index in pending_indices]
         for completed, future in enumerate(as_completed(futures), start=1):
             rows.append(future.result())
             if completed % 100 == 0:

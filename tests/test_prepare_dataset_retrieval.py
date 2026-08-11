@@ -5,6 +5,7 @@ from urllib.error import HTTPError
 from scripts.prepare_dataset_retrieval import (
     frozen_queries,
     gold_titles,
+    render_medqa_question,
     request_embedding_batch,
 )
 
@@ -37,6 +38,50 @@ def test_gold_titles_supports_multihop_formats() -> None:
     }
 
     assert gold_titles(row) == ["Alpha", "Beta", "Gamma"]
+
+
+def test_medqa_queries_use_choice_letters_and_render_all_options() -> None:
+    record = {
+        "id": "m1",
+        "question": "Which treatment is indicated?",
+        "answer": "Treatment beta",
+        "answer_idx": "B",
+        "answer_type": "mcq",
+        "options": {
+            "A": "Treatment alpha",
+            "B": "Treatment beta",
+            "C": "Treatment gamma",
+            "D": "Treatment delta",
+        },
+    }
+
+    rows = frozen_queries([record], 1, dataset="medqa")
+
+    assert rows[0]["answer"] == "B"
+    assert rows[0]["answer_idx"] == "B"
+    assert rows[0]["question"] == (
+        "Which treatment is indicated?\n"
+        "Options:\n"
+        "(A) Treatment alpha\n"
+        "(B) Treatment beta\n"
+        "(C) Treatment gamma\n"
+        "(D) Treatment delta"
+    )
+
+
+def test_medqa_query_rejects_incomplete_choice_sets() -> None:
+    record = {
+        "question": "Incomplete?",
+        "answer_idx": "A",
+        "options": {"A": "Only option"},
+    }
+
+    try:
+        render_medqa_question(record)
+    except ValueError as error:
+        assert "A/B/C/D" in str(error)
+    else:
+        raise AssertionError("incomplete MedQA choices must fail closed")
 
 
 def test_embedding_request_splits_server_rejected_batches(monkeypatch) -> None:

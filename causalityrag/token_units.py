@@ -300,6 +300,14 @@ def all_context_word_units(
                 if entity is not None:
                     if entity.label_.upper() in ONTO_TYPES:
                         unit_type = entity.label_.upper()
+            if entity is None and spacy_token is not None:
+                is_stop = (
+                    bool(spacy_token.get("is_stop", False))
+                    if isinstance(spacy_token, dict)
+                    else bool(spacy_token.is_stop)
+                )
+                if is_stop:
+                    unit_type = "STOPWORD"
             unit = {
                 "unit_id": (
                     f"token:{chunk_id}:{match.start()}:{match.end()}"
@@ -449,21 +457,31 @@ def units_from_context_row(record: dict, row: dict, *, k: int) -> list[dict]:
     identifier = record_id(record)
     if str(row.get("id", "")) != identifier:
         raise ValueError(f"context-units ID mismatch for {identifier}")
-    if int(row.get("top_k", k)) != k:
+    stored_top_k = int(row.get("top_k", k))
+    if stored_top_k < k:
         raise ValueError(f"context-units top-k mismatch for {identifier}")
+    contexts = retrieved_contexts(record)[:k]
+    context_ids = {str(context["chunk_id"]) for context in contexts}
     stored_hashes = row.get("context_sha256", {})
     if stored_hashes:
         current_hashes = {
             str(context["chunk_id"]): hashlib.sha256(
                 str(context["text"]).encode("utf-8")
             ).hexdigest()
-            for context in retrieved_contexts(record)[:k]
+            for context in contexts
         }
-        if stored_hashes != current_hashes:
+        cached_prefix_hashes = {
+            chunk_id: stored_hashes.get(chunk_id) for chunk_id in context_ids
+        }
+        if cached_prefix_hashes != current_hashes:
             raise ValueError(
                 f"context-units context hash mismatch for {identifier}"
             )
-    return list(row.get("units", []))
+    return [
+        dict(unit)
+        for unit in row.get("units", [])
+        if str(unit.get("chunk_id", "")) in context_ids
+    ]
 
 
 def units_from_cache_row(record: dict, row: dict, *, k: int) -> list[dict]:

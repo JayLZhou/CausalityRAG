@@ -12,8 +12,50 @@ from itertools import islice
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.io import iter_records, record_id, retrieved_contexts
-from causalityrag.reader import ReaderClient, answers_exact_match
+from causalityrag.io import gold_answers, iter_records, record_id, retrieved_contexts
+from causalityrag.reader import (
+    ReaderClient,
+    ReaderProtocolError,
+    answers_exact_match,
+)
+
+
+def answer_with_retry(
+    reader: ReaderClient,
+    question: str,
+    contexts: list[dict],
+    *,
+    retries: int = 5,
+) -> str:
+    for attempt in range(retries + 1):
+        try:
+            return reader.answer(question, contexts)
+        except (OSError, TimeoutError):
+            if attempt == retries:
+                raise
+            time.sleep(min(2**attempt, 15))
+    raise AssertionError("unreachable")
+
+
+def reader_outcome(future) -> dict:
+    """Return a frozen clean-target outcome without accepting protocol errors."""
+
+    try:
+        answer = future.result()
+    except ReaderProtocolError as error:
+        raw_answer = str(getattr(error, "raw_answer", "") or error)
+        return {
+            "answer": "",
+            "status": "protocol_violation",
+            "raw_reader_answer": raw_answer,
+            "protocol_error": str(error),
+        }
+    return {
+        "answer": answer,
+        "status": "ok" if answer.strip() else "reader_abstention_empty_answer",
+        "raw_reader_answer": "",
+        "protocol_error": "",
+    }
 
 
 def main() -> None:
@@ -30,10 +72,17 @@ def main() -> None:
     )
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--workers", type=int, default=16)
+    parser.add_argument("--retries", type=int, default=5)
     parser.add_argument("--base-url", default="")
     parser.add_argument("--served-model", default="")
     args = parser.parse_args()
-    if args.start < 0 or args.n < 0 or args.k <= 0 or args.workers <= 0:
+    if (
+        args.start < 0
+        or args.n < 0
+        or args.k <= 0
+        or args.workers <= 0
+        or args.retries < 0
+    ):
         parser.error(
             "--start and --n must be non-negative; --k and --workers "
             "must be positive"
@@ -49,21 +98,23 @@ def main() -> None:
         base_url=args.base_url or None,
         model=args.served_model or None,
     )
-    answers = [""] * len(records)
+    outcomes = [None] * len(records)
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = {
             executor.submit(
-                reader.answer,
+                answer_with_retry,
+                reader,
                 str(record.get("question", "")),
                 retrieved_contexts(record)[: args.k],
+                retries=args.retries,
             ): index
             for index, record in enumerate(records)
         }
         completed = 0
         for future in as_completed(futures):
             index = futures[future]
-            answers[index] = future.result()
+            outcomes[index] = reader_outcome(future)
             completed += 1
             print(
                 f"[vllm-clean-targets] {completed}/{len(records)} "
@@ -74,19 +125,26 @@ def main() -> None:
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     rows = []
     with open(args.out, "w", encoding="utf-8") as output:
-        for record, answer in zip(records, answers):
-            nonempty = bool(answer.strip())
+        for record, outcome in zip(records, outcomes):
+            if outcome is None:
+                raise RuntimeError("reader outcome collection is incomplete")
+            answer = str(outcome["answer"])
+            status = str(outcome["status"])
+            accepted_gold_answers = gold_answers(record)
             row = {
                 "id": record_id(record),
                 "question": str(record.get("question", "")),
                 "gold_answer": str(record.get("answer", "")),
+                "gold_answers": accepted_gold_answers,
                 "clean_answer": answer,
-                "status": "ok" if nonempty else "reader_abstention_empty_answer",
-                "clean_correct": answers_exact_match(
-                    answer,
-                    str(record.get("answer", "")),
+                "status": status,
+                "raw_reader_answer": str(outcome["raw_reader_answer"]),
+                "protocol_error": str(outcome["protocol_error"]),
+                "clean_correct": any(
+                    answers_exact_match(answer, gold)
+                    for gold in accepted_gold_answers
                 )
-                if nonempty
+                if status == "ok"
                 else False,
                 "reader_backend": "vllm_openai_compatible",
                 "served_model": reader.model,
@@ -102,6 +160,9 @@ def main() -> None:
         "nonempty_targets": sum(row["status"] == "ok" for row in rows),
         "reader_abstentions": sum(
             row["status"] == "reader_abstention_empty_answer" for row in rows
+        ),
+        "protocol_violations": sum(
+            row["status"] == "protocol_violation" for row in rows
         ),
         "clean_correct": sum(bool(row["clean_correct"]) for row in rows),
         "clean_exact_match": (

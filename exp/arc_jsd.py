@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable, Sequence
@@ -10,10 +11,8 @@ from typing import Iterable, Sequence
 from causalityrag.io import retrieved_contexts
 from causalityrag.max_flow import Dinic, INF
 from causalityrag.reader import (
-    READ_SYSTEM,
-    READ_USER,
-    format_passages,
     model_context_window,
+    reader_prompt,
 )
 from causalityrag.token_units import (
     all_context_word_units,
@@ -1192,15 +1191,17 @@ class ArcJsdModel:
         )["input_ids"]
 
     def _prompt_text(self, question: str, contexts: Sequence[dict]) -> str:
+        reader_mode = os.environ.get(
+            "CAUSALITYRAG_READER_MODE", "short_answer"
+        ).strip().lower()
+        system, user = reader_prompt(
+            question,
+            list(contexts),
+            reader_mode=reader_mode,
+        )
         messages = [
-            {"role": "system", "content": READ_SYSTEM},
-            {
-                "role": "user",
-                "content": READ_USER.format(
-                    question=question,
-                    passages=format_passages(list(contexts)),
-                ),
-            },
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
         ]
         return self.tokenizer.apply_chat_template(
             messages,

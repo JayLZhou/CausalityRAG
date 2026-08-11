@@ -14,17 +14,23 @@ from threading import Lock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.io import load_records, record_id
+from causalityrag.io import gold_answers, load_records, record_id
 from causalityrag.paraphrase_control import excluded_from_paraphrase_control
 from causalityrag.reader import (
     ReaderClient,
+    ReaderProtocolError,
     answer_token_f1,
     answers_exact_match,
     answers_match,
+    canonicalize_reader_answer,
+    reader_answer_token_f1,
+    reader_answers_exact_match,
+    reader_answers_match,
 )
 from causalityrag.revision import apply_token_replacements
 from causalityrag.shared_replacement_pool import file_sha256
 from causalityrag.token_units import units_from_cache_row
+from scripts.evaluate_reflow import valid_clean_answer
 
 
 def stable_candidate(candidates: list[dict], unit_id: str, seed: int) -> dict:
@@ -106,6 +112,36 @@ def evaluate_selected(
     reader_attempts: int = 3,
     reader_retry_delay: float = 2.0,
 ) -> dict:
+    question = str(record.get("question", ""))
+    reader_mode = getattr(reader, "reader_mode", "short_answer")
+    clean_answer_raw = clean_answer
+    gold_answer_raw = gold_answer
+    accepted_gold_answers_raw = gold_answers(record)
+    try:
+        clean_answer = canonicalize_reader_answer(
+            question,
+            clean_answer_raw,
+            reader_mode=reader_mode,
+        )
+        gold_answer = canonicalize_reader_answer(
+            question,
+            gold_answer_raw,
+            reader_mode=reader_mode,
+        )
+        accepted_gold_answers = [
+            canonicalize_reader_answer(
+                question,
+                answer,
+                reader_mode=reader_mode,
+            )
+            for answer in accepted_gold_answers_raw
+        ]
+    except ReaderProtocolError as exc:
+        return {
+            "status": "protocol_violation_invalid_clean_or_gold_answer",
+            "reader_called": False,
+            "protocol_error": str(exc),
+        }
     if not selected:
         return {"status": "no_selected_tokens", "reader_called": False}
     excluded = [
@@ -165,13 +201,29 @@ def evaluate_selected(
             "excluded_numeric_date_ids": excluded,
             "edits": revision["edits"],
         }
-    edited = answer_with_retries(
-        reader,
-        str(record.get("question", "")),
-        revision["edited_contexts"],
-        attempts=reader_attempts,
-        retry_delay=reader_retry_delay,
-    )
+    try:
+        edited = answer_with_retries(
+            reader,
+            question,
+            revision["edited_contexts"],
+            attempts=reader_attempts,
+            retry_delay=reader_retry_delay,
+        )
+    except ReaderProtocolError as exc:
+        return {
+            "status": "protocol_violation_invalid_reader_answer",
+            "reader_called": True,
+            "selected_ids": selected,
+            "control_selected_ids": control_selected,
+            "excluded_numeric_date_ids": excluded,
+            "n_modified_tokens": int(revision["n_edits"]),
+            "edits": revision["edits"],
+            "protocol_error": str(exc),
+            "answer_flip": False,
+            "f1_flip": False,
+            "em_flip": False,
+            "acc_flip": False,
+        }
     if not edited.strip():
         return {
             "status": "invalid_empty_answer",
@@ -187,8 +239,24 @@ def evaluate_selected(
             "em_flip": False,
             "acc_flip": False,
         }
-    clean_f1 = answer_token_f1(clean_answer, gold_answer)
-    edited_f1 = answer_token_f1(edited, gold_answer)
+    clean_f1 = max(
+        reader_answer_token_f1(
+            question,
+            clean_answer,
+            accepted,
+            reader_mode=reader_mode,
+        )
+        for accepted in accepted_gold_answers
+    )
+    edited_f1 = max(
+        reader_answer_token_f1(
+            question,
+            edited,
+            accepted,
+            reader_mode=reader_mode,
+        )
+        for accepted in accepted_gold_answers
+    )
     return {
         "status": "evaluated",
         "reader_called": True,
@@ -197,21 +265,107 @@ def evaluate_selected(
         "excluded_numeric_date_ids": excluded,
         "n_modified_tokens": int(revision["n_edits"]),
         "edits": revision["edits"],
+        "clean_answer": clean_answer,
+        "clean_answer_raw": clean_answer_raw,
+        "gold_answer": gold_answer,
+        "gold_answers": accepted_gold_answers,
+        "gold_answer_raw": gold_answer_raw,
         "edited_answer": edited,
-        "answer_flip": not answers_exact_match(clean_answer, edited),
+        "answer_flip": not reader_answers_exact_match(
+            question,
+            clean_answer,
+            edited,
+            reader_mode=reader_mode,
+        ),
         "f1_flip": edited_f1 < clean_f1,
         "em_flip": (
-            answers_exact_match(clean_answer, gold_answer)
-            and not answers_exact_match(edited, gold_answer)
+            any(
+                reader_answers_exact_match(
+                    question,
+                    clean_answer,
+                    accepted,
+                    reader_mode=reader_mode,
+                )
+                for accepted in accepted_gold_answers
+            )
+            and not any(
+                reader_answers_exact_match(
+                    question,
+                    edited,
+                    accepted,
+                    reader_mode=reader_mode,
+                )
+                for accepted in accepted_gold_answers
+            )
         ),
         "acc_flip": (
-            answers_match(clean_answer, gold_answer)
-            and not answers_match(edited, gold_answer)
+            any(
+                reader_answers_match(
+                    question,
+                    clean_answer,
+                    accepted,
+                    reader_mode=reader_mode,
+                )
+                for accepted in accepted_gold_answers
+            )
+            and not any(
+                reader_answers_match(
+                    question,
+                    edited,
+                    accepted,
+                    reader_mode=reader_mode,
+                )
+                for accepted in accepted_gold_answers
+            )
         ),
     }
 
 
-def summarize(rows: list[dict]) -> dict:
+def summarize(
+    rows: list[dict],
+    *,
+    reader_mode: str | None = None,
+) -> dict:
+    mode = (
+        reader_mode
+        or os.environ.get("CAUSALITYRAG_READER_MODE", "short_answer")
+    ).strip().lower()
+
+    def accuracy_match(left: str, right: str) -> bool:
+        if mode == "quartz":
+            return answers_exact_match(left, right)
+        return answers_match(left, right)
+
+    def valid_method(method: dict) -> bool:
+        return bool(method.get("reader_called")) and not str(
+            method.get("status", "")
+        ).startswith("protocol_violation")
+
+    def aliases(parent: dict) -> list[str]:
+        values = parent.get("gold_answers") or [parent.get("gold_answer", "")]
+        return [str(value) for value in values if str(value).strip()]
+
+    def valid_clean(parent: dict) -> bool:
+        status = str(parent.get("evaluation_status", ""))
+        return (
+            valid_clean_answer(str(parent.get("clean_answer", "")))
+            and not status.startswith("protocol_violation_invalid_clean")
+            and status != "invalid_clean_answer"
+        )
+
+    def best_f1(answer: str, parent: dict) -> float:
+        accepted = aliases(parent)
+        return max(
+            (answer_token_f1(answer, gold) for gold in accepted),
+            default=0.0,
+        )
+
+    def any_em(answer: str, parent: dict) -> bool:
+        return any(answers_exact_match(answer, gold) for gold in aliases(parent))
+
+    def any_acc(answer: str, parent: dict) -> bool:
+        return any(accuracy_match(answer, gold) for gold in aliases(parent))
+
     method_names = sorted({
         name for row in rows for name in row.get("methods", {})
     })
@@ -222,41 +376,38 @@ def summarize(rows: list[dict]) -> dict:
             for row in rows
         ]
         values = [method for _, method in pairs]
-        executed = [row for row in values if row.get("reader_called")]
+        executed = [row for row in values if valid_method(row)]
         valid = [
             row for row in executed
             if str(row.get("edited_answer", "")).strip()
         ]
-        f1_clean_correct = [
+        valid_clean_pairs = [
             (parent, method)
             for parent, method in pairs
-            if answer_token_f1(
-                str(parent.get("clean_answer", "")),
-                str(parent.get("gold_answer", "")),
-            ) >= 1.0 - 1e-12
+            if valid_clean(parent)
+        ]
+        f1_clean_correct = [
+            (parent, method)
+            for parent, method in valid_clean_pairs
+            if best_f1(str(parent.get("clean_answer", "")), parent)
+            >= 1.0 - 1e-12
         ]
         em_clean_correct = [
             (parent, method)
-            for parent, method in pairs
-            if answers_exact_match(
-                str(parent.get("clean_answer", "")),
-                str(parent.get("gold_answer", "")),
-            )
+            for parent, method in valid_clean_pairs
+            if any_em(str(parent.get("clean_answer", "")), parent)
         ]
         acc_clean_correct = [
             (parent, method)
-            for parent, method in pairs
-            if answers_match(
-                str(parent.get("clean_answer", "")),
-                str(parent.get("gold_answer", "")),
-            )
+            for parent, method in valid_clean_pairs
+            if any_acc(str(parent.get("clean_answer", "")), parent)
         ]
 
         def valid_correct(population: list[tuple[dict, dict]]) -> list[tuple[dict, dict]]:
             return [
                 (parent, method)
                 for parent, method in population
-                if method.get("reader_called")
+                if valid_method(method)
                 and str(method.get("edited_answer", "")).strip()
             ]
 
@@ -264,34 +415,32 @@ def summarize(rows: list[dict]) -> dict:
         valid_em_correct = valid_correct(em_clean_correct)
         valid_acc_correct = valid_correct(acc_clean_correct)
         f1_flips = sum(
-            answer_token_f1(
-                str(method.get("edited_answer", "")),
-                str(parent.get("gold_answer", "")),
-            ) < 1.0 - 1e-12
+            best_f1(str(method.get("edited_answer", "")), parent)
+            < 1.0 - 1e-12
             for parent, method in valid_f1_correct
         )
         em_flips = sum(
-            not answers_exact_match(
-                str(method.get("edited_answer", "")),
-                str(parent.get("gold_answer", "")),
-            )
+            not any_em(str(method.get("edited_answer", "")), parent)
             for parent, method in valid_em_correct
         )
         acc_flips = sum(
-            not answers_match(
-                str(method.get("edited_answer", "")),
-                str(parent.get("gold_answer", "")),
-            )
+            not any_acc(str(method.get("edited_answer", "")), parent)
             for parent, method in valid_acc_correct
+        )
+        answer_flips = sum(
+            bool(method.get("answer_flip"))
+            for parent, method in valid_clean_pairs
+            if valid_method(method)
+            and str(method.get("edited_answer", "")).strip()
         )
         methods[name] = {
             "queries": len(values),
             "executed_queries": len(executed),
             "valid_answer_queries": len(valid),
-            "answer_flips": sum(bool(row.get("answer_flip")) for row in valid),
+            "answer_denominator_queries": len(valid_clean_pairs),
+            "answer_flips": answer_flips,
             "answer_flip_rate_itt": (
-                sum(bool(row.get("answer_flip")) for row in valid)
-                / max(1, len(values))
+                answer_flips / max(1, len(valid_clean_pairs))
             ),
             "f1_clean_correct_queries": len(f1_clean_correct),
             "em_clean_correct_queries": len(em_clean_correct),
@@ -416,6 +565,7 @@ def main() -> None:
             "id": identifier,
             "clean_answer": clean_answer,
             "gold_answer": gold_answer,
+            "gold_answers": gold_answers(record),
             "methods": methods,
         }
         with lock:

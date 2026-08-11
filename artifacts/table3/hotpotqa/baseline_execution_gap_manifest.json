@@ -1,0 +1,12 @@
+{
+  "schema": "causalityrag.no_frontier_resume.v1",
+  "dataset": "hotpotqa",
+  "reason": "final_table3_baseline_execution_gap",
+  "target_ids": [
+    "5ac3b4e0554299741d48a2ec",
+    "5ae54b3d5542990ba0bbb260",
+    "5ab97a315542996be2020517",
+    "5a8be7735542997f31a41df2",
+    "5a80a7f6554299485f598680"
+  ]
+}

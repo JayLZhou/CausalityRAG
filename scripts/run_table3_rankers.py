@@ -15,7 +15,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from causalityrag.io import load_records, record_id
 
 
-DATASETS = ("timeqa", "finqa", "musique", "quartz", "triviaqa", "2wiki", "pubmedqa")
+DATASETS = (
+    "timeqa",
+    "finqa",
+    "musique",
+    "quartz",
+    "triviaqa",
+    "2wiki",
+    "popqa",
+)
 METHODS = ("attention", "gradient_x_input", "integrated_gradients", "mirage", "arc_jsd")
 FILENAMES = {
     "attention": "attention_top5_1000.jsonl",
@@ -45,6 +53,10 @@ def clean_reference(base: Path) -> Path:
         if candidate.is_file():
             return candidate
     raise FileNotFoundError(f"no clean top-5 reference under {base}")
+
+
+def reader_mode(dataset: str) -> str:
+    return dataset if dataset in {"medqa", "quartz"} else "short_answer"
 
 
 def method_command(
@@ -204,6 +216,7 @@ def main() -> None:
                 env["CUDA_VISIBLE_DEVICES"] = str(shard)
                 env["PYTHONUNBUFFERED"] = "1"
                 env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+                env["CAUSALITYRAG_READER_MODE"] = reader_mode(dataset)
                 log_handle = (log_dir / f"{method}_{start:04d}_{start + count - 1:04d}.log").open("a", encoding="utf-8")
                 log_handles.append(log_handle)
                 print(f"[table3-ranker] START {dataset}/{method} shard={shard}", flush=True)

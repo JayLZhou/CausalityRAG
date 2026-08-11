@@ -66,6 +66,33 @@ def test_editable_domain_excludes_nonsemantic_types():
     )
 
 
+def test_editable_domain_excludes_person_initial_fragments():
+    assert not is_editable_unit({
+        "text": "DK",
+        "pos": "PROPN",
+        "type": "PERSON",
+        "entity_text": "Chan DK",
+        "entity_token_index": 1,
+        "entity_token_count": 2,
+    })
+    assert not is_editable_unit({
+        "text": "G.",
+        "pos": "PROPN",
+        "type": "PERSON",
+        "entity_text": "Bertram G. Katzung",
+        "entity_token_index": 1,
+        "entity_token_count": 3,
+    })
+    assert is_editable_unit({
+        "text": "Katzung",
+        "pos": "PROPN",
+        "type": "PERSON",
+        "entity_text": "Bertram G. Katzung",
+        "entity_token_index": 2,
+        "entity_token_count": 3,
+    })
+
+
 def test_frozen_pool_tracks_common_excluded_positions(tmp_path):
     path = tmp_path / "pool.jsonl"
     rows = [

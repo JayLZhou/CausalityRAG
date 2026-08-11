@@ -76,12 +76,26 @@ def main() -> None:
                 if pool.is_eligible(str(unit["unit_id"]))
             ]
             source, interactions, target = contribution_graph_edges(graph)
+            graph_repair = graph.get(
+                "connectivity_repair",
+                graph.get("contribution_graph", {})
+                .get("diagnostics", {})
+                .get("connectivity_repair", {
+                    "applied": False,
+                    "reason": "not_targeted_for_repair",
+                }),
+            )
             frontier = breakpoint_price_cuts(
                 units,
                 source,
                 interactions,
                 target,
             )
+            if units and not frontier.get("candidates"):
+                raise RuntimeError(
+                    f"{identifier}: nonempty executable domain produced an "
+                    "empty frontier"
+                )
             initial_flow = remaining_contribution_flow(
                 units,
                 source,
@@ -126,7 +140,11 @@ def main() -> None:
                 "initial_support_flow": initial_flow,
                 "n_frontier": len(candidates),
                 "frontier_candidates": candidates,
-                "frontier_diagnostics": frontier.get("diagnostics", {}),
+                "frontier_diagnostics": {
+                    **frontier.get("diagnostics", {}),
+                    "graph_connectivity_repair": graph_repair,
+                },
+                "graph_connectivity_repair": graph_repair,
                 "frontier_status": frontier.get("status", ""),
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             }

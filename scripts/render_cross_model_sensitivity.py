@@ -14,7 +14,8 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.reader import answer_token_f1
+from causalityrag.reader import MEDQA_CHOICES, answer_token_f1
+from scripts.reprocess_quartz_choice_results import reprocess as reprocess_quartz
 
 
 DATASETS = (
@@ -25,14 +26,14 @@ DATASETS = (
     ("quartz", "QuaRTz"),
     ("triviaqa", "TriviaQA"),
     ("2wiki", "2Wiki"),
-    ("pubmedqa", "PubMedQA"),
+    ("medqa", "MedQA"),
 )
 
 MAIN_DATASETS = (
     ("hotpotqa", "Hotpot"),
     ("finqa", "FinQA"),
     ("triviaqa", "Trivia"),
-    ("pubmedqa", "PubMed"),
+    ("medqa", "MedQA"),
 )
 
 
@@ -68,8 +69,16 @@ def first_existing(paths: tuple[Path, ...]) -> Path:
 
 
 def artifact_paths(model: ModelSpec, dataset: str) -> tuple[Path, Path, Path]:
+    repaired = model.root / dataset / "choice_postprocess_v1"
+    repaired_complete = repaired / "COMPLETE"
     if model.layout == "sweep":
         base = model.root / dataset
+        if dataset == "quartz" and repaired_complete.is_file():
+            return (
+                repaired / "factual/results.jsonl",
+                repaired / "control/results.jsonl",
+                base / "graph/summary.json",
+            )
         return (
             base / "factual/results.jsonl",
             base / "synonym/results.jsonl",
@@ -79,6 +88,16 @@ def artifact_paths(model: ModelSpec, dataset: str) -> tuple[Path, Path, Path]:
         raise ValueError(f"unknown layout: {model.layout}")
 
     base = model.root / dataset
+    if dataset == "quartz" and repaired_complete.is_file():
+        graph = first_existing((
+            base / "graphs/contribution_graph_top5_1000.summary.json",
+            base / "methods/reflow/frontier_top5_1000.jsonl",
+        ))
+        return (
+            repaired / "factual/results.jsonl",
+            repaired / "control/results.jsonl",
+            graph,
+        )
     if dataset == "hotpotqa":
         factual = first_existing((
             base / "audits/final_top10pool_k5/reflow_1000_v2.jsonl",
@@ -135,10 +154,67 @@ def load_graph_coverage(path: Path) -> tuple[int, int, float, float | None]:
     return ok, total, coverage, summary.get("avg_seconds")
 
 
-def summarize_dataset(model: ModelSpec, dataset: str) -> dict:
+def summarize_dataset(
+    model: ModelSpec,
+    dataset: str,
+    *,
+    quartz_records: list[dict] | None = None,
+) -> dict:
     factual_path, control_path, graph_path = artifact_paths(model, dataset)
-    factual_rows = {str(row["id"]): row for row in iter_jsonl(factual_path)}
-    control_rows = {str(row["id"]): row for row in iter_jsonl(control_path)}
+    factual_list = list(iter_jsonl(factual_path))
+    control_list = list(iter_jsonl(control_path))
+    quartz_report = None
+    if dataset == "quartz":
+        if quartz_records is None:
+            raise ValueError("QuaRTz aggregation requires the frozen retrieval rows")
+        factual_list, control_list, quartz_report = reprocess_quartz(
+            quartz_records,
+            factual_list,
+            control_list,
+        )
+        factual_unresolved = sum(
+            count
+            for status, count in quartz_report["factual_statuses"].items()
+            if status.startswith("unresolved")
+        )
+        reflow_control_statuses = {}
+        for row in control_list:
+            status = str(
+                control_record(row).get("quartz_postprocess_status", "")
+            )
+            reflow_control_statuses[status] = (
+                reflow_control_statuses.get(status, 0) + 1
+            )
+        quartz_report["reflow_control_postprocess_statuses"] = dict(
+            sorted(reflow_control_statuses.items())
+        )
+        control_unresolved = sum(
+            count
+            for status, count in reflow_control_statuses.items()
+            if status.startswith("unresolved")
+        )
+        unresolved = factual_unresolved + control_unresolved
+        same_choice_controls = reflow_control_statuses.get(
+            "same_choice_false_positive", 0
+        )
+        repaired_complete = (
+            factual_path.parent.parent / "COMPLETE"
+        ).is_file()
+        if (
+            quartz_report["requires_frontier_resume"]
+            or same_choice_controls
+            or (unresolved and not repaired_complete)
+        ):
+            raise ValueError(
+                f"QuaRTz artifacts for {model.key} require choice-level repair: "
+                f"requires_frontier_resume="
+                f"{quartz_report['requires_frontier_resume']}, "
+                f"unresolved={unresolved}, "
+                f"same_choice_controls={same_choice_controls}"
+            )
+
+    factual_rows = {str(row["id"]): row for row in factual_list}
+    control_rows = {str(row["id"]): row for row in control_list}
     if factual_rows.keys() != control_rows.keys():
         missing_control = sorted(factual_rows.keys() - control_rows.keys())
         missing_factual = sorted(control_rows.keys() - factual_rows.keys())
@@ -153,6 +229,22 @@ def summarize_dataset(model: ModelSpec, dataset: str) -> dict:
 
     if not paired:
         raise ValueError(f"no paired factual/control records for {model.key}/{dataset}")
+    if dataset == "medqa":
+        allowed = set(MEDQA_CHOICES)
+        for factual, control in paired:
+            query_id = str(factual.get("id", ""))
+            for field in ("clean_answer", "gold_answer", "edited_answer"):
+                value = str(factual.get(field, "")).strip().upper()
+                if value not in allowed:
+                    raise ValueError(
+                        f"invalid MedQA {field} for {model.key}/{query_id}: {value!r}"
+                    )
+            control_answer = str(control.get("edited_answer", "")).strip().upper()
+            if control_answer and control_answer not in allowed:
+                raise ValueError(
+                    f"invalid MedQA control answer for {model.key}/{query_id}: "
+                    f"{control_answer!r}"
+                )
 
     ans_deltas = [
         int(bool(factual.get("verified_flip"))) - int(bool(control.get("answer_flip")))
@@ -176,7 +268,7 @@ def summarize_dataset(model: ModelSpec, dataset: str) -> dict:
 
     graph_ok, graph_total, coverage, mean_graph_seconds = load_graph_coverage(graph_path)
     all_factual = list(factual_rows.values())
-    return {
+    result = {
         "dataset": dataset,
         "queries": len(all_factual),
         "paired_queries": len(paired),
@@ -198,6 +290,9 @@ def summarize_dataset(model: ModelSpec, dataset: str) -> dict:
             "graph_summary": {"path": str(graph_path), "sha256": sha256(graph_path)},
         },
     }
+    if quartz_report is not None:
+        result["quartz_postprocess"] = quartz_report
+    return result
 
 
 def aggregate_results(rows: list[dict]) -> dict:
@@ -297,11 +392,36 @@ def main() -> None:
     parser.add_argument("--out-json", type=Path, required=True)
     parser.add_argument("--out-values-tex", type=Path, required=True)
     parser.add_argument("--out-appendix-tex", type=Path, required=True)
+    parser.add_argument("--quartz-retrieval", type=Path)
     args = parser.parse_args()
+
+    quartz_retrieval = args.quartz_retrieval
+    if quartz_retrieval is None:
+        candidates = [
+            model.root / "quartz/retrieval/top10_1000.jsonl"
+            for model in args.model
+            if model.layout == "default"
+        ]
+        quartz_retrieval = next(
+            (path for path in candidates if path.is_file()),
+            None,
+        )
+    if quartz_retrieval is None or not quartz_retrieval.is_file():
+        raise FileNotFoundError(
+            "QuaRTz frozen retrieval is required; pass --quartz-retrieval"
+        )
+    quartz_records = list(iter_jsonl(quartz_retrieval))
 
     rendered_models = []
     for model in args.model:
-        rows = [summarize_dataset(model, dataset) for dataset, _ in DATASETS]
+        rows = [
+            summarize_dataset(
+                model,
+                dataset,
+                quartz_records=quartz_records if dataset == "quartz" else None,
+            )
+            for dataset, _ in DATASETS
+        ]
         rendered_models.append({
             "key": model.key,
             "label": model.label,

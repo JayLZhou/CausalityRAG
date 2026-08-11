@@ -35,13 +35,41 @@ def gold_titles(record: dict) -> list[str]:
     return list(dict.fromkeys(value.strip() for value in values if value.strip()))
 
 
-def frozen_queries(records: list[dict], n: int) -> list[dict]:
+def render_medqa_question(record: dict) -> tuple[str, str]:
+    """Render a MedQA item with a canonical A/B/C/D gold answer."""
+
+    question = str(record.get("question", "")).strip()
+    options = record.get("options")
+    if not isinstance(options, dict):
+        raise ValueError("MedQA record is missing an options object")
+    letters = ("A", "B", "C", "D")
+    if any(not str(options.get(letter, "")).strip() for letter in letters):
+        raise ValueError("MedQA record must contain nonempty A/B/C/D options")
+    answer = str(record.get("answer_idx", "")).strip().upper()
+    if answer not in letters:
+        raise ValueError(f"invalid MedQA answer_idx: {answer!r}")
+    rendered = "\n".join(
+        [question, "Options:"]
+        + [f"({letter}) {str(options[letter]).strip()}" for letter in letters]
+    )
+    return rendered, answer
+
+
+def frozen_queries(
+    records: list[dict],
+    n: int,
+    *,
+    dataset: str = "",
+) -> list[dict]:
     rows = []
     seen = set()
     for record in records:
         identifier = record_id(record)
-        question = str(record.get("question", "")).strip()
-        answer = str(record.get("answer", "")).strip()
+        if dataset.strip().lower() == "medqa":
+            question, answer = render_medqa_question(record)
+        else:
+            question = str(record.get("question", "")).strip()
+            answer = str(record.get("answer", "")).strip()
         if not identifier or not question or not answer or identifier in seen:
             continue
         seen.add(identifier)
@@ -51,7 +79,14 @@ def frozen_queries(records: list[dict], n: int) -> list[dict]:
             "answer": answer,
             "gold_titles": gold_titles(record),
         }
-        for key in ("answers", "answer_aliases", "answer_type", "long_answer"):
+        for key in (
+            "answers",
+            "answer_aliases",
+            "answer_type",
+            "long_answer",
+            "options",
+            "answer_idx",
+        ):
             if key in record:
                 row[key] = record[key]
         rows.append(row)
@@ -231,7 +266,11 @@ def main() -> None:
     top_path = retrieval / "top10_1000.jsonl"
     summary_path = retrieval / "top10_1000.summary.json"
 
-    queries = frozen_queries(load_records(args.questions), args.n)
+    queries = frozen_queries(
+        load_records(args.questions),
+        args.n,
+        dataset=args.dataset,
+    )
     write_jsonl(query_path, queries)
     tokenizer = AutoTokenizer.from_pretrained(
         args.tokenizer_path,

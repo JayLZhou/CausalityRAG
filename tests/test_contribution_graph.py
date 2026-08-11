@@ -1,8 +1,13 @@
+from types import SimpleNamespace
+
 from causalityrag.contribution_graph import (
     ContributionGraphBuilder,
     _contract_token_labels,
     contribution_graph_edges,
+    ensure_executable_source_target_path,
+    positive_source_target_path_exists,
 )
+from causalityrag.message_flow import _ClosedMessageFlowExtractor
 
 
 def test_builds_contribution_graph_from_closed_message_flow() -> None:
@@ -149,3 +154,67 @@ def test_support_shortcut_handles_a_flow_without_direct_source_or_target_edges()
     assert interactions == {}
     assert target == {"token:c1:0:5": 0.7}
     assert diagnostics["path_shortcut_fallback"]
+
+
+def test_layer_specific_sliding_window_policy() -> None:
+    direct = SimpleNamespace(
+        sliding_window=1024,
+        config=SimpleNamespace(model_type="gemma3_text"),
+    )
+    assert _ClosedMessageFlowExtractor._sliding_window(direct, 0) == 1024
+
+    qwen = SimpleNamespace(
+        config=SimpleNamespace(
+            model_type="qwen2",
+            sliding_window=4096,
+            max_window_layers=2,
+            use_sliding_window=True,
+        )
+    )
+    assert _ClosedMessageFlowExtractor._sliding_window(qwen, 1) is None
+    assert _ClosedMessageFlowExtractor._sliding_window(qwen, 2) == 4096
+
+    mistral = SimpleNamespace(
+        config=SimpleNamespace(model_type="mistral", sliding_window=8192)
+    )
+    assert _ClosedMessageFlowExtractor._sliding_window(mistral, 0) == 8192
+
+
+def test_disconnected_executable_graph_gets_one_bottleneck_bridge() -> None:
+    source, interactions, target, diagnostics = (
+        ensure_executable_source_target_path(
+            {"source-token", "target-token"},
+            {"source-token": 0.8, "excluded": 9.0},
+            {},
+            {"target-token": 0.3},
+        )
+    )
+
+    assert diagnostics["applied"]
+    assert diagnostics["reason"] == "disconnected_executable_positive_subgraph"
+    assert diagnostics["added_source_edges"] == []
+    assert diagnostics["added_target_edges"] == []
+    assert diagnostics["added_interaction_edges"] == [
+        {
+            "source": "source-token",
+            "target": "target-token",
+            "capacity": 0.3,
+        }
+    ]
+    assert positive_source_target_path_exists(source, interactions, target)
+
+
+def test_connectivity_repair_adds_missing_endpoint_edges() -> None:
+    source, interactions, target, diagnostics = (
+        ensure_executable_source_target_path(
+            {"a", "b"},
+            {},
+            {("a", "b"): 0.4},
+            {},
+        )
+    )
+
+    assert diagnostics["applied"]
+    assert diagnostics["added_source_edges"]
+    assert diagnostics["added_target_edges"]
+    assert positive_source_target_path_exists(source, interactions, target)

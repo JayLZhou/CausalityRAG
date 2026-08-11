@@ -42,6 +42,7 @@ def main() -> None:
     parser.add_argument("--target-results", nargs="+", default=[])
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", default="bfloat16")
+    parser.add_argument("--device-map", default="")
     parser.add_argument("--max-receivers-per-layer", type=int, default=48)
     args = parser.parse_args()
     if args.start < 0 or args.n <= 0 or args.k <= 0:
@@ -75,6 +76,7 @@ def main() -> None:
         args.model_path,
         device=args.device,
         dtype=args.dtype,
+        device_map=args.device_map,
         max_receivers_per_layer=args.max_receivers_per_layer,
     )
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)

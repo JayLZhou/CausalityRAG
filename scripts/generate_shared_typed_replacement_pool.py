@@ -434,7 +434,12 @@ def main() -> None:
     ]
     rows_by_key = {str(row["typed_key"]): row for row in typed_rows}
     resolved = {}
-    for path in (args.seed, args.out):
+    adjacent_seed = os.path.join(
+        os.path.dirname(os.path.abspath(args.out)),
+        "global_seed.jsonl",
+    )
+    seed_paths = list(dict.fromkeys((args.seed, adjacent_seed, args.out)))
+    for path in seed_paths:
         if not os.path.exists(path):
             continue
         with open(path, encoding="utf-8") as source:
@@ -537,6 +542,11 @@ def main() -> None:
         "unresolved": len(rows_by_key) - len(resolved),
         "missing_before_limit": missing_before_limit,
         "attempted_this_run": len(missing),
+        "seed_paths": [
+            os.path.abspath(path)
+            for path in seed_paths
+            if os.path.exists(path)
+        ],
         "generator_calls": calls,
         "output": os.path.abspath(args.out),
         "sha256": file_sha256(args.out),

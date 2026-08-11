@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 import json
+import os
 from dataclasses import dataclass
 from typing import Any
 
 from causalityrag.io import record_id, retrieved_contexts
-from causalityrag.reader import READ_SYSTEM, READ_USER
+from causalityrag.reader import reader_completion_text, reader_prompt
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class _TransformerRuntime:
         *,
         device: str = "cuda",
         dtype: str = "bfloat16",
+        device_map: str = "",
         max_context_tokens: int = 0,
         max_length: int = 0,
         max_receivers_per_layer: int = 48,
@@ -58,23 +60,33 @@ class _TransformerRuntime:
         # single-device load, while the installed torch build cannot use it.
         if hasattr(config, "base_model_tp_plan"):
             config.base_model_tp_plan = None
+        text_config = getattr(config, "text_config", config)
+        if hasattr(text_config, "base_model_tp_plan"):
+            text_config.base_model_tp_plan = None
         self.model_context_length = int(
-            getattr(config, "max_position_embeddings", 0) or 0
+            getattr(text_config, "max_position_embeddings", 0) or 0
         )
-        config._attn_implementation = "sdpa"
+        text_config._attn_implementation = "sdpa"
         torch_dtype = getattr(torch, dtype)
-        self.model = (
-            AutoModelForCausalLM.from_pretrained(
-                model_path,
-                config=config,
-                torch_dtype=torch_dtype,
-                trust_remote_code=True,
-                low_cpu_mem_usage=True,
-            )
-            .to(device)
-            .eval()
+        load_kwargs: dict[str, Any] = {}
+        if device_map:
+            load_kwargs["device_map"] = device_map
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            config=config,
+            torch_dtype=torch_dtype,
+            trust_remote_code=True,
+            low_cpu_mem_usage=True,
+            **load_kwargs,
         )
+        if device_map:
+            self.device = str(self.model.get_input_embeddings().weight.device)
+            self.model.eval()
+        else:
+            self.model = self.model.to(device).eval()
         self.model.requires_grad_(False)
+        self.decoder = self.model.model
+        self.model_family = str(getattr(text_config, "model_type", "unknown"))
 
 
     def _truncate_contexts(self, contexts: list[dict]) -> list[dict]:
@@ -116,20 +128,27 @@ class _TransformerRuntime:
     def _render(
         self, record: dict, contexts: list[dict], target_answer: str
     ) -> tuple[str, list[TextSpan]]:
-        passages = "\n\n".join(
-            f"[{context['chunk_id']}] {context['text']}" for context in contexts
-        )
         question = str(record.get("question", ""))
-        user = READ_USER.format(passages=passages, question=question)
+        reader_mode = os.environ.get(
+            "CAUSALITYRAG_READER_MODE", "short_answer"
+        ).strip().lower()
+        system, user = reader_prompt(
+            question,
+            contexts,
+            reader_mode=reader_mode,
+        )
         prompt = self.tokenizer.apply_chat_template(
             [
-                {"role": "system", "content": READ_SYSTEM},
+                {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
             tokenize=False,
             add_generation_prompt=True,
         )
-        completion = json.dumps({"answer": target_answer}, ensure_ascii=False)
+        completion = reader_completion_text(
+            target_answer,
+            reader_mode=reader_mode,
+        )
         text = prompt + completion
 
         spans: list[TextSpan] = []
@@ -306,7 +325,7 @@ class _MessageTraceRuntime(_TransformerRuntime):
 
             return hook
 
-        for index, layer in enumerate(self.model.model.layers):
+        for index, layer in enumerate(self.decoder.layers):
             trace.handles.append(
                 layer.register_forward_pre_hook(
                     save_input(trace.layer_inputs, index), with_kwargs=True
@@ -339,7 +358,7 @@ class _MessageTraceRuntime(_TransformerRuntime):
 
 
 class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
-    """Build a target-logit graph from Qwen's actual component writes.
+    """Build a target-logit graph from a decoder's actual component writes.
 
     Attention edges are source-specific OV writes contracted with the target
     gradient. MLP and residual edges use the actual vectors added to the
@@ -347,7 +366,7 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
     contributions in the original model, with no learned feature surrogate.
     """
 
-    method = "qwen_message_flow_target_logit_attribution"
+    method = "decoder_message_flow_target_logit_attribution"
 
     def __init__(
         self,
@@ -425,13 +444,13 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
                 )
                 target_tensor.backward()
 
-            layer_count = len(self.model.model.layers)
+            layer_count = len(self.decoder.layers)
             position_ids = torch.arange(
                 len(token_meta),
                 device=input_ids.device,
             ).unsqueeze(0)
             with torch.no_grad():
-                position_embeddings = self.model.model.rotary_emb(
+                position_embeddings = self.decoder.rotary_emb(
                     embeddings.detach(),
                     position_ids,
                 )
@@ -548,7 +567,7 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
         """Trace conserved positive flow backward from the answer."""
 
         edges: list[dict] = []
-        layer_count = len(self.model.model.layers)
+        layer_count = len(self.decoder.layers)
         final_layer = layer_count - 1
         final_stage = 2 * layer_count
         predictors = sorted({position - 1 for position in target_positions})
@@ -626,6 +645,7 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
             )
             layer_input = trace.layer_inputs[layer_index][0].detach().float()
             attention_grad = trace.attn_outputs[layer_index].grad[0].detach().float()
+            layer_input = layer_input.to(attention_grad.device)
             attention_residual = (attention_grad * layer_input).sum(dim=-1)
 
             allocations: list[dict] = []
@@ -994,7 +1014,7 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
         attention_input: Any,
     ) -> tuple[Any, Any]:
         torch = self.torch
-        layer = self.model.model.layers[layer_index]
+        layer = self.decoder.layers[layer_index]
         module = layer.self_attn
         n_heads = module.config.num_attention_heads
         n_kv_heads = module.config.num_key_value_heads
@@ -1012,9 +1032,19 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
                 .view(1, sequence_length, n_kv_heads, head_dim)
                 .transpose(1, 2)
             )
+            if hasattr(module, "q_norm"):
+                query_states = module.q_norm(query_states)
+            if hasattr(module, "k_norm"):
+                key_states = module.k_norm(key_states)
             cos, sin = position_embeddings
-            cos = cos.unsqueeze(1).to(query_states.dtype)
-            sin = sin.unsqueeze(1).to(query_states.dtype)
+            cos = cos.unsqueeze(1).to(
+                device=query_states.device,
+                dtype=query_states.dtype,
+            )
+            sin = sin.unsqueeze(1).to(
+                device=query_states.device,
+                dtype=query_states.dtype,
+            )
             query_states = query_states * cos + self._rotate_half(query_states) * sin
             key_states = key_states * cos + self._rotate_half(key_states) * sin
             if n_kv_heads != n_heads:
@@ -1029,18 +1059,21 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
                 )
                 * module.scaling
             )
+            softcap = getattr(module, "attn_logit_softcapping", None)
+            if softcap is not None:
+                attention_scores = (
+                    torch.tanh(attention_scores / float(softcap))
+                    * float(softcap)
+                )
             positions = torch.arange(
                 sequence_length,
                 device=attention_scores.device,
             )
             causal_mask = positions.unsqueeze(0) > positions.unsqueeze(1)
-            if (
-                module.config.use_sliding_window
-                and getattr(module.config, "sliding_window", None) is not None
-                and layer_index >= module.config.max_window_layers
-            ):
+            sliding_window = self._sliding_window(module, layer_index)
+            if sliding_window is not None:
                 too_old = positions.unsqueeze(0) <= (
-                    positions.unsqueeze(1) - int(module.config.sliding_window)
+                    positions.unsqueeze(1) - int(sliding_window)
                 )
                 causal_mask = causal_mask | too_old
             attention_scores.masked_fill_(
@@ -1071,6 +1104,26 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
                 ).square().sum(dim=0)
             )
             return contribution, transport
+
+    @staticmethod
+    def _sliding_window(module: Any, layer_index: int) -> int | None:
+        """Return the window used by this exact decoder layer, if any."""
+
+        direct = getattr(module, "sliding_window", None)
+        if direct is not None:
+            return int(direct)
+        config = module.config
+        window = getattr(config, "sliding_window", None)
+        if window is None:
+            return None
+        max_window_layers = getattr(config, "max_window_layers", None)
+        if max_window_layers is not None:
+            if not bool(getattr(config, "use_sliding_window", False)):
+                return None
+            return int(window) if layer_index >= int(max_window_layers) else None
+        if str(getattr(config, "model_type", "")) == "mistral":
+            return int(window)
+        return None
 
     def _rotate_half(self, hidden_states: Any) -> Any:
         midpoint = hidden_states.shape[-1] // 2

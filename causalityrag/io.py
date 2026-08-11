@@ -31,6 +31,27 @@ def record_id(record: dict, default: str = "") -> str:
     return default
 
 
+def gold_answers(record: dict) -> list[str]:
+    """Return the canonical answer followed by distinct benchmark aliases."""
+
+    values = []
+    for key in ("answer", "answers", "answer_aliases"):
+        value = record.get(key)
+        if isinstance(value, (list, tuple)):
+            values.extend(value)
+        elif value is not None:
+            values.append(value)
+    answers = []
+    seen = set()
+    for value in values:
+        text = str(value).strip()
+        normalized = text.casefold()
+        if text and normalized not in seen:
+            answers.append(text)
+            seen.add(normalized)
+    return answers
+
+
 def retrieved_contexts(record: dict) -> list[dict]:
     """Return normalized contexts as ``{chunk_id, text, title, rank}``.
 

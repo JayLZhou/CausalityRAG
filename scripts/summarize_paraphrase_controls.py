@@ -18,11 +18,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument(
+        "--reader-mode",
+        default=os.environ.get("CAUSALITYRAG_READER_MODE", "short_answer"),
+    )
     args = parser.parse_args()
 
-    result = summarize(load_records(args.input))
+    result = summarize(
+        load_records(args.input),
+        reader_mode=args.reader_mode,
+    )
     result["metric_contract"] = {
-        "answer_population": "all rows",
+        "answer_population": (
+            "queries with a valid clean answer; invalid clean answers are "
+            "excluded from the Ans-FR denominator"
+        ),
         "correctness_population": (
             "metric-specific clean-correct queries: clean F1=1 for F1, "
             "clean exact match for EM, and clean normalized containment "

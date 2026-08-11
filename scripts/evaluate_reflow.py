@@ -13,8 +13,13 @@ from threading import Lock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from causalityrag.io import load_records, record_id
-from causalityrag.reader import ReaderClient, answers_exact_match
+from causalityrag.io import gold_answers, load_records, record_id
+from causalityrag.reader import (
+    ReaderClient,
+    ReaderProtocolError,
+    canonicalize_reader_answer,
+    reader_answers_exact_match,
+)
 from causalityrag.revision import apply_token_replacements
 from causalityrag.shared_replacement_pool import (
     FrozenSharedReplacementPool,
@@ -64,17 +69,69 @@ def evaluate_query(
 ) -> dict:
     started = time.monotonic()
     query_id = record_id(record)
+    question = str(record.get("question", ""))
+    reader_mode = getattr(reader, "reader_mode", "short_answer")
     units = units_from_cache_row(record, units_row, k=k)
     by_id = {str(unit["unit_id"]): unit for unit in units}
-    clean_answer = str(frontier_row.get("clean_answer", ""))
-    gold_answer = str(record.get("answer", ""))
+    clean_answer_raw = str(frontier_row.get("clean_answer", ""))
+    gold_answer_raw = str(record.get("answer", ""))
+    accepted_gold_answers_raw = gold_answers(record)
+    try:
+        clean_answer = canonicalize_reader_answer(
+            question,
+            clean_answer_raw,
+            reader_mode=reader_mode,
+        )
+        gold_answer = canonicalize_reader_answer(
+            question,
+            gold_answer_raw,
+            reader_mode=reader_mode,
+        )
+        accepted_gold_answers = [
+            canonicalize_reader_answer(
+                question,
+                answer,
+                reader_mode=reader_mode,
+            )
+            for answer in accepted_gold_answers_raw
+        ]
+    except ReaderProtocolError as exc:
+        return {
+            "index": int(frontier_row.get("index", -1)),
+            "id": query_id,
+            "method": "reflow",
+            "clean_answer": clean_answer_raw,
+            "gold_answer": gold_answer_raw,
+            "gold_answers": accepted_gold_answers_raw,
+            "clean_correct": False,
+            "replacement_seed": replacement_seed,
+            "eligible": False,
+            "verified_flip": False,
+            "n_modified_tokens": 0,
+            "reader_calls": 0,
+            "attempts": [],
+            "evaluation_status": "protocol_violation_invalid_clean_or_gold_answer",
+            "protocol_error": str(exc),
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+        }
     base = {
         "index": int(frontier_row.get("index", -1)),
         "id": query_id,
         "method": "reflow",
         "clean_answer": clean_answer,
         "gold_answer": gold_answer,
-        "clean_correct": answers_exact_match(clean_answer, gold_answer),
+        "gold_answers": accepted_gold_answers,
+        "clean_answer_raw": clean_answer_raw,
+        "gold_answer_raw": gold_answer_raw,
+        "clean_correct": any(
+            reader_answers_exact_match(
+                question,
+                clean_answer,
+                accepted,
+                reader_mode=reader_mode,
+            )
+            for accepted in accepted_gold_answers
+        ),
         "replacement_seed": replacement_seed,
     }
     if not valid_clean_answer(clean_answer):
@@ -141,11 +198,33 @@ def evaluate_query(
                 "candidate_status": "protocol_violation_failed_edit",
             })
             continue
-        edited_answer = reader.answer(
-            str(record.get("question", "")),
-            revision["edited_contexts"],
+        try:
+            edited_answer = reader.answer(
+                question,
+                revision["edited_contexts"],
+            )
+        except ReaderProtocolError as exc:
+            attempts.append({
+                **candidate,
+                "selected_ids": selected_ids,
+                "selected_tokens": [
+                    str(by_id[unit_id].get("text", ""))
+                    for unit_id in selected_ids
+                ],
+                "n_edits": int(revision["n_edits"]),
+                "edits": revision["edits"],
+                "reader_called": True,
+                "answer_changed": False,
+                "candidate_status": "protocol_violation_invalid_reader_answer",
+                "protocol_error": str(exc),
+            })
+            break
+        changed = not reader_answers_exact_match(
+            question,
+            clean_answer,
+            edited_answer,
+            reader_mode=reader_mode,
         )
-        changed = not answers_exact_match(clean_answer, edited_answer)
         attempt = {
             **candidate,
             "selected_ids": selected_ids,
@@ -174,6 +253,11 @@ def evaluate_query(
         )
         for attempt in attempts
     )
+    has_invalid_reader_answer = any(
+        attempt.get("candidate_status")
+        == "protocol_violation_invalid_reader_answer"
+        for attempt in attempts
+    )
     return {
         **base,
         "eligible": True,
@@ -192,12 +276,16 @@ def evaluate_query(
             "verified_flip"
             if verified is not None
             else (
-                "verified_no_flip"
-                if executed
+                "protocol_violation_invalid_reader_answer"
+                if has_invalid_reader_answer
                 else (
-                    "protocol_violation_unexecutable_frontier"
-                    if has_protocol_violation
-                    else "no_frontier_candidate"
+                    "verified_no_flip"
+                    if executed
+                    else (
+                        "protocol_violation_unexecutable_frontier"
+                        if has_protocol_violation
+                        else "no_frontier_candidate"
+                    )
                 )
             )
         ),
@@ -222,9 +310,11 @@ def summarize(rows: list[dict]) -> dict:
     return {
         "queries": len(rows),
         "eligible_queries": len(eligible),
+        "answer_denominator_queries": len(eligible),
         "executed_queries": len(executed),
         "verified_flips": len(flips),
         "raw_flip_rate": len(flips) / max(1, len(rows)),
+        "answer_flip_rate": len(flips) / max(1, len(eligible)),
         "eligible_flip_rate": len(flips) / max(1, len(eligible)),
         "executed_flip_rate": len(flips) / max(1, len(executed)),
         "clean_correct_queries": len(clean_correct),

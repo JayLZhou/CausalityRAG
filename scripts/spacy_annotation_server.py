@@ -100,6 +100,7 @@ def annotate(nlp, text: str) -> dict:
                 "tag": token.tag_,
                 "lemma": token.lemma_,
                 "morph": token.morph.to_dict(),
+                "is_stop": bool(token.is_stop),
             }
             for token in doc
         ],

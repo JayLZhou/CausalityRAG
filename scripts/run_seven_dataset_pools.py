@@ -13,14 +13,19 @@ from pathlib import Path
 
 DATASETS = [
     (
+        "popqa",
+        "/data1/yujia/RAGData/paper_datasets/popqa/normalized_20260810/questions.jsonl",
+        "/data1/yujia/RAGData/paper_datasets/popqa/normalized_20260810/corpus.jsonl",
+    ),
+    (
         "2wiki",
         "/data1/yujia/RAGData/2wiki/questions/2wikimultihopqa.json",
         "/data1/yujia/RAGData/2wiki/corpus/2wikimultihopqa_corpus.json",
     ),
     (
-        "pubmedqa",
-        "/data1/yujia/RAGData/pubmedqa/questions/pubmedqa.json",
-        "/data1/yujia/RAGData/pubmedqa/corpus/pubmedqa_corpus.json",
+        "medqa",
+        "/data1/yujia/RAGData/paper_datasets/medqa/questions/medqa.json",
+        "/data1/yujia/RAGData/paper_datasets/medqa/corpus/medqa_textbooks.jsonl",
     ),
     (
         "timeqa",
@@ -141,7 +146,8 @@ def generate_until_complete(
     seed: Path,
     pool_dir: Path,
     max_passes: int,
-) -> None:
+    allow_exclusions: bool = False,
+) -> int:
     for generation_pass in range(1, max_passes + 1):
         manifest = pool_dir / "generation.json"
         if generation_pass == 1:
@@ -195,7 +201,14 @@ def generate_until_complete(
             flush=True,
         )
         if unresolved == 0:
-            return
+            return 0
+    if allow_exclusions:
+        print(
+            f"[pool-generation] exhausted={max_passes} "
+            f"excluding_unresolved={unresolved}",
+            flush=True,
+        )
+        return unresolved
     raise RuntimeError(
         f"replacement generation remains unresolved after {max_passes} passes"
     )
@@ -239,29 +252,35 @@ def freeze_pool(
     python: str,
     repository: Path,
     pool_dir: Path,
+    exclude_unresolved: bool = False,
 ) -> None:
-    run(
-        [
-            python,
-            "scripts/freeze_shared_replacement_pool.py",
-            "--positions",
-            str(pool_dir / "positions.jsonl"),
-            "--typed-candidates",
-            str(pool_dir / "typed_candidates.jsonl"),
-            "--out",
-            str(pool_dir / "shared_pool.jsonl"),
-            "--manifest-out",
-            str(pool_dir / "shared_pool.manifest.json"),
-        ],
-        cwd=repository,
-    )
+    command = [
+        python,
+        "scripts/freeze_shared_replacement_pool.py",
+        "--positions",
+        str(pool_dir / "positions.jsonl"),
+        "--typed-candidates",
+        str(pool_dir / "typed_candidates.jsonl"),
+        "--out",
+        str(pool_dir / "shared_pool.jsonl"),
+        "--manifest-out",
+        str(pool_dir / "shared_pool.manifest.json"),
+    ]
+    if exclude_unresolved:
+        command.append("--exclude-unresolved")
+    run(command, cwd=repository)
     report = json.loads(
         (pool_dir / "shared_pool.manifest.json").read_text(encoding="utf-8")
     )
-    if (
-        int(report["unresolved_typed_positions"]) != 0
-        or int(report["eligible_positions"]) != int(report["positions"])
-    ):
+    positions = int(report["positions"])
+    eligible = int(report["eligible_positions"])
+    excluded = int(report["excluded_positions"])
+    unresolved = int(report["unresolved_typed_positions"])
+    valid_partition = eligible + excluded == positions
+    valid_exclusions = (
+        unresolved == excluded if exclude_unresolved else unresolved == excluded == 0
+    )
+    if not valid_partition or not valid_exclusions or float(report["coverage"]) != 1.0:
         raise RuntimeError(f"pool failed closed audit: {report}")
 
 
@@ -277,11 +296,27 @@ def main() -> None:
         default="/data1/yujia/envs/graphrag/bin/python",
     )
     parser.add_argument("--max-generation-passes", type=int, default=100)
+    parser.add_argument(
+        "--exclude-unresolved-after-max-passes",
+        action="store_true",
+        help=(
+            "after exhausting generation, freeze unresolved positions as common "
+            "no-legal-counterfactual exclusions"
+        ),
+    )
+    parser.add_argument(
+        "--datasets",
+        nargs="*",
+        default=[],
+        help="build only these dataset keys; the default keeps the full suite",
+    )
     args = parser.parse_args()
 
     repository = Path(__file__).resolve().parents[1]
     out_root = Path(args.out_root)
     for dataset, questions, corpus in DATASETS:
+        if args.datasets and dataset not in set(args.datasets):
+            continue
         root = out_root / dataset
         write_manifest(root, dataset, "pool_building")
         retrieval = root / "retrieval" / "top10_1000.jsonl"
@@ -360,18 +395,20 @@ def main() -> None:
             pool_dir=smoke,
             n=10,
         )
-        generate_until_complete(
+        smoke_unresolved = generate_until_complete(
             python="/data1/yujia/envs/spacyner/bin/python",
             repository=repository,
             typed_keys=smoke / "typed_keys.jsonl",
             seed=smoke / "typed_candidates.jsonl",
             pool_dir=smoke,
             max_passes=args.max_generation_passes,
+            allow_exclusions=args.exclude_unresolved_after_max_passes,
         )
         freeze_pool(
             python="/data1/yujia/envs/spacyner/bin/python",
             repository=repository,
             pool_dir=smoke,
+            exclude_unresolved=smoke_unresolved > 0,
         )
         print(f"[smoke:passed] {dataset}", flush=True)
 
@@ -384,18 +421,20 @@ def main() -> None:
             pool_dir=formal,
             n=1000,
         )
-        generate_until_complete(
+        formal_unresolved = generate_until_complete(
             python="/data1/yujia/envs/spacyner/bin/python",
             repository=repository,
             typed_keys=formal / "typed_keys.jsonl",
             seed=smoke / "typed_candidates.jsonl",
             pool_dir=formal,
             max_passes=args.max_generation_passes,
+            allow_exclusions=args.exclude_unresolved_after_max_passes,
         )
         freeze_pool(
             python="/data1/yujia/envs/spacyner/bin/python",
             repository=repository,
             pool_dir=formal,
+            exclude_unresolved=formal_unresolved > 0,
         )
         write_manifest(root, dataset, "pool_complete")
         print(f"[dataset:pool-complete] {dataset}", flush=True)

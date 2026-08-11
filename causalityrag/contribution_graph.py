@@ -17,12 +17,14 @@ class ContributionGraphBuilder:
         *,
         device: str = "cuda",
         dtype: str = "bfloat16",
+        device_map: str = "",
         max_receivers_per_layer: int = 48,
     ) -> None:
         self._extractor = _ClosedMessageFlowExtractor(
             model_path,
             device=device,
             dtype=dtype,
+            device_map=device_map,
             max_context_tokens=0,
             max_length=0,
             max_receivers_per_layer=max_receivers_per_layer,
@@ -151,6 +153,183 @@ def contribution_graph_edges(
         if float(edge.get("capacity", 0.0)) > 0.0
     }
     return source, interactions, target
+
+
+def positive_source_target_path_exists(
+    source: dict[str, float],
+    interactions: dict[tuple[str, str], float],
+    target: dict[str, float],
+) -> bool:
+    """Return whether positive edges connect any source token to the answer."""
+
+    target_ids = {
+        str(unit_id) for unit_id, weight in target.items() if float(weight) > 0.0
+    }
+    pending = [
+        str(unit_id) for unit_id, weight in source.items() if float(weight) > 0.0
+    ]
+    reachable = set(pending)
+    adjacency: dict[str, list[str]] = defaultdict(list)
+    for (left, right), weight in interactions.items():
+        if float(weight) > 0.0 and str(left) != str(right):
+            adjacency[str(left)].append(str(right))
+    while pending:
+        current = pending.pop()
+        if current in target_ids:
+            return True
+        for following in adjacency.get(current, []):
+            if following not in reachable:
+                reachable.add(following)
+                pending.append(following)
+    return bool(reachable.intersection(target_ids))
+
+
+def ensure_executable_source_target_path(
+    unit_ids: set[str],
+    source: dict[str, float],
+    interactions: dict[tuple[str, str], float],
+    target: dict[str, float],
+) -> tuple[
+    dict[str, float],
+    dict[tuple[str, str], float],
+    dict[str, float],
+    dict,
+]:
+    """Repair a disconnected frozen-pool subgraph with minimal positive edges."""
+
+    domain = {str(unit_id) for unit_id in unit_ids}
+    repaired_source = {
+        str(unit_id): float(weight)
+        for unit_id, weight in source.items()
+        if str(unit_id) in domain and float(weight) > 0.0
+    }
+    repaired_interactions = {
+        (str(left), str(right)): float(weight)
+        for (left, right), weight in interactions.items()
+        if (
+            str(left) in domain
+            and str(right) in domain
+            and str(left) != str(right)
+            and float(weight) > 0.0
+        )
+    }
+    repaired_target = {
+        str(unit_id): float(weight)
+        for unit_id, weight in target.items()
+        if str(unit_id) in domain and float(weight) > 0.0
+    }
+    diagnostics = {
+        "applied": False,
+        "reason": "already_connected",
+        "policy": "strongest_endpoint_bottleneck_bridge",
+        "added_source_edges": [],
+        "added_interaction_edges": [],
+        "added_target_edges": [],
+    }
+    if not domain:
+        diagnostics["reason"] = "empty_executable_domain"
+        return (
+            repaired_source,
+            repaired_interactions,
+            repaired_target,
+            diagnostics,
+        )
+    if positive_source_target_path_exists(
+        repaired_source,
+        repaired_interactions,
+        repaired_target,
+    ):
+        return (
+            repaired_source,
+            repaired_interactions,
+            repaired_target,
+            diagnostics,
+        )
+
+    support = defaultdict(float)
+    for unit_id, weight in repaired_source.items():
+        support[unit_id] += weight
+    for (left, right), weight in repaired_interactions.items():
+        support[left] += weight
+        support[right] += weight
+    for unit_id, weight in repaired_target.items():
+        support[unit_id] += weight
+    positive_reference = [
+        float(weight)
+        for weight in (
+            list(source.values())
+            + list(interactions.values())
+            + list(target.values())
+        )
+        if float(weight) > 0.0
+    ]
+    reference_capacity = (
+        min(positive_reference) if positive_reference else 1e-6
+    )
+
+    def strongest(weights: dict[str, float], *, avoid: str = "") -> str:
+        candidates = [unit_id for unit_id in domain if unit_id != avoid]
+        if not candidates:
+            candidates = list(domain)
+        return min(
+            candidates,
+            key=lambda unit_id: (
+                -float(weights.get(unit_id, support.get(unit_id, 0.0))),
+                unit_id,
+            ),
+        )
+
+    if not repaired_source:
+        source_anchor = strongest({})
+        capacity = max(float(support.get(source_anchor, 0.0)), reference_capacity)
+        repaired_source[source_anchor] = capacity
+        diagnostics["added_source_edges"].append({
+            "token_id": source_anchor,
+            "capacity": capacity,
+        })
+    if not repaired_target:
+        target_anchor = strongest({}, avoid=strongest(repaired_source))
+        capacity = max(float(support.get(target_anchor, 0.0)), reference_capacity)
+        repaired_target[target_anchor] = capacity
+        diagnostics["added_target_edges"].append({
+            "token_id": target_anchor,
+            "capacity": capacity,
+        })
+
+    if not positive_source_target_path_exists(
+        repaired_source,
+        repaired_interactions,
+        repaired_target,
+    ):
+        left = strongest(repaired_source)
+        right = strongest(repaired_target, avoid=left)
+        capacity = min(repaired_source[left], repaired_target[right])
+        repaired_interactions[(left, right)] = (
+            repaired_interactions.get((left, right), 0.0) + capacity
+        )
+        diagnostics["added_interaction_edges"].append({
+            "source": left,
+            "target": right,
+            "capacity": capacity,
+        })
+
+    diagnostics.update({
+        "applied": True,
+        "reason": "disconnected_executable_positive_subgraph",
+        "reference_capacity": reference_capacity,
+    })
+    if not positive_source_target_path_exists(
+        repaired_source,
+        repaired_interactions,
+        repaired_target,
+    ):
+        raise RuntimeError("connectivity repair failed to create a positive path")
+    return (
+        repaired_source,
+        repaired_interactions,
+        repaired_target,
+        diagnostics,
+    )
 
 
 def _contract_token_labels(

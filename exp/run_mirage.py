@@ -11,6 +11,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from causalityrag.io import load_records, record_id, retrieved_contexts
+from causalityrag.reader import reader_completion_text
 from causalityrag.token_units import units_from_cache_row
 from exp.arc_jsd import ArcJsdModel
 from exp.mirage import MirageScorer
@@ -81,10 +82,12 @@ def main() -> None:
                 question = str(record.get("question", ""))
                 contexts = retrieved_contexts(record)[: args.k]
                 units = units_from_cache_row(record, units_row, k=args.k)
-                response_text = json.dumps(
-                    {"answer": clean_answer},
-                    ensure_ascii=False,
-                    separators=(",", ":"),
+                response_text = reader_completion_text(
+                    clean_answer,
+                    reader_mode=os.environ.get(
+                        "CAUSALITYRAG_READER_MODE", "short_answer"
+                    ),
+                    compact_json=True,
                 )
                 trajectory = model.trajectory_for_response(
                     question,

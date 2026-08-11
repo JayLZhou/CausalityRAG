@@ -1,10 +1,10 @@
 """Summarize HotpotQA counterfactual flips against clean reader answers.
 
-Each answer is evaluated against the same dataset gold answer with the
-HippoRAG/MRQA normalizer.  Answer-Flip is measured over every query.  The
-gold-based metrics are correctness-conditioned: each metric uses the queries
-that the clean reader answered correctly under that same metric, and only a
-decrease counts as a flip.  We report:
+Each answer is evaluated against every accepted dataset gold alias with the
+HippoRAG/MRQA normalizer.  Answer-Flip excludes invalid clean answers from its
+denominator.  The gold-based metrics are correctness-conditioned: each metric
+uses the queries that the clean reader answered correctly under that same
+metric, and only a decrease counts as a flip.  We report:
 
 * Answer-Flip: normalized EM(edited, clean) = 0;
 * F1-CFlip: normalized token F1(edited, gold) < F1(clean, gold);
@@ -27,6 +27,7 @@ from typing import Any, Iterable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from causalityrag.reader import answer_token_f1, answers_exact_match, answers_match
+from scripts.evaluate_reflow import valid_clean_answer
 
 
 def _rows(path: str) -> list[dict[str, Any]]:
@@ -35,27 +36,71 @@ def _rows(path: str) -> list[dict[str, Any]]:
 
 
 def _is_executed(method: dict[str, Any]) -> bool:
-    return bool(method.get("reader_called", False))
+    return bool(method.get("reader_called", False)) and not str(
+        method.get("status", "")
+    ).startswith("protocol_violation")
 
 
-def _metric_row(*, row: dict[str, Any], edited_answer: str) -> dict[str, Any] | None:
+def _accuracy_match(left: str, right: str, *, reader_mode: str) -> bool:
+    if reader_mode == "quartz":
+        return answers_exact_match(left, right)
+    return answers_match(left, right)
+
+
+def _gold_aliases(row: dict[str, Any]) -> list[str]:
+    values = row.get("gold_answers") or [row.get("gold_answer", "")]
+    return [str(value) for value in values if str(value).strip()]
+
+
+def _valid_clean_row(row: dict[str, Any]) -> bool:
+    status = str(row.get("evaluation_status", ""))
+    return (
+        valid_clean_answer(str(row.get("clean_answer", "")))
+        and not status.startswith("protocol_violation_invalid_clean")
+        and status != "invalid_clean_answer"
+    )
+
+
+def _metric_row(
+    *,
+    row: dict[str, Any],
+    edited_answer: str,
+    reader_mode: str,
+) -> dict[str, Any] | None:
     clean_answer = str(row.get("clean_answer", ""))
-    gold_answer = str(row.get("gold_answer", ""))
-    if not clean_answer or not gold_answer or not edited_answer.strip():
+    accepted = _gold_aliases(row)
+    if not _valid_clean_row(row) or not accepted or not edited_answer.strip():
         return None
     return {
         "id": str(row.get("id", "")),
-        "clean_f1": answer_token_f1(clean_answer, gold_answer),
-        "edited_f1": answer_token_f1(edited_answer, gold_answer),
-        "clean_em": answers_exact_match(clean_answer, gold_answer),
-        "edited_em": answers_exact_match(edited_answer, gold_answer),
-        "clean_acc": answers_match(clean_answer, gold_answer),
-        "edited_acc": answers_match(edited_answer, gold_answer),
+        "clean_f1": max(answer_token_f1(clean_answer, gold) for gold in accepted),
+        "edited_f1": max(
+            answer_token_f1(edited_answer, gold) for gold in accepted
+        ),
+        "clean_em": any(
+            answers_exact_match(clean_answer, gold) for gold in accepted
+        ),
+        "edited_em": any(
+            answers_exact_match(edited_answer, gold) for gold in accepted
+        ),
+        "clean_acc": any(
+            _accuracy_match(clean_answer, gold, reader_mode=reader_mode)
+            for gold in accepted
+        ),
+        "edited_acc": any(
+            _accuracy_match(edited_answer, gold, reader_mode=reader_mode)
+            for gold in accepted
+        ),
     }
 
 
-def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> dict[str, Any]:
+def _summarize(
+    method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]],
+    *,
+    reader_mode: str = "short_answer",
+) -> dict[str, Any]:
     total_queries = 0
+    valid_clean_queries = 0
     evaluated = 0
     valid_answers = 0
     scored = 0
@@ -71,18 +116,24 @@ def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> 
     for parent, method in method_rows:
         total_queries += 1
         clean_answer = str(parent.get("clean_answer", ""))
-        gold_answer = str(parent.get("gold_answer", ""))
+        accepted = _gold_aliases(parent)
+        valid_clean = _valid_clean_row(parent)
+        valid_clean_queries += int(valid_clean)
         clean_f1_score = (
-            answer_token_f1(clean_answer, gold_answer)
-            if clean_answer and gold_answer
+            max(answer_token_f1(clean_answer, gold) for gold in accepted)
+            if valid_clean and accepted
             else 0.0
         )
         clean_em_score = bool(
-            clean_answer and gold_answer
-            and answers_exact_match(clean_answer, gold_answer)
+            valid_clean
+            and any(answers_exact_match(clean_answer, gold) for gold in accepted)
         )
         clean_acc_score = bool(
-            clean_answer and gold_answer and answers_match(clean_answer, gold_answer)
+            valid_clean
+            and any(
+                _accuracy_match(clean_answer, gold, reader_mode=reader_mode)
+                for gold in accepted
+            )
         )
         f1_clean_correct = clean_f1_score >= 1.0 - 1e-12
         f1_clean_correct_queries += int(f1_clean_correct)
@@ -92,12 +143,13 @@ def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> 
             continue
         evaluated += 1
         edited_answer = str(method.get("edited_answer", method.get("answer", "")))
-        if clean_answer and edited_answer.strip():
+        if valid_clean and edited_answer.strip():
             answer_flips += int(not answers_exact_match(edited_answer, clean_answer))
             valid_answers += 1
         metrics = _metric_row(
             row=parent,
             edited_answer=edited_answer,
+            reader_mode=reader_mode,
         )
         if metrics is None:
             continue
@@ -122,9 +174,9 @@ def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> 
                 "clean_acc": bool(metrics["clean_acc"]),
                 "edited_acc": bool(metrics["edited_acc"]),
             })
-    denominator = max(1, total_queries)
     return {
         "total_queries": total_queries,
+        "answer_denominator_queries": valid_clean_queries,
         "reader_executed_queries": evaluated,
         "valid_answer_queries": valid_answers,
         "gold_scored_queries": scored,
@@ -132,7 +184,7 @@ def _summarize(method_rows: Iterable[tuple[dict[str, Any], dict[str, Any]]]) -> 
         "em_clean_correct_queries": em_clean_correct_queries,
         "acc_clean_correct_queries": acc_clean_correct_queries,
         "answer_flip_count": answer_flips,
-        "answer_flip_ratio": answer_flips / denominator,
+        "answer_flip_ratio": answer_flips / max(1, valid_clean_queries),
         "f1_flip_count": f1_flips,
         "f1_flip_ratio": f1_flips / max(1, f1_clean_correct_queries),
         "em_flip_count": em_flips,
@@ -151,7 +203,12 @@ def main() -> None:
     parser.add_argument("--reflow", required=True)
     parser.add_argument("--baselines", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument(
+        "--reader-mode",
+        default=os.environ.get("CAUSALITYRAG_READER_MODE", "short_answer"),
+    )
     args = parser.parse_args()
+    reader_mode = args.reader_mode.strip().lower()
 
     reflow_rows = _rows(args.reflow)
     baseline_rows = _rows(args.baselines)
@@ -165,6 +222,7 @@ def main() -> None:
             row,
             {
                 "reader_called": int(row.get("reader_calls", 0)) > 0,
+                "status": row.get("evaluation_status", ""),
                 "edited_answer": row.get("edited_answer", ""),
             },
         ))
@@ -176,7 +234,7 @@ def main() -> None:
     })
     output: dict[str, Any] = {
         "metric_contract": {
-            "answer_population": "all rows; no reader execution, no legal edit, or an empty answer contributes zero answer flips",
+            "answer_population": "queries with a valid clean answer; invalid clean answers are excluded, while valid-clean queries with no executed legal edit contribute zero flips",
             "correctness_population": "metric-specific clean-correct queries: clean F1=1 for F1, clean exact match for EM, and clean normalized containment accuracy for Acc; unexecuted or invalid edits contribute zero correctness flips",
             "answer_flip": "normalized EM(edited, clean) = 0",
             "f1_flip": "on the clean-correct population, normalized token F1(edited, gold) < token F1(clean, gold)",
@@ -188,13 +246,19 @@ def main() -> None:
             "baselines": os.path.abspath(args.baselines),
         },
         "methods": {
-            "reflow": _summarize(reflow_method_rows),
+            "reflow": _summarize(
+                reflow_method_rows,
+                reader_mode=reader_mode,
+            ),
         },
     }
     for method_name in method_names:
         output["methods"][method_name] = _summarize(
-            (row, row.get("methods", {}).get(method_name, {}))
-            for row in baseline_rows
+            (
+                (row, row.get("methods", {}).get(method_name, {}))
+                for row in baseline_rows
+            ),
+            reader_mode=reader_mode,
         )
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)

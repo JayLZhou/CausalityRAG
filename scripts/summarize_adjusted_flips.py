@@ -75,8 +75,9 @@ def main() -> None:
     result = {
         "population": {
             "answer": (
-                "All queries; unsupported or unexecuted interventions "
-                "contribute zero flips."
+                "Queries with a valid clean answer; invalid clean answers are "
+                "excluded, while unsupported or unexecuted interventions on "
+                "valid-clean queries contribute zero flips."
             ),
             "correctness": (
                 "Metric-specific clean-correct subsets shared by factual "

@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from causalityrag.io import load_records, record_id, retrieved_contexts
 from causalityrag.linguistics import SpacyAnnotationClient
+from causalityrag.reader import reader_completion_text
 from exp.arc_jsd import (
     ArcJsdModel,
     ablate_context_sentence,
@@ -84,10 +85,12 @@ def main() -> None:
                     "ranked_ids": [],
                 }
             else:
-                response_text = json.dumps(
-                    {"answer": clean_answer},
-                    ensure_ascii=False,
-                    separators=(",", ":"),
+                response_text = reader_completion_text(
+                    clean_answer,
+                    reader_mode=os.environ.get(
+                        "CAUSALITYRAG_READER_MODE", "short_answer"
+                    ),
+                    compact_json=True,
                 )
                 trajectory = model.trajectory_for_response(
                     question,

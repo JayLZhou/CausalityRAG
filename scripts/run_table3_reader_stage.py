@@ -24,7 +24,7 @@ DATASETS = (
     "quartz",
     "triviaqa",
     "2wiki",
-    "pubmedqa",
+    "popqa",
 )
 SCORE_FILES = {
     "attention": "attention_top5_1000.jsonl",
@@ -35,9 +35,17 @@ SCORE_FILES = {
 }
 
 
-def run(command: list[str], *, cwd: Path) -> None:
+def run(
+    command: list[str],
+    *,
+    cwd: Path,
+    reader_mode: str = "",
+) -> None:
     print("[table3-reader] RUN " + " ".join(command), flush=True)
-    subprocess.run(command, cwd=cwd, check=True)
+    env = os.environ.copy()
+    if reader_mode:
+        env["CAUSALITYRAG_READER_MODE"] = reader_mode
+    subprocess.run(command, cwd=cwd, env=env, check=True)
 
 
 def complete_jsonl(path: Path, expected_ids: list[str]) -> bool:
@@ -47,6 +55,16 @@ def complete_jsonl(path: Path, expected_ids: list[str]) -> bool:
         return [record_id(row) for row in load_records(path)] == expected_ids
     except (OSError, ValueError):
         return False
+
+
+def reader_mode_for_dataset(dataset: str) -> str:
+    """Return the reader protocol used by every subprocess for a dataset."""
+
+    return (
+        dataset
+        if dataset in {"pubmedqa", "medqa", "quartz"}
+        else "short_answer"
+    )
 
 
 def require_complete_jsonl(path: Path, expected_ids: list[str]) -> None:
@@ -83,6 +101,7 @@ def build_paraphrase_pool(
     max_passes: int,
     llm_base_url: str,
     llm_model: str,
+    reader_mode: str,
 ) -> tuple[Path, str]:
     controls = base / "controls"
     controls.mkdir(parents=True, exist_ok=True)
@@ -120,7 +139,7 @@ def build_paraphrase_pool(
         ]
         if pool.is_file():
             command.extend(["--existing-pool", str(pool)])
-        run(command, cwd=repo)
+        run(command, cwd=repo, reader_mode=reader_mode)
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         print(
             f"[table3-reader] paraphrase pass={generation_pass} "
@@ -146,6 +165,7 @@ def main() -> None:
     repo = Path(__file__).resolve().parents[1]
     root = Path(args.out_root)
     for dataset in args.datasets:
+        dataset_reader_mode = reader_mode_for_dataset(dataset)
         base = root / dataset
         retrieval = base / "retrieval/top10_1000.jsonl"
         units = base / "inputs/token_units_top10_1000.jsonl"
@@ -210,7 +230,7 @@ def main() -> None:
                 "--replacement-seed", "0",
                 "--llm-base-url", args.llm_base_url,
                 "--llm-model", args.llm_model,
-            ], cwd=repo)
+            ], cwd=repo, reader_mode=dataset_reader_mode)
         require_complete_jsonl(reflow_results, expected_ids)
 
         baseline_summary = audit / "baselines_1000.summary.json"
@@ -235,7 +255,7 @@ def main() -> None:
             ]
             for method, path in score_paths.items():
                 command.extend(["--scores", f"{method}={path}"])
-            run(command, cwd=repo)
+            run(command, cwd=repo, reader_mode=dataset_reader_mode)
         require_complete_jsonl(baseline_results, expected_ids)
 
         factual_metrics = audit / "factual_metrics_1000.json"
@@ -245,6 +265,7 @@ def main() -> None:
             "--reflow", str(reflow_results),
             "--baselines", str(baseline_results),
             "--out", str(factual_metrics),
+            "--reader-mode", dataset_reader_mode,
         ], cwd=repo)
 
         paraphrase_pool, paraphrase_sha = build_paraphrase_pool(
@@ -258,6 +279,7 @@ def main() -> None:
             max_passes=args.max_paraphrase_passes,
             llm_base_url=args.llm_base_url,
             llm_model=args.llm_model,
+            reader_mode=dataset_reader_mode,
         )
         paraphrase_results = base / "controls/paraphrase_results_top5_1000_v2.jsonl"
         paraphrase_summary = base / "controls/paraphrase_results_top5_1000_v2.summary.json"
@@ -282,13 +304,14 @@ def main() -> None:
                 "--replacement-seed", "0",
                 "--llm-base-url", args.llm_base_url,
                 "--llm-model", args.llm_model,
-            ], cwd=repo)
+            ], cwd=repo, reader_mode=dataset_reader_mode)
         require_complete_jsonl(paraphrase_results, expected_ids)
         run([
             args.python,
             "scripts/summarize_paraphrase_controls.py",
             "--input", str(paraphrase_results),
             "--out", str(paraphrase_summary),
+            "--reader-mode", dataset_reader_mode,
         ], cwd=repo)
 
         adjusted = audit / "table3_metrics_1000_v2.json"

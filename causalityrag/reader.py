@@ -6,6 +6,7 @@ import json
 import os
 import re
 import string
+import unicodedata
 import urllib.request
 from collections import Counter
 from typing import Sequence
@@ -17,6 +18,102 @@ READ_USER = """Passages:
 
 Question: {question}
 Return STRICT JSON: {{"answer": "..."}}"""
+PUBMEDQA_CHOICES = ("yes", "no", "maybe")
+PUBMEDQA_SYSTEM = "Answer the question using only the provided passages."
+PUBMEDQA_USER = """Passages:
+{passages}
+
+Question: {question}
+Answer with exactly one label: yes, no, or maybe. Do not explain."""
+QUARTZ_SYSTEM = (
+    "You are answering a QuaRTz qualitative reasoning multiple-choice question. "
+    "Use only the provided passage and question. Return exactly one of the two "
+    "listed answer choices, with no explanation. Output JSON only."
+)
+QUARTZ_USER = """Passage:
+{passages}
+
+Question and choices:
+{question}
+Return STRICT JSON containing exactly the selected choice text:
+{{"answer": "<choice>"}}"""
+MEDQA_CHOICES = ("A", "B", "C", "D")
+QUARTZ_CHOICES = ("A", "B")
+MEDQA_SYSTEM = (
+    "You are answering a MedQA-USMLE multiple-choice question. "
+    "Use only the provided passages. Return exactly one answer-choice letter: "
+    "A, B, C, or D. Do not provide an explanation or punctuation."
+)
+MEDQA_USER = """Passages:
+{passages}
+
+Question and choices:
+{question}
+Return exactly one letter: A, B, C, or D."""
+
+
+class ReaderProtocolError(ValueError):
+    """Raised when a constrained reader returns an invalid answer."""
+
+
+def reader_prompt(
+    question: str,
+    contexts: list[dict],
+    *,
+    reader_mode: str,
+) -> tuple[str, str]:
+    """Return the exact system/user prompt for one reader protocol."""
+
+    mode = reader_mode.strip().lower()
+    passages = format_passages(contexts)
+    if mode == "pubmedqa":
+        return (
+            PUBMEDQA_SYSTEM,
+            PUBMEDQA_USER.format(question=question, passages=passages),
+        )
+    if mode == "quartz":
+        return (
+            QUARTZ_SYSTEM,
+            QUARTZ_USER.format(question=question, passages=passages),
+        )
+    if mode == "medqa":
+        return (
+            MEDQA_SYSTEM,
+            MEDQA_USER.format(question=question, passages=passages),
+        )
+    return (
+        READ_SYSTEM,
+        READ_USER.format(question=question, passages=passages),
+    )
+
+
+def reader_completion_text(
+    answer: str,
+    *,
+    reader_mode: str,
+    compact_json: bool = False,
+) -> str:
+    """Render the teacher-forced completion used by the live reader."""
+
+    mode = reader_mode.strip().lower()
+    if mode == "pubmedqa":
+        label = str(answer).strip().casefold()
+        if label not in PUBMEDQA_CHOICES:
+            raise ReaderProtocolError(
+                f"invalid PubMedQA teacher-forced label: {answer!r}"
+            )
+        return label
+    if mode == "medqa":
+        choice = str(answer).strip().upper()
+        if choice not in MEDQA_CHOICES:
+            raise ReaderProtocolError(
+                f"invalid MedQA teacher-forced choice: {answer!r}"
+            )
+        return choice
+    kwargs = {"ensure_ascii": False}
+    if compact_json:
+        kwargs["separators"] = (",", ":")
+    return json.dumps({"answer": str(answer)}, **kwargs)
 
 
 class ReaderClient:
@@ -28,6 +125,7 @@ class ReaderClient:
         model: str | None = None,
         timeout: int = 120,
         max_tokens: int | None = None,
+        reader_mode: str | None = None,
     ) -> None:
         self.base_url = (
             base_url
@@ -42,19 +140,29 @@ class ReaderClient:
             or "qwen2.5-7b"
         )
         self.timeout = timeout
-        self.max_tokens = max_tokens
+        env_max_tokens = os.environ.get("CAUSALITYRAG_READER_MAX_TOKENS")
+        self.max_tokens = (
+            max_tokens
+            if max_tokens is not None
+            else int(env_max_tokens)
+            if env_max_tokens
+            else None
+        )
+        self.reader_mode = (
+            reader_mode or os.environ.get("CAUSALITYRAG_READER_MODE", "short_answer")
+        ).strip().lower()
 
     def answer(self, question: str, contexts: list[dict]) -> str:
+        system, user = reader_prompt(
+            question,
+            contexts,
+            reader_mode=self.reader_mode,
+        )
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": READ_SYSTEM},
-                {
-                    "role": "user",
-                    "content": READ_USER.format(
-                        question=question, passages=format_passages(contexts)
-                    ),
-                },
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
             ],
             "temperature": 0,
         }
@@ -71,8 +179,14 @@ class ReaderClient:
         content = data["choices"][0]["message"]["content"]
         parsed = parse_json_object(content)
         if isinstance(parsed, dict) and parsed.get("answer") is not None:
-            return str(parsed["answer"]).strip()
-        return str(content).strip()
+            answer = str(parsed["answer"]).strip()
+        else:
+            answer = str(content).strip()
+        return canonicalize_reader_answer(
+            question,
+            answer,
+            reader_mode=self.reader_mode,
+        )
 
 
 class LocalHFReader:
@@ -219,6 +333,233 @@ def format_passages(contexts: list[dict]) -> str:
         f"[{ctx.get('chunk_id', i)}] {ctx.get('text', '')}"
         for i, ctx in enumerate(contexts)
     )
+
+
+def canonicalize_quartz_answer(question: str, answer: str) -> str:
+    """Return the selected QuaRTz choice text or reject an invalid response."""
+
+    choices = parse_quartz_choices(question)
+    return choices[quartz_choice_label(question, answer)]
+
+
+def canonicalize_reader_answer(
+    question: str,
+    answer: str,
+    *,
+    reader_mode: str,
+) -> str:
+    """Canonicalize an answer according to the active reader protocol."""
+
+    mode = reader_mode.strip().lower()
+    if mode == "pubmedqa":
+        match = re.search(r"\b(yes|no|maybe)\b", str(answer).casefold())
+        return match.group(1) if match else str(answer).strip()
+    if mode == "quartz":
+        return canonicalize_quartz_answer(question, answer)
+    if mode == "medqa":
+        choice = str(answer).strip().upper()
+        if choice not in MEDQA_CHOICES:
+            raise ReaderProtocolError(
+                f"MedQA reader returned an invalid choice: {answer!r}"
+            )
+        return choice
+    return str(answer).strip()
+
+
+def reader_answers_exact_match(
+    question: str,
+    left: str,
+    right: str,
+    *,
+    reader_mode: str,
+) -> bool:
+    """Compare answers after applying the dataset reader protocol."""
+
+    mode = reader_mode.strip().lower()
+    if mode == "quartz":
+        return quartz_choice_label(question, left) == quartz_choice_label(
+            question, right
+        )
+    return answers_exact_match(
+        canonicalize_reader_answer(question, left, reader_mode=mode),
+        canonicalize_reader_answer(question, right, reader_mode=mode),
+    )
+
+
+def reader_answers_match(
+    question: str,
+    left: str,
+    right: str,
+    *,
+    reader_mode: str,
+) -> bool:
+    """Apply benchmark-style correctness after protocol canonicalization."""
+
+    mode = reader_mode.strip().lower()
+    if mode == "quartz":
+        return quartz_choice_label(question, left) == quartz_choice_label(
+            question, right
+        )
+    return answers_match(
+        canonicalize_reader_answer(question, left, reader_mode=mode),
+        canonicalize_reader_answer(question, right, reader_mode=mode),
+    )
+
+
+def reader_answer_token_f1(
+    question: str,
+    left: str,
+    right: str,
+    *,
+    reader_mode: str,
+) -> float:
+    """Compute token F1 after protocol-specific canonicalization."""
+
+    return answer_token_f1(
+        canonicalize_reader_answer(question, left, reader_mode=reader_mode),
+        canonicalize_reader_answer(question, right, reader_mode=reader_mode),
+    )
+
+
+def parse_quartz_choices(question: str) -> dict[str, str]:
+    """Parse the two choices from a frozen QuaRTz question."""
+
+    markers = list(re.finditer(r"\bchoices\s*:\s*", question, flags=re.I))
+    if not markers:
+        raise ReaderProtocolError("QuaRTz question does not contain 'Choices:'")
+    tail = question[markers[-1].end() :]
+    labels = list(re.finditer(r"\(\s*([AB])\s*\)", tail, flags=re.I))
+    if [match.group(1).upper() for match in labels] != list(QUARTZ_CHOICES):
+        raise ReaderProtocolError(
+            "QuaRTz question must contain exactly the choices (A) and (B)"
+        )
+
+    first, second = labels
+    choice_a = tail[first.end() : second.start()].strip()
+    choice_b = tail[second.end() :].strip()
+    choice_a = re.sub(r"\s*;\s*$", "", choice_a).strip()
+    choice_b = re.sub(r"[.?!]+\s*$", "", choice_b).strip()
+    choices = {"A": choice_a, "B": choice_b}
+    if any(not text for text in choices.values()):
+        raise ReaderProtocolError("QuaRTz question contains an empty choice")
+    if len({_normalize_quartz_choice(text) for text in choices.values()}) != 2:
+        raise ReaderProtocolError("QuaRTz question contains duplicate choices")
+    return choices
+
+
+def quartz_choice_label(question: str, answer: str) -> str:
+    """Map one unambiguous QuaRTz response to its canonical A/B label."""
+
+    choices = parse_quartz_choices(question)
+    raw = str(answer or "").strip()
+    parsed = parse_json_object(raw)
+    if isinstance(parsed, dict) and parsed.get("answer") is not None:
+        raw = str(parsed["answer"]).strip()
+    raw = _strip_matching_quotes(raw)
+    if not raw:
+        raise ReaderProtocolError("QuaRTz reader returned an empty answer")
+
+    label = _quartz_label_only(raw)
+    if label is not None:
+        return label
+
+    labelled = _quartz_labelled_text(raw)
+    if labelled is not None:
+        label, rendered_text = labelled
+        if (
+            rendered_text
+            and _normalize_quartz_choice(rendered_text)
+            != _normalize_quartz_choice(choices[label])
+        ):
+            raise ReaderProtocolError(
+                "QuaRTz answer label conflicts with its rendered choice text: "
+                f"{answer!r}"
+            )
+        return label
+
+    normalized = _normalize_quartz_choice(raw)
+    matches = [
+        label
+        for label, text in choices.items()
+        if normalized == _normalize_quartz_choice(text)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+
+    partial_matches = [
+        label
+        for label, text in choices.items()
+        if _quartz_contiguous_token_subset(
+            normalized,
+            _normalize_quartz_choice(text),
+        )
+    ]
+    if len(partial_matches) == 1:
+        return partial_matches[0]
+    raise ReaderProtocolError(
+        f"QuaRTz reader returned an unmappable answer: {answer!r}"
+    )
+
+
+def _normalize_quartz_choice(text: str) -> str:
+    """Normalize choice rendering without deleting meaningful articles."""
+
+    normalized = unicodedata.normalize("NFKC", str(text or "")).casefold()
+    normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
+    return " ".join(normalized.split())
+
+
+def _strip_matching_quotes(text: str) -> str:
+    value = text.strip()
+    pairs = {'"': '"', "'": "'", "`": "`"}
+    while len(value) >= 2 and pairs.get(value[0]) == value[-1]:
+        value = value[1:-1].strip()
+    return value
+
+
+def _quartz_contiguous_token_subset(answer: str, choice: str) -> bool:
+    """Accept a uniquely identifying truncated choice, never a verbose answer."""
+
+    answer_tokens = answer.split()
+    choice_tokens = choice.split()
+    if not answer_tokens or len(answer_tokens) >= len(choice_tokens):
+        return False
+    width = len(answer_tokens)
+    return any(
+        choice_tokens[index : index + width] == answer_tokens
+        for index in range(len(choice_tokens) - width + 1)
+    )
+
+
+def _quartz_label_only(text: str) -> str | None:
+    match = re.fullmatch(
+        r"\s*(?:\(\s*([AB])\s*\)|([AB]))\s*[.)]?\s*",
+        text,
+        flags=re.I,
+    )
+    if not match:
+        return None
+    return (match.group(1) or match.group(2)).upper()
+
+
+def _quartz_labelled_text(text: str) -> tuple[str, str] | None:
+    direct = re.fullmatch(
+        r"\s*(?:\(\s*([AB])\s*\)|([AB])\s*[):.\-])\s*(.*?)\s*",
+        text,
+        flags=re.I | re.S,
+    )
+    if direct:
+        return (direct.group(1) or direct.group(2)).upper(), direct.group(3)
+
+    explicit = re.fullmatch(
+        r"\s*(?:the\s+)?(?:answer|choice|option)\s*(?:is|:)\s*"
+        r"(?:\(\s*([AB])\s*\)|([AB]))\s*[.)]?\s*",
+        text,
+        flags=re.I,
+    )
+    if explicit:
+        return (explicit.group(1) or explicit.group(2)).upper(), ""
+    return None
 
 
 def parse_json_object(text: str):

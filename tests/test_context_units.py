@@ -27,3 +27,55 @@ def test_context_sentence_units_assigns_every_word_to_a_sentence():
 
     assert len(sentences) == 2
     assert len({unit["sentence_id"] for unit in units}) == 2
+
+
+class _StopwordAnnotation:
+    def annotate(self, text):
+        return {
+            "tokens": [
+                {
+                    "text": "Therefore",
+                    "start": 0,
+                    "end": 9,
+                    "pos": "ADV",
+                    "tag": "RB",
+                    "lemma": "therefore",
+                    "morph": {},
+                    "is_stop": True,
+                },
+                {
+                    "text": "Paris",
+                    "start": 10,
+                    "end": 15,
+                    "pos": "PROPN",
+                    "tag": "NNP",
+                    "lemma": "Paris",
+                    "morph": {},
+                    "is_stop": False,
+                },
+            ],
+            "entities": [
+                {
+                    "text": "Paris",
+                    "start": 10,
+                    "end": 15,
+                    "label": "GPE",
+                    "tokens": [{"start": 10, "end": 15}],
+                }
+            ],
+        }
+
+
+def test_spacy_stopword_metadata_overrides_capitalization_fallback():
+    record = {
+        "retrieved": [
+            {"chunk_id": "c1", "text": "Therefore Paris", "rank": 1}
+        ],
+    }
+
+    units = all_context_word_units(record, k=1, nlp=_StopwordAnnotation())
+
+    assert [(unit["text"], unit["type"]) for unit in units] == [
+        ("Therefore", "STOPWORD"),
+        ("Paris", "GPE"),
+    ]

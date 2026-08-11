@@ -53,7 +53,6 @@ def main() -> None:
                 "index": index,
                 "id": identifier,
                 "method": "prompt_only_last_layer_attention",
-                "uses_answer_tokens": False,
                 "layers": 1,
             }
             question = str(record.get("question", ""))
@@ -77,7 +76,6 @@ def main() -> None:
                 "status": "ok" if ranked else "no_ranked_tokens",
                 "token_scores": token_scores,
                 "ranked_ids": ranked,
-                "prompt_tokens_only": True,
             }
             row["elapsed_seconds"] = round(time.monotonic() - started, 3)
             rows.append(row)
@@ -93,7 +91,6 @@ def main() -> None:
         "method": "prompt_only_last_layer_attention",
         "queries": len(rows),
         "ranked_queries": sum(row["status"] == "ok" for row in rows),
-        "uses_answer_tokens": False,
         "layers": 1,
         "total_seconds": sum(float(row["elapsed_seconds"]) for row in rows),
         "out": os.path.abspath(args.out),

@@ -1,0 +1,403 @@
+{
+  "schema": "causalityrag.table3_final8_audit.v1",
+  "dataset_order": [
+    "hotpotqa",
+    "timeqa",
+    "finqa",
+    "musique",
+    "quartz",
+    "triviaqa",
+    "2wiki",
+    "popqa"
+  ],
+  "pubmedqa_in_main_table": false,
+  "datasets": [
+    {
+      "dataset": "hotpotqa",
+      "queries": 1000,
+      "valid_clean_queries": 989,
+      "invalid_clean_queries": 11,
+      "baseline_methods": [
+        "arc_jsd",
+        "attention_prompt_last",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4"
+      ],
+      "control_methods": [
+        "arc_jsd",
+        "attention_prompt_last",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4",
+        "reflow"
+      ],
+      "verified_reflow_flips": 941,
+      "shas": {
+        "reflow": "b1f91169d653c1e827670ff926b19660aae2d6a35d4b4821a1bae859a798ed4d",
+        "baselines": "f41716d5e255d8126b01b80617460936800af08b55ce095c1a3bdd52fbd232a3",
+        "controls": "153d8136455180642d1a280b6e480c7933edc1d9033faf701a0d85ff8bfb78df",
+        "factual": "2cce68621cb3794c02ca8a1f9842f18e4daa1e44abfa001343bdb3b79800b7a7",
+        "control_summary": "b9eecab6ae448012bca808727fe9cc3ab6a20a0da8462d2def23adf9630188f4",
+        "adjusted": "9e9618363069d67f43e2d0d14873ea80d6303a89599f60499901c74388816adc"
+      },
+      "paths": {
+        "reflow": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/hotpotqa/results_1000.jsonl",
+        "baselines": "/data1/yujia/CausalityRAG/out_table3_final8_20260811/hotpotqa/baseline_gap_repair_v1/baselines_1000.jsonl",
+        "controls": "/data1/yujia/CausalityRAG/out_table3_final8_20260811/hotpotqa/baseline_gap_repair_v1/controls_1000.jsonl",
+        "factual": "/data1/yujia/CausalityRAG/out_table3_final8_20260811/hotpotqa/baseline_gap_repair_v1/factual_metrics_1000.json",
+        "control_summary": "/data1/yujia/CausalityRAG/out_table3_final8_20260811/hotpotqa/baseline_gap_repair_v1/controls_1000.summary.json",
+        "adjusted": "/data1/yujia/CausalityRAG/out_table3_final8_20260811/hotpotqa/baseline_gap_repair_v1/table3_metrics_1000.json"
+      }
+    },
+    {
+      "dataset": "timeqa",
+      "queries": 1000,
+      "valid_clean_queries": 995,
+      "invalid_clean_queries": 5,
+      "baseline_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4"
+      ],
+      "control_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4",
+        "reflow"
+      ],
+      "verified_reflow_flips": 930,
+      "shas": {
+        "reflow": "3cd0801cafa2efc5d94fd59d0603fae9d41ddb3a663f569a2e5b42109c211a0b",
+        "baselines": "2de14c1fe2f33c4d24816c004c6b76edbcf9642aea035eecbd354184fb8ee52f",
+        "controls": "3f32b7121bba7bba6512e1df0819104e6f192af9b0cfffcdc1e86b5166b0ed33",
+        "factual": "0bad84c1a04f20e5674ad19a200790d88b5167d476c7029693a3a8c692022f3f",
+        "control_summary": "6575607213f5aff49c8d9746c8b2c5d1b8ee6ef193efdd6a98ea67e3e09a2108",
+        "adjusted": "6b3c2cf62ddf54d283bf8d42744cdfdc61967ee73aa866f317dc4a89b0d31312"
+      },
+      "paths": {
+        "reflow": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/timeqa/results_1000.jsonl",
+        "baselines": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/timeqa/table3_resume/baselines_1000.jsonl",
+        "controls": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/timeqa/table3_resume/controls_1000.jsonl",
+        "factual": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/timeqa/table3_resume/factual_metrics_1000.json",
+        "control_summary": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/timeqa/table3_resume/controls_1000.summary.json",
+        "adjusted": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/timeqa/table3_resume/table3_metrics_1000.json"
+      }
+    },
+    {
+      "dataset": "finqa",
+      "queries": 1000,
+      "valid_clean_queries": 992,
+      "invalid_clean_queries": 8,
+      "baseline_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4"
+      ],
+      "control_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4",
+        "reflow"
+      ],
+      "verified_reflow_flips": 843,
+      "shas": {
+        "reflow": "7e5a329ed453d3e611f8c5b57ab1e695d7f7248057f5ca0bc2d5d2afb5d7bf80",
+        "baselines": "d10f849bfddabbb83c3799353cca637c8017388af093f127ead81307e16bc097",
+        "controls": "753b4110f5d6c3a9d9de545c5325e638259437fd7e3841f0dca7d979f63dcc64",
+        "factual": "342111ed29bd584bdcb6624f3d00eca27ee32b823cdbf6a1516a378cc1f4fd03",
+        "control_summary": "6bfad6924f8f644ebede8a7afc7832553c40c3cc0e4998a2f2040428303f17ab",
+        "adjusted": "e6355b9e86ce91f9d1c8e6eb62e6fd1fd1b9ee42b42ba61ec8c505d874d51236"
+      },
+      "paths": {
+        "reflow": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/finqa/results_1000.jsonl",
+        "baselines": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/finqa/table3_resume/baselines_1000.jsonl",
+        "controls": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/finqa/table3_resume/controls_1000.jsonl",
+        "factual": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/finqa/table3_resume/factual_metrics_1000.json",
+        "control_summary": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/finqa/table3_resume/controls_1000.summary.json",
+        "adjusted": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/finqa/table3_resume/table3_metrics_1000.json"
+      }
+    },
+    {
+      "dataset": "musique",
+      "queries": 1000,
+      "valid_clean_queries": 965,
+      "invalid_clean_queries": 35,
+      "baseline_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4"
+      ],
+      "control_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4",
+        "reflow"
+      ],
+      "verified_reflow_flips": 920,
+      "shas": {
+        "reflow": "defc3b2a44b6727ac7b364718cdaac860bb3b8c5c521e16c5a3df0d7a9ea7250",
+        "baselines": "b9b922d87bb25e15cc47a2a0272926519771fdfb4d2b2e254712d6754723bec0",
+        "controls": "d9e38d32e0ad798f45083acf11e80363c31ac8973ab63926c35afe2f86f38715",
+        "factual": "75f998ba2e6f857a2f0b4957e4806a1d76492be1c9b4e05db8c84bf918df5f55",
+        "control_summary": "f8f6b5d649560858e0f2cb5ff18a2db4b51e4a7afd8b94022dc7b1a8861bac89",
+        "adjusted": "fbc2a4049b4a5062f58331f0af3d84ac501aca8a84211973683b972c351efa85"
+      },
+      "paths": {
+        "reflow": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/musique/results_1000.jsonl",
+        "baselines": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/musique/table3_resume/baselines_1000.jsonl",
+        "controls": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/musique/table3_resume/controls_1000.jsonl",
+        "factual": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/musique/table3_resume/factual_metrics_1000.json",
+        "control_summary": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/musique/table3_resume/controls_1000.summary.json",
+        "adjusted": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/musique/table3_resume/table3_metrics_1000.json"
+      }
+    },
+    {
+      "dataset": "quartz",
+      "queries": 1000,
+      "valid_clean_queries": 1000,
+      "invalid_clean_queries": 0,
+      "baseline_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4"
+      ],
+      "control_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4",
+        "reflow"
+      ],
+      "verified_reflow_flips": 402,
+      "shas": {
+        "reflow": "54414c7439452177af84c4cc3e142667b9c36660ce65705f8e7ea29c91e01958",
+        "baselines": "8994b55672def68200ccbbc839b1d6db882eb58e43f86b70d19d0d2493797a79",
+        "controls": "9d3bfc2fffdb0ab5e6702986e2a0ad7701c82461d510f536f333bbc811ebd006",
+        "factual": "a76716fbdfc36d244138b865eb94396846a0d1330da1fba8edb087ec3d4b6660",
+        "control_summary": "063065a2c3354697219a34e1f4f4ba5a26a6a2a457e003ef8f1dd85f05ff90f6",
+        "adjusted": "ebbf7f91abff0851428c2ae560619389cfdcfbaa3bfdba390ed946e66f772ec8"
+      },
+      "paths": {
+        "reflow": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/quartz/results_1000.jsonl",
+        "baselines": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/quartz/table3_resume/baselines_1000.jsonl",
+        "controls": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/quartz/table3_resume/controls_1000.jsonl",
+        "factual": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/quartz/table3_resume/factual_metrics_1000.json",
+        "control_summary": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/quartz/table3_resume/controls_1000.summary.json",
+        "adjusted": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/quartz/table3_resume/table3_metrics_1000.json"
+      }
+    },
+    {
+      "dataset": "triviaqa",
+      "queries": 1000,
+      "valid_clean_queries": 979,
+      "invalid_clean_queries": 21,
+      "baseline_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4"
+      ],
+      "control_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4",
+        "reflow"
+      ],
+      "verified_reflow_flips": 754,
+      "shas": {
+        "reflow": "79a4d98ba2fec1ef618b733dbbb17fb6220cc4cfa783069e911588763152e82f",
+        "baselines": "a5f3c46f930e287afda34030ce9b15e034e3aff712176d9ae92467be2b6bc9d0",
+        "controls": "ba57294c8dbf503596f8a6e8790f801eae5ee30ff6614c1ce05ecf965cd8efe4",
+        "factual": "69a6807c992d5968631fb8b502ae56c9ea08a9b2a128cd64e95b9d4fdb0eaf92",
+        "control_summary": "341f4693325a42905400b67cfdc0d5317735fd10e9679297afffdc503eea3a9b",
+        "adjusted": "85b4d2c4805d0f383aea42dd0ea3e665c440292c0f4b6909eb132777c38b2870"
+      },
+      "paths": {
+        "reflow": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/triviaqa/results_1000.jsonl",
+        "baselines": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/triviaqa/table3_resume/baselines_1000.jsonl",
+        "controls": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/triviaqa/table3_resume/controls_1000.jsonl",
+        "factual": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/triviaqa/table3_resume/factual_metrics_1000.json",
+        "control_summary": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/triviaqa/table3_resume/controls_1000.summary.json",
+        "adjusted": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/triviaqa/table3_resume/table3_metrics_1000.json"
+      }
+    },
+    {
+      "dataset": "2wiki",
+      "queries": 1000,
+      "valid_clean_queries": 994,
+      "invalid_clean_queries": 6,
+      "baseline_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4"
+      ],
+      "control_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4",
+        "reflow"
+      ],
+      "verified_reflow_flips": 896,
+      "shas": {
+        "reflow": "2c83b6d2e6bbe08adbc258fc5c882960274eb462b7d25f6099cce91a7e0f347c",
+        "baselines": "9bea33523fc8bfffae0fbcafba85453556918f5f16fefd777c28c5ef4f924a54",
+        "controls": "726cae51c255df77c2a7efb3b1036f20299236f689245ff126b2a1ebc3babbe0",
+        "factual": "7ecbcf1e6c2cbe6400180943bf773c156b2f5950268d65d1b8442a84f9495b3f",
+        "control_summary": "1abf9a001166ef7ed11299879e6695112082f838ab4cec367f14ceb53fe64779",
+        "adjusted": "d120c78037dc0aba9f461a6c873731bcd5dc57f70c68ad5f6bcaa2956d2dedd2"
+      },
+      "paths": {
+        "reflow": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/2wiki/results_1000.jsonl",
+        "baselines": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/2wiki/table3_resume/baselines_1000.jsonl",
+        "controls": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/2wiki/table3_resume/controls_1000.jsonl",
+        "factual": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/2wiki/table3_resume/factual_metrics_1000.json",
+        "control_summary": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/2wiki/table3_resume/controls_1000.summary.json",
+        "adjusted": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/2wiki/table3_resume/table3_metrics_1000.json"
+      }
+    },
+    {
+      "dataset": "popqa",
+      "queries": 1000,
+      "valid_clean_queries": 998,
+      "invalid_clean_queries": 2,
+      "baseline_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4"
+      ],
+      "control_methods": [
+        "arc_jsd",
+        "attention",
+        "gradient_x_input",
+        "integrated_gradients",
+        "mirage",
+        "random_seed0",
+        "random_seed1",
+        "random_seed2",
+        "random_seed3",
+        "random_seed4",
+        "reflow"
+      ],
+      "verified_reflow_flips": 979,
+      "shas": {
+        "reflow": "dda5dd6939b34f8e00bc3092773934a6df933d550610e76701a51c6936f4d703",
+        "baselines": "51e7569bb065816adcb840403bf7e8d0cb23fea1b35cb83edd5f821e1fa07a92",
+        "controls": "a0b38f846ee94271e6e2b4f13729b7c52aaa4d9355334ec71b9f66e178f4dfcf",
+        "factual": "1e76b593d6d3a503f12eef3c3ac1ab72b94b413113f2852b6e49053e41958e3e",
+        "control_summary": "fbe09502eeb881b7a063e2a46d080d7fa998df94f5d435eb697acbce238412b2",
+        "adjusted": "305be3887059dd5d331b4774044c4879466a324bad9f1c9c6bd543e827ced6b9"
+      },
+      "paths": {
+        "reflow": "/data1/yujia/CausalityRAG/out_popqa_no_frontier_repair_20260811/popqa/results_1000.jsonl",
+        "baselines": "/data1/yujia/CausalityRAG/out_table3_final8_20260811/popqa/audits/final_top10pool_k5/baselines_1000.jsonl",
+        "controls": "/data1/yujia/CausalityRAG/out_table3_final8_20260811/popqa/controls/paraphrase_results_top5_1000_v2.jsonl",
+        "factual": "/data1/yujia/CausalityRAG/out_table3_final8_20260811/popqa/audits/final_top10pool_k5/factual_metrics_1000.json",
+        "control_summary": "/data1/yujia/CausalityRAG/out_table3_final8_20260811/popqa/controls/paraphrase_results_top5_1000_v2.summary.json",
+        "adjusted": "/data1/yujia/CausalityRAG/out_table3_final8_20260811/popqa/audits/final_top10pool_k5/table3_metrics_1000_v2.json"
+      }
+    }
+  ],
+  "queries": 8000,
+  "valid_clean_queries": 7912,
+  "invalid_clean_queries": 88
+}

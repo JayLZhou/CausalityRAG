@@ -17,7 +17,7 @@ DATASETS = (
     ("quartz", "QuaRTz", "QuartzMetricRows"),
     ("triviaqa", "TriviaQA", "TriviaQAMetricRows"),
     ("2wiki", "2Wiki", "TwoWikiMetricRows"),
-    ("pubmedqa", "PubMedQA", "PubMedQAMetricRows"),
+    ("popqa", "PopQA", "PopQAMetricRows"),
 )
 METHODS = (
     ("random", "random"),

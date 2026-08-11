@@ -1,5 +1,8 @@
 import json
 
+import pytest
+
+from scripts import run_seven_dataset_pools as runner
 from scripts.run_seven_dataset_pools import artifact_complete
 
 
@@ -41,3 +44,84 @@ def test_artifact_complete_rejects_stale_summary(tmp_path):
         expected_rows=1,
         top_k_field="top_k",
     )
+
+
+def test_generation_tail_can_be_returned_for_common_exclusion(
+    monkeypatch, tmp_path
+):
+    pool_dir = tmp_path / "pool"
+    pool_dir.mkdir()
+
+    def fake_run(command, *, cwd, attempts=3):
+        (pool_dir / "generation.json").write_text(json.dumps({
+            "typed_keys_covered": 8,
+            "typed_keys_total": 10,
+            "unresolved": 2,
+        }))
+
+    monkeypatch.setattr(runner, "run", fake_run)
+
+    unresolved = runner.generate_until_complete(
+        python="python",
+        repository=tmp_path,
+        typed_keys=tmp_path / "typed.jsonl",
+        seed=tmp_path / "seed.jsonl",
+        pool_dir=pool_dir,
+        max_passes=1,
+        allow_exclusions=True,
+    )
+
+    assert unresolved == 2
+
+
+def test_generation_tail_still_fails_closed_by_default(monkeypatch, tmp_path):
+    pool_dir = tmp_path / "pool"
+    pool_dir.mkdir()
+
+    def fake_run(command, *, cwd, attempts=3):
+        (pool_dir / "generation.json").write_text(json.dumps({
+            "typed_keys_covered": 8,
+            "typed_keys_total": 10,
+            "unresolved": 2,
+        }))
+
+    monkeypatch.setattr(runner, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="remains unresolved"):
+        runner.generate_until_complete(
+            python="python",
+            repository=tmp_path,
+            typed_keys=tmp_path / "typed.jsonl",
+            seed=tmp_path / "seed.jsonl",
+            pool_dir=pool_dir,
+            max_passes=1,
+        )
+
+
+def test_freeze_accepts_a_complete_partition_with_common_exclusions(
+    monkeypatch, tmp_path
+):
+    pool_dir = tmp_path / "pool"
+    pool_dir.mkdir()
+    commands = []
+
+    def fake_run(command, *, cwd, attempts=3):
+        commands.append(command)
+        (pool_dir / "shared_pool.manifest.json").write_text(json.dumps({
+            "positions": 10,
+            "eligible_positions": 8,
+            "excluded_positions": 2,
+            "unresolved_typed_positions": 2,
+            "coverage": 1.0,
+        }))
+
+    monkeypatch.setattr(runner, "run", fake_run)
+
+    runner.freeze_pool(
+        python="python",
+        repository=tmp_path,
+        pool_dir=pool_dir,
+        exclude_unresolved=True,
+    )
+
+    assert "--exclude-unresolved" in commands[0]
