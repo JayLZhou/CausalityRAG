@@ -28,7 +28,7 @@ ssh yujia-server2 \
   "tar -xzf /data1/yujia/shapley_eval_bundle.tgz -C '$ROOT'"
 
 ssh yujia-server2 \
-  "mkdir -p '$EVAL'; nohup '$ROOT/scripts/run_final8_token_shapley_eval_server2.sh' >'$EVAL/master.log' 2>&1 < /dev/null & echo \$! >'$EVAL/master.pid'"
+  "mkdir -p '$EVAL'; nohup '$ROOT/scripts/launchers/run_final8_token_shapley_eval_server2.sh' >'$EVAL/master.log' 2>&1 < /dev/null & echo \$! >'$EVAL/master.pid'"
 
 until ssh yujia-server2 "test -f '$EVAL/FINAL8_COMPLETE'"; do
   sleep 60

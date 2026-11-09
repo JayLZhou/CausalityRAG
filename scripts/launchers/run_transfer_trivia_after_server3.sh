@@ -44,7 +44,7 @@ done
 touch "$OUT/2WIKI_COMPLETE"
 
 mkdir -p "$ROOT/out/token_leverage_shap_final8_m128_3m_eval"
-"$ROOT/scripts/run_final8_token_shapley_eval_server3.sh" \
+"$ROOT/scripts/launchers/run_final8_token_shapley_eval_server3.sh" \
   >"$ROOT/out/token_leverage_shap_final8_m128_3m_eval/server3_master.log" 2>&1
 
 tar -czf "$ARCHIVE" -C "$ROOT/out" \
@@ -56,7 +56,7 @@ scp -q -o BatchMode=yes "$ARCHIVE" "$SERVER2:$ARCHIVE"
 ssh -o BatchMode=yes "$SERVER2" \
   "tar -xzf '$ARCHIVE' -C '$ROOT/out' && touch '$OUT/TRIVIA_IMPORTED' '$OUT/2WIKI_COMPLETE' '$ROOT/out/token_leverage_shap_final8_m128_3m_eval/SERVER3_IMPORTED'"
 
-"$ROOT/scripts/run_final8_shapley_budget_server3.sh" \
+"$ROOT/scripts/launchers/run_final8_shapley_budget_server3.sh" \
   >"$ROOT/out/token_leverage_shap_final8_m128_3m_budget_sweep/server3_master.log" 2>&1
 tar -czf "$ARCHIVE" -C "$ROOT/out" \
   token_leverage_shap_final8_m128_3m_budget_sweep/triviaqa \

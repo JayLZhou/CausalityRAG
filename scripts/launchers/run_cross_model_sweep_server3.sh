@@ -3,7 +3,7 @@ set -euo pipefail
 
 EXPECTED_HOST=${EXPECTED_HOST:-3haoji-A100}
 REPO=${REPO:-/data1/yujia/CausalityRAG_release_model_sweep_20260807}
-RUNNER="$REPO/scripts/run_cross_model_reflow_server3.sh"
+RUNNER="$REPO/scripts/launchers/run_cross_model_reflow_server3.sh"
 LOG_ROOT=/data1/yujia/CausalityRAG/out/model_sensitivity_v1/logs
 
 if [[ "$(hostname)" != "$EXPECTED_HOST" ]]; then

@@ -6,7 +6,7 @@ generation (RAG) system. A selected set is only a search candidate until the
 same reader is run on the edited context: it counts as a successful
 counterfactual intervention only after direct reader verification.
 
-This README is the canonical reproduction guide. It specifies the frozen
+This guide is the canonical reproduction guide. It specifies the frozen
 protocol, the complete main experiment, every additional experiment currently
 used by the project, the expected artifacts, and the audits that must pass
 before numbers are reported.
@@ -59,13 +59,13 @@ not substitutes for the frozen per-query inputs.
 ### Portable commands and historical schedulers
 
 Python entry points in `causalityrag/`, `exp/`, and `scripts/` are the portable
-interfaces. Shell files containing `server2`, `server3`, or `gpu0` record the
+interfaces. Shell files in `scripts/launchers/` record the
 original absolute paths, ports, GPU mappings, and resume logic. They are
 provenance, not portable launchers; several intentionally refuse to run on a
 different hostname. Review and override every path before reusing one.
 
 Do not copy an aggregate number into a paper table unless the row-alignment,
-pool-hash, execution, and metric audits in this README pass.
+pool-hash, execution, and metric audits in this guide pass.
 
 ## Frozen protocol
 
@@ -184,7 +184,7 @@ claim bitwise reproduction when these differ.
 Run tests before a formal job:
 
 ```bash
-python scripts/run_tests.py
+python -m pytest -q tests
 ```
 
 ### Services
@@ -1330,7 +1330,7 @@ On macOS use `shasum -a 256 -c SHA256SUMS`. Treat aggregate files under
 Run the complete suite:
 
 ```bash
-python scripts/run_tests.py
+python -m pytest -q tests
 ```
 
 For protocol-sensitive changes, at minimum run:
@@ -1382,11 +1382,13 @@ causalityrag/   graph, flow, token, pool, reader, and metric primitives
 configs/        frozen protocol checklists
 exp/            ReFlow and attribution/Shapley rankers
 scripts/        preparation, evaluation, aggregation, audit, and render tools
+scripts/launchers/  original server launch scripts, kept as provenance
+revision/       experiments added during the paper revision
 tests/          unit, integration, metric, and protocol tests
 artifacts/      checked aggregate result and audit records
 figures/        rendered outputs and their data files
 ```
 
-`EXPERIMENT_RUNBOOK.md` preserves historical execution order and source-path
-notes. If it conflicts with this README on the final suite, the final-eight
-scorers, audits, and this README take precedence.
+[`EXPERIMENT_RUNBOOK.md`](EXPERIMENT_RUNBOOK.md) preserves historical execution
+order and source-path notes. If it conflicts with this guide on the final suite,
+the final-eight scorers, audits, and this guide take precedence.

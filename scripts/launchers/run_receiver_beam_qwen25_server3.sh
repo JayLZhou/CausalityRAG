@@ -199,7 +199,7 @@ critical = [
     "exp/run_reflow.py",
     "scripts/build_contribution_graph_beams.py",
     "scripts/evaluate_reflow.py",
-    "scripts/run_receiver_beam_qwen25_server3.sh",
+    "scripts/launchers/run_receiver_beam_qwen25_server3.sh",
 ]
 repo_path = Path(repo)
 hashes = {

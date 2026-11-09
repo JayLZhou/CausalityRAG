@@ -23,6 +23,6 @@ for dataset in triviaqa 2wiki; do
   done
 done
 
-"$ROOT/scripts/run_final8_token_shapley_eval_server2_subset.sh"
+"$ROOT/scripts/launchers/run_final8_token_shapley_eval_server2_subset.sh"
 
 touch "$EVAL/SERVER3_IMPORTED"

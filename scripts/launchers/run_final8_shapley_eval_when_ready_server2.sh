@@ -10,7 +10,7 @@ while [[ ! -f "$RANK/RANKING_COMPLETE" ]]; do
 done
 
 mkdir -p "$EVAL"
-"$ROOT/scripts/run_final8_token_shapley_eval_server2.sh" \
+"$ROOT/scripts/launchers/run_final8_token_shapley_eval_server2.sh" \
   >"$EVAL/master.log" 2>&1
 
 while [[ ! -f "$EVAL/SERVER3_IMPORTED" ]]; do

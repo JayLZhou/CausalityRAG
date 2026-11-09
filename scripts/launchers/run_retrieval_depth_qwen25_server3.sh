@@ -175,7 +175,7 @@ critical = [
     "scripts/materialize_retrieval_prefix.py",
     "scripts/prepare_no_frontier_resume.py",
     "scripts/repair_disconnected_contribution_graphs.py",
-    "scripts/run_retrieval_depth_qwen25_server3.sh",
+    "scripts/launchers/run_retrieval_depth_qwen25_server3.sh",
 ]
 repo_path = Path(repo)
 hashes = {}

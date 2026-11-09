@@ -1,6 +1,6 @@
 # Reference configuration for the final HotpotQA pipeline.
 # The current command-line scripts use explicit flags; this file records the
-# frozen defaults and artifact names used by Readme.md.
+# frozen defaults and artifact names used by docs/REPRODUCTION.md.
 
 experiment: hotpotqa_contribution_flow_final
 seed: 20260711

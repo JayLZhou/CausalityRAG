@@ -61,4 +61,4 @@ fi
 }
 
 exec env START_AT_TABLE3=1 ONLY_QWEN25=1 \
-  ./scripts/run_medqa_replacement_server3.sh
+  ./scripts/launchers/run_medqa_replacement_server3.sh

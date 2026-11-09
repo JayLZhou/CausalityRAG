@@ -261,19 +261,19 @@ fi
 
 echo '[medqa] stage=cross-model-qwen3'
 REPO="$REPO" FROZEN_ROOT="$OUT_ROOT" OUTPUT_ROOT="$SENSITIVITY_ROOT" \
-  scripts/run_cross_model_reflow_server3.sh qwen3-4b \
+  scripts/launchers/run_cross_model_reflow_server3.sh qwen3-4b \
   /data1/yujia/models/Qwen3-4B-Instruct-2507 qwen3-4b 1000 \
   >"$LOG_ROOT/cross_qwen3.log" 2>&1
 
 echo '[medqa] stage=cross-model-llama'
 REPO="$REPO" FROZEN_ROOT="$OUT_ROOT" OUTPUT_ROOT="$SENSITIVITY_ROOT" \
-  scripts/run_cross_model_reflow_server3.sh llama3.1-8b \
+  scripts/launchers/run_cross_model_reflow_server3.sh llama3.1-8b \
   /data1/yujia/models/Llama-3.1-8B-Instruct llama3.1-8b 1000 \
   >"$LOG_ROOT/cross_llama.log" 2>&1
 
 echo '[medqa] stage=cross-model-mistral'
 REPO="$REPO" FROZEN_ROOT="$OUT_ROOT" OUTPUT_ROOT="$SENSITIVITY_ROOT" \
-  scripts/run_cross_model_reflow_server3.sh mistral-nemo-12b \
+  scripts/launchers/run_cross_model_reflow_server3.sh mistral-nemo-12b \
   /data1/yujia/models/Mistral-Nemo-Instruct-2407 mistral-nemo-12b 1000 \
   >"$LOG_ROOT/cross_mistral.log" 2>&1
 

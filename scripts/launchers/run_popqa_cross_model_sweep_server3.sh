@@ -7,7 +7,7 @@ if [[ "$(hostname)" != "${EXPECTED_HOST:-3haoji-A100}" ]]; then
 fi
 
 RELEASE=${RELEASE:-/data1/yujia/CausalityRAG_release_popqa_models_20260811}
-RUNNER=$RELEASE/scripts/run_popqa_cross_model_server3.sh
+RUNNER=$RELEASE/scripts/launchers/run_popqa_cross_model_server3.sh
 ANALYSIS_COMPLETE=${ANALYSIS_COMPLETE:-/data1/yujia/CausalityRAG/out_popqa_figures_20260811/popqa/figure8/REFINE_COMPLETE}
 LOG_ROOT=${LOG_ROOT:-/data1/yujia/CausalityRAG/out/model_sensitivity_popqa_v1/logs}
 mkdir -p "$LOG_ROOT"
