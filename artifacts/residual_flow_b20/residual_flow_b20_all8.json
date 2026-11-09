@@ -1,0 +1,793 @@
+{
+  "audit": {
+    "all_source_sha_verified": true,
+    "all_summary_metrics_independently_recomputed": true,
+    "datasets_complete": 8,
+    "invalid_outputs_excluded_from_metric_numerators_and_denominators": true,
+    "probe_rows": 8000,
+    "protocol_violations": 39,
+    "unique_task_ids_within_each_dataset": true,
+    "valid_reader_calls": 7961
+  },
+  "dataset_order": [
+    "hotpotqa",
+    "timeqa",
+    "finqa",
+    "musique",
+    "quartz",
+    "triviaqa",
+    "2wiki",
+    "popqa"
+  ],
+  "datasets": {
+    "2wiki": {
+      "answer_flip_rate": [
+        0.63,
+        0.41,
+        0.39,
+        0.34,
+        0.24,
+        0.24,
+        0.22,
+        0.26,
+        0.22,
+        0.17
+      ],
+      "artifact_sha256": {
+        "probes_1000": "68c9b60363ff48e9aff00e9cf6c75776875ada4be6631ef20702504beb519eb6",
+        "summary": "030b4e8e39cf3ec276c0fac96f2717756d73aa344507792348b7bb87ec78cb32"
+      },
+      "audit": {
+        "complete_marker": true,
+        "invalid_outputs_excluded_from_metric_numerators_and_denominators": true,
+        "probe_rows": 1000,
+        "selected_tokens_per_trial": 20,
+        "source_sha_matches_files": true,
+        "summary_matches_independent_recomputation": true,
+        "ten_trials_per_query": true,
+        "unique_query_ids": 100,
+        "unique_task_ids": 1000
+      },
+      "auroc_removed_flow_predicting_answer_flip": 0.7516468209600478,
+      "comparable_pairs": 1594,
+      "display_name": "2Wiki",
+      "equal_budget_pairwise_concordance": 0.6882057716436637,
+      "mean_answer_distance": [
+        0.4348484848484849,
+        0.2999469696969697,
+        0.28833189033189033,
+        0.2419033189033189,
+        0.17702777777777778,
+        0.18387626262626264,
+        0.1971969696969697,
+        0.20144444444444445,
+        0.1720342712842713,
+        0.16482517482517484
+      ],
+      "mean_residual_flow_ratio": [
+        0.5991382718856014,
+        0.7714502886806943,
+        0.8383199928751667,
+        0.899419604919403,
+        0.9386911948861151,
+        0.9565363369483141,
+        0.9707255122573075,
+        0.9803821213058909,
+        0.9882593111127702,
+        0.9950503283878969
+      ],
+      "mean_within_query_budget_spearman_residual_vs_distance": -0.31773917295752974,
+      "protocol_violations": 0,
+      "queries": 100,
+      "ranks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "reader_calls": 1000,
+      "source_sha256": {
+        "graphs": "11796250cd44256eb8ad25aaccbb9d6494aa668c12e483fafdd976ddb3208837",
+        "input": "1b81c869cbdcdba671b80f63b29626a357285050fd5aa7807d4324d7ce7e165c",
+        "shared_pool": "3191b10db9b1b2e2477a1076c497e88f4ac561266372d7ba13ba481833aebeed",
+        "units": "220fb61c5dcc8e7208f215e1ae6d4ea4786b474ff773786a7d035190d17981aa"
+      },
+      "valid_reader_calls": 1000
+    },
+    "finqa": {
+      "answer_flip_rate": [
+        0.5,
+        0.58,
+        0.47474747474747475,
+        0.48,
+        0.52,
+        0.39,
+        0.48,
+        0.44,
+        0.49,
+        0.41
+      ],
+      "artifact_sha256": {
+        "probes_1000": "e21ff98895dd7be7c1f228df83fb4b10945cadc93997c6cbba07fc8b22f5b5da",
+        "summary": "5ba60f217f72c4832c969f36f9f975004d4d92e2254f7eb704b2ee8f9618db83"
+      },
+      "audit": {
+        "complete_marker": true,
+        "invalid_outputs_excluded_from_metric_numerators_and_denominators": true,
+        "probe_rows": 1000,
+        "selected_tokens_per_trial": 20,
+        "source_sha_matches_files": true,
+        "summary_matches_independent_recomputation": true,
+        "ten_trials_per_query": true,
+        "unique_query_ids": 100,
+        "unique_task_ids": 1000
+      },
+      "auroc_removed_flow_predicting_answer_flip": 0.565037678551344,
+      "comparable_pairs": 1032,
+      "display_name": "FQA",
+      "equal_budget_pairwise_concordance": 0.5678294573643411,
+      "mean_answer_distance": [
+        0.46884313725490195,
+        0.5165787545787546,
+        0.42214299861358684,
+        0.445,
+        0.45774231678487,
+        0.36433333333333334,
+        0.43492063492063493,
+        0.39025396825396824,
+        0.452,
+        0.36777777777777776
+      ],
+      "mean_residual_flow_ratio": [
+        0.7584270662440302,
+        0.901515628721637,
+        0.9568812421235411,
+        0.9796106004887725,
+        0.9918505939816462,
+        0.9972350087671769,
+        0.9987032839734811,
+        0.9995233124325956,
+        0.9996539114350089,
+        0.9996855996340869
+      ],
+      "mean_within_query_budget_spearman_residual_vs_distance": -0.11582205382822473,
+      "protocol_violations": 1,
+      "queries": 100,
+      "ranks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "reader_calls": 1000,
+      "source_sha256": {
+        "graphs": "61f04cb44c164d06199cbd93a9636157d287857cae100d7de78db41467019283",
+        "input": "f6db67c33b94b56a177a44a7613d67f1edaadda6331aac55216443d85ea4cdf7",
+        "shared_pool": "e74882962f23b3b2dec3668fb1f2d44cb586fec8c6a330fa60ed850034b26fb6",
+        "units": "63341324033f00de6de22f1ea5c21354972fbc183b5965f38dd0a47c6c878029"
+      },
+      "valid_reader_calls": 999
+    },
+    "hotpotqa": {
+      "answer_flip_rate": [
+        0.64,
+        0.51,
+        0.39,
+        0.37,
+        0.38,
+        0.35,
+        0.31,
+        0.26,
+        0.3,
+        0.26
+      ],
+      "artifact_sha256": {
+        "probes_1000": "93c7bc6f31a0f94a31089970540db27c726dd6c87b5df3d1e8af3dcf7fab3350",
+        "summary": "61e4cf6c2a429ddeb76d82683905d00b334bf9627ca9b1d1700c08bcfe30893b"
+      },
+      "audit": {
+        "complete_marker": true,
+        "invalid_outputs_excluded_from_metric_numerators_and_denominators": true,
+        "probe_rows": 1000,
+        "selected_tokens_per_trial": 20,
+        "source_sha_matches_files": true,
+        "summary_matches_independent_recomputation": true,
+        "ten_trials_per_query": true,
+        "unique_query_ids": 100,
+        "unique_task_ids": 1000
+      },
+      "auroc_removed_flow_predicting_answer_flip": 0.6742062664185873,
+      "comparable_pairs": 1243,
+      "display_name": "HQA",
+      "equal_budget_pairwise_concordance": 0.7449718423169751,
+      "mean_answer_distance": [
+        0.46219353634870874,
+        0.3671078431372549,
+        0.2783333333333333,
+        0.26354774637127576,
+        0.30134261611621393,
+        0.26455635894810425,
+        0.2458127112914131,
+        0.20444385026737968,
+        0.25195556843427025,
+        0.20268627450980392
+      ],
+      "mean_residual_flow_ratio": [
+        0.6569292747354616,
+        0.7822054554207089,
+        0.8775995257166989,
+        0.9139839408691164,
+        0.954656209162673,
+        0.9710611277193651,
+        0.9828194349455093,
+        0.9902196421076959,
+        0.9949255002948569,
+        0.9978609816487621
+      ],
+      "mean_within_query_budget_spearman_residual_vs_distance": -0.39587211462785726,
+      "protocol_violations": 0,
+      "queries": 100,
+      "ranks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "reader_calls": 1000,
+      "source_sha256": {
+        "graphs": "3a85696eb15df2e92dd6d7c49b8d06af58e21fb6144dcfe48ce829f4e2b09764",
+        "input": "767e3d73fd9f13fc9fd9ec7a2e7f591c05541b684629c059b71d75c776a084bc",
+        "shared_pool": "992b18eb1a2d5993ba01a978212b3d7498c091a8204e8d94959b32b8167d2a96",
+        "units": "e290eac0b0f34c42607c4be0fa30499416963596df749228ef8d671c4ddeb523"
+      },
+      "valid_reader_calls": 1000
+    },
+    "musique": {
+      "answer_flip_rate": [
+        0.7755102040816326,
+        0.6041666666666666,
+        0.5104166666666666,
+        0.3854166666666667,
+        0.3877551020408163,
+        0.3958333333333333,
+        0.32653061224489793,
+        0.2916666666666667,
+        0.28865979381443296,
+        0.17
+      ],
+      "artifact_sha256": {
+        "probes_1000": "427219cb95755705334bdca439a111ec48a64806e470de04ea5972e69cda95c6",
+        "summary": "ea8527c7c5c9a6d187fc289bd23a619154f14543df17de3e04f148564b0c2f34"
+      },
+      "audit": {
+        "complete_marker": true,
+        "invalid_outputs_excluded_from_metric_numerators_and_denominators": true,
+        "probe_rows": 1000,
+        "selected_tokens_per_trial": 20,
+        "source_sha_matches_files": true,
+        "summary_matches_independent_recomputation": true,
+        "ten_trials_per_query": true,
+        "unique_query_ids": 100,
+        "unique_task_ids": 1000
+      },
+      "auroc_removed_flow_predicting_answer_flip": 0.7164369777311108,
+      "comparable_pairs": 1942,
+      "display_name": "MSQ",
+      "equal_budget_pairwise_concordance": 0.7353244078269825,
+      "mean_answer_distance": [
+        0.633847237418666,
+        0.4611888963862648,
+        0.4094631834215168,
+        0.2681551954989455,
+        0.2874500654624878,
+        0.2945040684624018,
+        0.2731027475925435,
+        0.23039277579718756,
+        0.23933926897844424,
+        0.14176190476190476
+      ],
+      "mean_residual_flow_ratio": [
+        0.6349945955826807,
+        0.7961934067535177,
+        0.8800774883201774,
+        0.9231430475290577,
+        0.9472725909452909,
+        0.9634805987128541,
+        0.975833846122032,
+        0.9858314209415209,
+        0.9912516350356156,
+        0.996438598663177
+      ],
+      "mean_within_query_budget_spearman_residual_vs_distance": -0.3962819861663049,
+      "protocol_violations": 29,
+      "queries": 100,
+      "ranks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "reader_calls": 1000,
+      "source_sha256": {
+        "graphs": "8b510c55ac34a24bf73bea57e1eadb95351d055409441ecfd909be1181faddfa",
+        "input": "bd0b1c3bd7007c769684a16471172fdf49ef76a79504d2db4154ef6a77e5866b",
+        "shared_pool": "56c7af323dd5ed2bec7391704578a8ea85d9ff958b13db94e559ca7fd32791b6",
+        "units": "4e93647c316dc3c8c4d0349619c1e80a301bd75c0d52be6e5ac58ee3c95ccc81"
+      },
+      "valid_reader_calls": 971
+    },
+    "popqa": {
+      "answer_flip_rate": [
+        0.7,
+        0.53,
+        0.42,
+        0.38,
+        0.27,
+        0.28,
+        0.21,
+        0.2,
+        0.13,
+        0.12
+      ],
+      "artifact_sha256": {
+        "probes_1000": "0fcbaf57c13ed1676185bbc8d83060f64666c8267942b8f9d9ff20c21357042c",
+        "summary": "227f8a58901817c320931632ced0b73050fc1d3a17a9a013c3208f879dee8403"
+      },
+      "audit": {
+        "complete_marker": true,
+        "invalid_outputs_excluded_from_metric_numerators_and_denominators": true,
+        "probe_rows": 1000,
+        "selected_tokens_per_trial": 20,
+        "source_sha_matches_files": true,
+        "summary_matches_independent_recomputation": true,
+        "ten_trials_per_query": true,
+        "unique_query_ids": 100,
+        "unique_task_ids": 1000
+      },
+      "auroc_removed_flow_predicting_answer_flip": 0.7792479362992184,
+      "comparable_pairs": 1713,
+      "display_name": "PQA",
+      "equal_budget_pairwise_concordance": 0.7950963222416813,
+      "mean_answer_distance": [
+        0.5613805916305916,
+        0.40645238095238095,
+        0.31192063492063493,
+        0.2814765373515373,
+        0.20441666666666666,
+        0.2310873015873016,
+        0.173981240981241,
+        0.15242857142857144,
+        0.08556746031746032,
+        0.09288888888888888
+      ],
+      "mean_residual_flow_ratio": [
+        0.5138749007800704,
+        0.6729831398887373,
+        0.7728170261004407,
+        0.8577332064510289,
+        0.8950029639793315,
+        0.9243028373735702,
+        0.9470689044881337,
+        0.9601675397751547,
+        0.9758557503038384,
+        0.9860792437105856
+      ],
+      "mean_within_query_budget_spearman_residual_vs_distance": -0.4803331015233399,
+      "protocol_violations": 0,
+      "queries": 100,
+      "ranks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "reader_calls": 1000,
+      "source_sha256": {
+        "graphs": "b64d23aa1784927339ceb492196a7b4bc4938c9d3f3a9b85d1213e00dac625e9",
+        "input": "1d43bdde40be0d0e9f2de9a5ff60b2b8f08ae24c6b85b4bd04f437a1ed0685d6",
+        "shared_pool": "4e0fce32f8a56f56bb62d5d9e788166d584e0964e351b6d4a11305293efcdeec",
+        "units": "e7365a8f804276b3a23d24a30dfc957c68116c454af0ed07856fc4e09110e445"
+      },
+      "valid_reader_calls": 1000
+    },
+    "quartz": {
+      "answer_flip_rate": [
+        0.46,
+        0.4,
+        0.47474747474747475,
+        0.36,
+        0.37,
+        0.34,
+        0.36,
+        0.43,
+        0.42,
+        0.36
+      ],
+      "artifact_sha256": {
+        "probes_1000": "bee424973ffdc7904ee4ab7c0b173f8f9ff287a3530378fce48368fe39d4267c",
+        "summary": "3fa147de54e0a0fde86f0c2474126c2bd2a41a8d6cf1c266138e62c743e5f47a"
+      },
+      "audit": {
+        "complete_marker": true,
+        "invalid_outputs_excluded_from_metric_numerators_and_denominators": true,
+        "probe_rows": 1000,
+        "selected_tokens_per_trial": 20,
+        "source_sha_matches_files": true,
+        "summary_matches_independent_recomputation": true,
+        "ten_trials_per_query": true,
+        "unique_query_ids": 100,
+        "unique_task_ids": 1000
+      },
+      "auroc_removed_flow_predicting_answer_flip": 0.5451099190774664,
+      "comparable_pairs": 1117,
+      "display_name": "QTZ",
+      "equal_budget_pairwise_concordance": 0.5452103849597135,
+      "mean_answer_distance": [
+        0.4003333333333333,
+        0.352,
+        0.44107744107744107,
+        0.32266666666666666,
+        0.32333333333333336,
+        0.312,
+        0.31333333333333335,
+        0.385,
+        0.38166666666666665,
+        0.3293333333333333
+      ],
+      "mean_residual_flow_ratio": [
+        0.07099263240892308,
+        0.11873906295865942,
+        0.17429398966352158,
+        0.24816502529223192,
+        0.34755068645284365,
+        0.41983840895645996,
+        0.5497304738128784,
+        0.6461887839254663,
+        0.7491747613425631,
+        0.8434398795848326
+      ],
+      "mean_within_query_budget_spearman_residual_vs_distance": -0.06637480036714913,
+      "protocol_violations": 1,
+      "queries": 100,
+      "ranks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "reader_calls": 1000,
+      "source_sha256": {
+        "graphs": "9b5598fc0467d1022e281108ebbd5a19dfe7c8caa3a98692a3eea3d4465ab526",
+        "input": "6873e96662e0c806cbac4e0e0636bf6dda587cedc6eed9b2f12118646aa1e842",
+        "shared_pool": "724115a67b2b8af90f74cfaeea47270e0412f7250b75a66d421f232d6cd148e6",
+        "units": "0dba232e48f129ca4891b3dcf5af38a3efaec9e67239748cb72b1387c4e58d97"
+      },
+      "valid_reader_calls": 999
+    },
+    "timeqa": {
+      "answer_flip_rate": [
+        0.8,
+        0.68,
+        0.6,
+        0.45,
+        0.4,
+        0.33,
+        0.31,
+        0.32,
+        0.29,
+        0.28
+      ],
+      "artifact_sha256": {
+        "probes_1000": "1df1a50db772c60cb2c391b1ebb0a1ed2265ab9ea8e251c673fa78d4e64ad001",
+        "summary": "6aff5119fb1656d562990056815dbe4f162b1704d5599c73025e9fce8b55f4dc"
+      },
+      "audit": {
+        "complete_marker": true,
+        "invalid_outputs_excluded_from_metric_numerators_and_denominators": true,
+        "probe_rows": 1000,
+        "selected_tokens_per_trial": 20,
+        "source_sha_matches_files": true,
+        "summary_matches_independent_recomputation": true,
+        "ten_trials_per_query": true,
+        "unique_query_ids": 100,
+        "unique_task_ids": 1000
+      },
+      "auroc_removed_flow_predicting_answer_flip": 0.7225720807498665,
+      "comparable_pairs": 2262,
+      "display_name": "TQA",
+      "equal_budget_pairwise_concordance": 0.6936339522546419,
+      "mean_answer_distance": [
+        0.5387251082251082,
+        0.4497622655122655,
+        0.3882849927849928,
+        0.3188119658119658,
+        0.29923809523809525,
+        0.2578100983983337,
+        0.27205555555555555,
+        0.24486008436008436,
+        0.24778571428571428,
+        0.252985347985348
+      ],
+      "mean_residual_flow_ratio": [
+        0.5760847331007679,
+        0.7463588226946843,
+        0.8383156883304811,
+        0.8897312645493105,
+        0.9212845633770754,
+        0.9433427769995796,
+        0.9598018546776125,
+        0.9698283258023284,
+        0.9812415139644249,
+        0.9903819859953095
+      ],
+      "mean_within_query_budget_spearman_residual_vs_distance": -0.3387008060030298,
+      "protocol_violations": 0,
+      "queries": 100,
+      "ranks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "reader_calls": 1000,
+      "source_sha256": {
+        "graphs": "454cfffbb5a481abe6fc5632eb25a3d569f996a32738da1e8aa7abd9a4f447dd",
+        "input": "561bc92a62068fb85a35696d772d331d1e4345757ee1e6205680244e1362077e",
+        "shared_pool": "cd7a8c9bc043b6541b8f2dd0f6c957e416080779d0d264941204fbbfa13f4e9c",
+        "units": "44f40c9a72870ce9814af30bb5798831b9488ad74e339a868e508f35a1dcc6d4"
+      },
+      "valid_reader_calls": 1000
+    },
+    "triviaqa": {
+      "answer_flip_rate": [
+        0.23232323232323232,
+        0.1111111111111111,
+        0.0707070707070707,
+        0.050505050505050504,
+        0.030303030303030304,
+        0.050505050505050504,
+        0.04,
+        0.06,
+        0.030303030303030304,
+        0.04040404040404041
+      ],
+      "artifact_sha256": {
+        "probes_1000": "f6535d9fcb40e0aa730b09eb5e8c2652432770d342e6530d0e36552d427b84a5",
+        "summary": "938b1c0d990ca4fe22f151bd51565c20697b0a60249176d74239cb76f1c99190"
+      },
+      "audit": {
+        "complete_marker": true,
+        "invalid_outputs_excluded_from_metric_numerators_and_denominators": true,
+        "probe_rows": 1000,
+        "selected_tokens_per_trial": 20,
+        "source_sha_matches_files": true,
+        "summary_matches_independent_recomputation": true,
+        "ten_trials_per_query": true,
+        "unique_query_ids": 100,
+        "unique_task_ids": 1000
+      },
+      "auroc_removed_flow_predicting_answer_flip": 0.6754905109265801,
+      "comparable_pairs": 465,
+      "display_name": "TrQA",
+      "equal_budget_pairwise_concordance": 0.7483870967741936,
+      "mean_answer_distance": [
+        0.1712281545614879,
+        0.07081930415263749,
+        0.053631553631553634,
+        0.04713804713804714,
+        0.022727272727272728,
+        0.03342953342953343,
+        0.019761904761904762,
+        0.049619883040935675,
+        0.028058361391694726,
+        0.026695526695526696
+      ],
+      "mean_residual_flow_ratio": [
+        0.7820306275468526,
+        0.9233265718227588,
+        0.970062042055498,
+        0.9824944828340004,
+        0.9893121728871103,
+        0.9951761176604219,
+        0.9978880522398987,
+        0.9994099932112336,
+        0.999880540073383,
+        0.99995814804251
+      ],
+      "mean_within_query_budget_spearman_residual_vs_distance": -0.3587684332401044,
+      "protocol_violations": 8,
+      "queries": 100,
+      "ranks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "reader_calls": 1000,
+      "source_sha256": {
+        "graphs": "4143620acef0604712a7eac8e13c15b1d36bd5475acde2a2723c40c150de1c2a",
+        "input": "28f71468f3ae7ba69fc9dac0ac2770761e5dfec940f23a6c0e35802b8c0313b3",
+        "shared_pool": "6d28c0e6871aee28c3ad47402a65a830d73a5a68d2b6b7d2bacdd2de9da573a8",
+        "units": "a1ff7e3dce9cdf118f335ce92eaba678e9aa52647723d590f79afeb42ca96437"
+      },
+      "valid_reader_calls": 992
+    }
+  },
+  "input_audit": [
+    {
+      "dataset": "hotpotqa",
+      "eligible_queries_b20": 999,
+      "graph_ok": 999,
+      "ordered_ids_aligned": true,
+      "rows": 1000,
+      "unique_ids": 1000
+    },
+    {
+      "dataset": "timeqa",
+      "eligible_queries_b20": 933,
+      "graph_ok": 933,
+      "ordered_ids_aligned": true,
+      "rows": 1000,
+      "unique_ids": 1000
+    },
+    {
+      "dataset": "finqa",
+      "eligible_queries_b20": 921,
+      "graph_ok": 922,
+      "ordered_ids_aligned": true,
+      "rows": 1000,
+      "unique_ids": 1000
+    },
+    {
+      "dataset": "musique",
+      "eligible_queries_b20": 957,
+      "graph_ok": 957,
+      "ordered_ids_aligned": true,
+      "rows": 1000,
+      "unique_ids": 1000
+    },
+    {
+      "dataset": "quartz",
+      "eligible_queries_b20": 980,
+      "graph_ok": 1000,
+      "ordered_ids_aligned": true,
+      "rows": 1000,
+      "unique_ids": 1000
+    },
+    {
+      "dataset": "triviaqa",
+      "eligible_queries_b20": 970,
+      "graph_ok": 970,
+      "ordered_ids_aligned": true,
+      "rows": 1000,
+      "unique_ids": 1000
+    },
+    {
+      "dataset": "2wiki",
+      "eligible_queries_b20": 986,
+      "graph_ok": 986,
+      "ordered_ids_aligned": true,
+      "rows": 1000,
+      "unique_ids": 1000
+    },
+    {
+      "dataset": "popqa",
+      "eligible_queries_b20": 983,
+      "graph_ok": 998,
+      "ordered_ids_aligned": true,
+      "rows": 1000,
+      "unique_ids": 1000
+    }
+  ],
+  "input_audit_sha256": "f340d1afc0a6edb66c41ad3e8e0eda6e00afd74b9dc0d4f567708c7a8aeea28a",
+  "macro_average": {
+    "answer_flip_rate": [
+      0.5922291795506082,
+      0.47815972222222225,
+      0.41632733585858583,
+      0.3519902146464646,
+      0.3247572665429808,
+      0.297042297979798,
+      0.28206632653061225,
+      0.28270833333333334,
+      0.2711203530146829,
+      0.22630050505050506
+    ],
+    "ci95_across_datasets_lower": [
+      0.43499406447388933,
+      0.3312450690202915,
+      0.28594046492533187,
+      0.24284001735495886,
+      0.20248487959124112,
+      0.20306002442187676,
+      0.17424558158655404,
+      0.18013323825037145,
+      0.14788865573877957,
+      0.1225351677945716
+    ],
+    "ci95_across_datasets_upper": [
+      0.749464294627327,
+      0.625074375424153,
+      0.5467142067918398,
+      0.4611404119379704,
+      0.4470296534947205,
+      0.3910245715377192,
+      0.3898870714746705,
+      0.38528342841629526,
+      0.39435205029058623,
+      0.33006584230643854
+    ],
+    "ci_method": "two-sided t interval across eight dataset-level rates (df=7)",
+    "rank1_to_rank10_ratio": 2.6170033487925104,
+    "ranks": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ]
+  },
+  "schema": "causalityrag.residual_flow_b20_all8.v1",
+  "settings": {
+    "fixed_token_budget": 20,
+    "queries_per_dataset": 100,
+    "reader_calls_per_dataset": 1000,
+    "retrieval_depth": 5,
+    "selection": "uniform legal token sets sampled before residual flow is computed",
+    "total_reader_calls": 8000,
+    "trials_per_query": 10
+  }
+}

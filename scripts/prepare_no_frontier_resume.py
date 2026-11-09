@@ -74,13 +74,25 @@ def command_prepare(args: argparse.Namespace) -> None:
         if actual_ids != expected_ids:
             raise ValueError(f"{path}: row IDs are not aligned with input")
 
-    target_ids = [
+    all_target_ids = [
         record_id(row)
         for row in results
         if str(row.get("evaluation_status", "")) == args.target_status
     ]
-    if not target_ids:
+    if not all_target_ids:
         raise ValueError(f"no result rows have status {args.target_status!r}")
+    frontier_by_id = indexed_rows(frontiers)
+    excluded_no_executable_ids = [
+        identifier
+        for identifier in all_target_ids
+        if int(frontier_by_id[identifier].get("editable_token_units", 0)) == 0
+    ]
+    excluded_no_executable_set = set(excluded_no_executable_ids)
+    target_ids = [
+        identifier
+        for identifier in all_target_ids
+        if identifier not in excluded_no_executable_set
+    ]
     target_set = set(target_ids)
     graph_by_id = indexed_rows(graphs)
     for identifier in target_ids:
@@ -113,8 +125,11 @@ def command_prepare(args: argparse.Namespace) -> None:
         "schema": "causalityrag.no_frontier_resume.v1",
         "target_status": args.target_status,
         "source_queries": args.n,
+        "source_target_queries": len(all_target_ids),
         "target_queries": len(target_ids),
         "target_ids": target_ids,
+        "excluded_no_executable_queries": len(excluded_no_executable_ids),
+        "excluded_no_executable_ids": excluded_no_executable_ids,
         "original_index_by_id": index_by_id,
         "sources": {
             "input": str(args.input.resolve()),
@@ -145,8 +160,16 @@ def load_manifest(path: Path) -> dict:
     if manifest.get("schema") != "causalityrag.no_frontier_resume.v1":
         raise ValueError(f"unsupported resume manifest: {path}")
     target_ids = [str(value) for value in manifest.get("target_ids", [])]
-    if not target_ids or len(set(target_ids)) != len(target_ids):
-        raise ValueError("resume manifest target IDs must be nonempty and unique")
+    if len(set(target_ids)) != len(target_ids):
+        raise ValueError("resume manifest target IDs must be unique")
+    excluded_ids = [
+        str(value)
+        for value in manifest.get("excluded_no_executable_ids", [])
+    ]
+    if len(set(excluded_ids)) != len(excluded_ids):
+        raise ValueError("excluded no-executable IDs must be unique")
+    if set(target_ids).intersection(excluded_ids):
+        raise ValueError("repair and no-executable ID sets must be disjoint")
     return manifest
 
 
@@ -191,14 +214,28 @@ def command_merge_frontier(args: argparse.Namespace) -> None:
         if not row.get("graph_connectivity_repair", {}).get("targeted"):
             raise ValueError(f"{record_id(row)}: missing graph target evidence")
     merged = merge_rows(old_rows, resumed_rows, manifest)
+    excluded_ids = set(manifest.get("excluded_no_executable_ids", []))
+    merged = [
+        {
+            **row,
+            "frontier_status": "invalid_no_executable_domain",
+            "frontier_exclusion_reason": "zero_editable_token_units",
+        }
+        if record_id(row) in excluded_ids
+        else row
+        for row in merged
+    ]
     atomic_write_jsonl(args.out, merged)
     summary = {
         "schema": "causalityrag.no_frontier_frontier_merge.v1",
         "queries": len(merged),
         "replaced_queries": len(resumed_rows),
         "preserved_queries": len(merged) - len(resumed_rows),
+        "excluded_no_executable_queries": len(excluded_ids),
         "remaining_empty_frontiers": sum(
-            not row.get("frontier_candidates") for row in merged
+            not row.get("frontier_candidates")
+            and record_id(row) not in excluded_ids
+            for row in merged
         ),
         "out": str(args.out.resolve()),
         "out_sha256": file_sha256(str(args.out)),
@@ -221,12 +258,32 @@ def command_merge_results(args: argparse.Namespace) -> None:
         if row.get("evaluation_status") == manifest["target_status"]:
             raise ValueError(f"{record_id(row)}: result remains no-frontier")
     merged = merge_rows(old_rows, resumed_rows, manifest)
+    excluded_ids = set(manifest.get("excluded_no_executable_ids", []))
+    merged = [
+        {
+            **row,
+            "eligible": False,
+            "verified_flip": False,
+            "selected_ids": [],
+            "selected_tokens": [],
+            "n_modified_tokens": 0,
+            "edited_answer": str(row.get("clean_answer", "")),
+            "reader_calls": 0,
+            "attempts": [],
+            "evaluation_status": "invalid_no_executable_domain",
+            "exclusion_reason": "zero_editable_token_units",
+        }
+        if record_id(row) in excluded_ids
+        else row
+        for row in merged
+    ]
     atomic_write_jsonl(args.out, merged)
     summary = {
         **summarize(merged),
         "schema": "causalityrag.no_frontier_result_merge.v1",
         "replaced_queries": len(resumed_rows),
         "preserved_queries": len(merged) - len(resumed_rows),
+        "excluded_no_executable_queries": len(excluded_ids),
         "remaining_no_frontier": sum(
             row.get("evaluation_status") == manifest["target_status"]
             for row in merged

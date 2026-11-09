@@ -1,0 +1,17 @@
+% Qwen2.5-7B retrieval-depth k=10; factual ReFlow only.
+\begin{tabular}{lrrrrrrr}
+\toprule
+Dataset & Ans-FR & F1-FR & Edits & Coverage & Nodes & Edges & E2E (s) \\
+\midrule
+HotpotQA & 93.5 & 91.9 & 3.36 & 99.7 & 920.2 & 705.3 & 17.49 \\
+TimeQA & 95.5 & 99.0 & 1.71 & 100.0 & 613.1 & 1049.7 & 10.48 \\
+FinQA & 87.6 & 84.2 & 3.32 & 99.6 & 1692.9 & 181.6 & 45.63 \\
+MuSiQue & 97.5 & 97.2 & 2.00 & 99.1 & 923.6 & 796.6 & 14.33 \\
+QuaRTz & 19.5 & 18.4 & 6.14 & 100.0 & 145.7 & 114.3 & 8.34 \\
+TriviaQA & 74.9 & 65.5 & 6.54 & 98.8 & 2604.0 & 908.6 & 72.55 \\
+2Wiki & 89.7 & 94.7 & 3.28 & 99.6 & 807.4 & 510.5 & 15.96 \\
+PopQA & 98.3 & 97.0 & 2.25 & 100.0 & 651.1 & 652.3 & 11.20 \\
+\midrule
+Micro/weighted & 82.0 & 69.0 & 3.57 & 99.6 & 1042.4 & 614.4 & 24.50 \\
+\bottomrule
+\end{tabular}

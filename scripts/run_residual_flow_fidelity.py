@@ -21,7 +21,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from causalityrag.contribution_graph import contribution_graph_edges
 from causalityrag.flow_contract import remaining_contribution_flow
 from causalityrag.io import load_records, record_id
-from causalityrag.reader import ReaderClient, answer_token_f1, answers_exact_match
+from causalityrag.reader import (
+    ReaderClient,
+    ReaderProtocolError,
+    answer_token_f1,
+    answers_exact_match,
+)
 from causalityrag.revision import apply_token_replacements
 from causalityrag.shared_replacement_pool import (
     FrozenSharedReplacementPool,
@@ -29,6 +34,7 @@ from causalityrag.shared_replacement_pool import (
     stable_shared_candidate,
 )
 from causalityrag.token_units import units_from_cache_row
+from scripts.evaluate_reflow import valid_clean_answer
 
 
 def stable_int(*values: object) -> int:
@@ -183,7 +189,20 @@ def main() -> None:
         if revision["n_failed_edits"] or revision["n_edits"] != budget:
             raise ValueError(f"failed frozen edit for {task_id}")
         clean = str(graph_row.get("clean_answer", graph_row.get("target_answer", "")))
-        edited = reader.answer(str(record.get("question", "")), revision["edited_contexts"])
+        try:
+            edited = reader.answer(
+                str(record.get("question", "")),
+                revision["edited_contexts"],
+            )
+            protocol_error = (
+                "invalid empty or non-answer reader output"
+                if not valid_clean_answer(edited)
+                else ""
+            )
+        except ReaderProtocolError as exc:
+            edited = ""
+            protocol_error = str(exc)
+        valid_answer = not protocol_error
         row = {
             "task_id": task_id,
             "id": query_id,
@@ -193,8 +212,15 @@ def main() -> None:
             "residual_flow_ratio": residual,
             "clean_answer": clean,
             "edited_answer": edited,
-            "answer_flip": not answers_exact_match(clean, edited),
-            "answer_distance": 1.0 - answer_token_f1(clean, edited),
+            "valid_answer": valid_answer,
+            "protocol_error": protocol_error,
+            "answer_flip": valid_answer
+            and not answers_exact_match(clean, edited),
+            "answer_distance": (
+                1.0 - answer_token_f1(clean, edited)
+                if valid_answer
+                else None
+            ),
         }
         with lock:
             with target.open("a", encoding="utf-8") as handle:
@@ -226,13 +252,16 @@ def main() -> None:
         ordered = sorted(group, key=lambda row: (row["residual_flow_ratio"], row["trial"]))
         for index, row in enumerate(ordered, start=1):
             deciles[index].append(row)
+        valid_group = [row for row in group if row.get("valid_answer", True)]
         correlation = pearson(
-            average_ranks([row["residual_flow_ratio"] for row in group]),
-            average_ranks([row["answer_distance"] for row in group]),
+            average_ranks(
+                [row["residual_flow_ratio"] for row in valid_group]
+            ),
+            average_ranks([row["answer_distance"] for row in valid_group]),
         )
         if correlation is not None:
             correlations.append(correlation)
-        for left, right in itertools.combinations(group, 2):
+        for left, right in itertools.combinations(valid_group, 2):
             flow_delta = left["residual_flow_ratio"] - right["residual_flow_ratio"]
             distance_delta = left["answer_distance"] - right["answer_distance"]
             if abs(flow_delta) <= 1e-12 or abs(distance_delta) <= 1e-12:
@@ -241,31 +270,47 @@ def main() -> None:
             concordant += int(flow_delta * distance_delta < 0)
     decile_rows = []
     for index, values in deciles.items():
-        flips = sum(bool(row["answer_flip"]) for row in values)
+        valid_values = [
+            row for row in values if row.get("valid_answer", True)
+        ]
+        flips = sum(bool(row["answer_flip"]) for row in valid_values)
         decile_rows.append({
             "decile": index,
             "count": len(values),
+            "valid_answer_count": len(valid_values),
             "mean_residual_flow_ratio": statistics.fmean(
                 row["residual_flow_ratio"] for row in values
             ),
-            "answer_flip_rate": flips / len(values),
-            "wilson_95": wilson(flips, len(values)),
-            "mean_answer_distance": statistics.fmean(
-                row["answer_distance"] for row in values
+            "answer_flip_rate": flips / max(1, len(valid_values)),
+            "wilson_95": wilson(flips, len(valid_values)),
+            "mean_answer_distance": (
+                statistics.fmean(
+                    row["answer_distance"] for row in valid_values
+                )
+                if valid_values
+                else None
             ),
         })
+    valid_rows = [row for row in rows if row.get("valid_answer", True)]
     summary = {
         "schema": "causalityrag.residual_flow_fidelity.v1",
         "queries": len(prepared),
         "budgets": args.budgets,
         "trials_per_query_budget": args.trials,
         "reader_executions": len(rows),
+        "valid_answer_executions": len(valid_rows),
+        "protocol_violations": len(rows) - len(valid_rows),
         "selection": "uniform legal token sets sampled before residual flow is computed",
         "deciles_low_to_high_residual": decile_rows,
-        "mean_within_query_budget_spearman_residual_vs_distance": statistics.fmean(correlations),
+        "mean_within_query_budget_spearman_residual_vs_distance": (
+            statistics.fmean(correlations) if correlations else None
+        ),
         "auroc_removed_flow_predicting_answer_flip": auc(
-            [bool(row["answer_flip"]) for row in rows],
-            [1.0 - float(row["residual_flow_ratio"]) for row in rows],
+            [bool(row["answer_flip"]) for row in valid_rows],
+            [
+                1.0 - float(row["residual_flow_ratio"])
+                for row in valid_rows
+            ],
         ),
         "equal_budget_pairwise_concordance": concordant / max(1, comparable),
         "comparable_pairs": comparable,

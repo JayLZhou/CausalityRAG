@@ -621,12 +621,78 @@ class ArcJsdModel:
             output = self.model.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                output_attentions=True,
+                output_attentions=False,
+                output_hidden_states=True,
                 use_cache=False,
                 return_dict=True,
             )
-        # [heads, query, key] -> mean heads -> final prompt query position.
-        final_attention = output.attentions[-1][0].mean(dim=0)[-1]
+            # Materialize only the final query row of the final-layer attention
+            # matrix. Asking Transformers for every layer's dense n-by-n
+            # attention tensor is equivalent for this score but can require
+            # tens of GB for long retrieved contexts.
+            decoder = self.model.model
+            module = decoder.layers[-1].self_attn
+            hidden_states = output.hidden_states[-2]
+            sequence_length = hidden_states.shape[1]
+            n_heads = module.config.num_attention_heads
+            n_kv_heads = module.config.num_key_value_heads
+            head_dim = module.head_dim
+            query_states = (
+                module.q_proj(hidden_states[:, -1:, :])
+                .view(1, 1, n_heads, head_dim)
+                .transpose(1, 2)
+            )
+            key_states = (
+                module.k_proj(hidden_states)
+                .view(1, sequence_length, n_kv_heads, head_dim)
+                .transpose(1, 2)
+            )
+            if hasattr(module, "q_norm"):
+                query_states = module.q_norm(query_states)
+            if hasattr(module, "k_norm"):
+                key_states = module.k_norm(key_states)
+
+            position_ids = torch.arange(
+                sequence_length,
+                device=input_ids.device,
+            ).unsqueeze(0)
+            cos, sin = decoder.rotary_emb(hidden_states, position_ids)
+            cos = cos.unsqueeze(1).to(query_states.dtype)
+            sin = sin.unsqueeze(1).to(query_states.dtype)
+
+            def rotate_half(states):
+                midpoint = states.shape[-1] // 2
+                return torch.cat(
+                    (-states[..., midpoint:], states[..., :midpoint]),
+                    dim=-1,
+                )
+
+            query_states = (
+                query_states * cos[:, :, -1:, :]
+                + rotate_half(query_states) * sin[:, :, -1:, :]
+            )
+            key_states = key_states * cos + rotate_half(key_states) * sin
+            if n_kv_heads != n_heads:
+                key_states = key_states.repeat_interleave(
+                    module.num_key_value_groups,
+                    dim=1,
+                )
+            attention_scores = (
+                torch.matmul(query_states, key_states.transpose(2, 3))
+                * float(getattr(module, "scaling", head_dim**-0.5))
+            )
+            softcap = getattr(module, "attn_logit_softcapping", None)
+            if softcap is not None:
+                attention_scores = (
+                    torch.tanh(attention_scores / float(softcap))
+                    * float(softcap)
+                )
+            # [batch, heads, one query, keys] -> one score per prompt token.
+            final_attention = torch.softmax(
+                attention_scores,
+                dim=-1,
+                dtype=torch.float32,
+            )[0, :, 0, :].mean(dim=0)
         return [
             float(final_attention[positions].sum().item())
             for positions in positions_by_unit

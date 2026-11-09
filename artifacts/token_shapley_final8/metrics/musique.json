@@ -1,0 +1,56 @@
+{
+  "dataset": "musique",
+  "queries": 1000,
+  "diagnostics": {
+    "factual_invalid": 12,
+    "control_invalid": 9,
+    "factual_unexecuted": 0,
+    "control_unexecuted": 257
+  },
+  "metrics": {
+    "Ans-FR": {
+      "flips": 583,
+      "denominator": 953,
+      "rate_percent": 61.17523609653725
+    },
+    "Ans-CFR": {
+      "factual_flips": 581,
+      "control_flips": 181,
+      "denominator": 950,
+      "rate_percent": 42.10526315789474
+    },
+    "F1-FR": {
+      "flips": 95,
+      "denominator": 150,
+      "rate_percent": 63.333333333333336
+    },
+    "F1-CFR": {
+      "factual_flips": 95,
+      "control_flips": 18,
+      "denominator": 150,
+      "rate_percent": 51.333333333333336
+    },
+    "EM-FR": {
+      "flips": 95,
+      "denominator": 150,
+      "rate_percent": 63.333333333333336
+    },
+    "EM-CFR": {
+      "factual_flips": 95,
+      "control_flips": 18,
+      "denominator": 150,
+      "rate_percent": 51.333333333333336
+    },
+    "Acc-FR": {
+      "flips": 137,
+      "denominator": 235,
+      "rate_percent": 58.297872340425535
+    },
+    "Acc-CFR": {
+      "factual_flips": 137,
+      "control_flips": 20,
+      "denominator": 235,
+      "rate_percent": 49.787234042553195
+    }
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "dataset": "hotpotqa",
+  "queries": 1000,
+  "clean_acc_queries": 543,
+  "reflow": {
+    "valid_queries": 541,
+    "acc_flip_count": 461,
+    "acc_fr": 0.8521256931608133
+  },
+  "token_shapley": {
+    "1": {
+      "valid_queries": 542,
+      "acc_flip_count": 290,
+      "acc_fr": 0.5350553505535055,
+      "mean_modified_tokens": 1.0
+    },
+    "2": {
+      "valid_queries": 540,
+      "acc_flip_count": 345,
+      "acc_fr": 0.6388888888888888,
+      "mean_modified_tokens": 2.0
+    },
+    "4": {
+      "valid_queries": 538,
+      "acc_flip_count": 368,
+      "acc_fr": 0.6840148698884758,
+      "mean_modified_tokens": 4.0
+    },
+    "8": {
+      "valid_queries": 536,
+      "acc_flip_count": 383,
+      "acc_fr": 0.7145522388059702,
+      "mean_modified_tokens": 8.0
+    },
+    "16": {
+      "valid_queries": 534,
+      "acc_flip_count": 392,
+      "acc_fr": 0.7340823970037453,
+      "mean_modified_tokens": 16.0
+    },
+    "32": {
+      "valid_queries": 534,
+      "acc_flip_count": 409,
+      "acc_fr": 0.7659176029962547,
+      "mean_modified_tokens": 32.0
+    },
+    "64": {
+      "valid_queries": 528,
+      "acc_flip_count": 415,
+      "acc_fr": 0.7859848484848485,
+      "mean_modified_tokens": 64.0
+    },
+    "128": {
+      "valid_queries": 518,
+      "acc_flip_count": 438,
+      "acc_fr": 0.8455598455598455,
+      "mean_modified_tokens": 127.66988416988417
+    }
+  },
+  "first_matching_tested_budget": null,
+  "reaches_target_through_128": false,
+  "first_matching_budget": null,
+  "exact_integer_search": true
+}

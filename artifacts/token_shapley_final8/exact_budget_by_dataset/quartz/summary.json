@@ -1,0 +1,64 @@
+{
+  "dataset": "quartz",
+  "queries": 1000,
+  "clean_acc_queries": 723,
+  "reflow": {
+    "valid_queries": 722,
+    "acc_flip_count": 258,
+    "acc_fr": 0.3573407202216066
+  },
+  "token_shapley": {
+    "1": {
+      "valid_queries": 723,
+      "acc_flip_count": 96,
+      "acc_fr": 0.13278008298755187,
+      "mean_modified_tokens": 1.0
+    },
+    "2": {
+      "valid_queries": 722,
+      "acc_flip_count": 124,
+      "acc_fr": 0.17174515235457063,
+      "mean_modified_tokens": 2.0
+    },
+    "4": {
+      "valid_queries": 722,
+      "acc_flip_count": 151,
+      "acc_fr": 0.20914127423822715,
+      "mean_modified_tokens": 4.0
+    },
+    "8": {
+      "valid_queries": 723,
+      "acc_flip_count": 195,
+      "acc_fr": 0.2697095435684647,
+      "mean_modified_tokens": 8.0
+    },
+    "16": {
+      "valid_queries": 722,
+      "acc_flip_count": 236,
+      "acc_fr": 0.3268698060941828,
+      "mean_modified_tokens": 16.0
+    },
+    "32": {
+      "valid_queries": 720,
+      "acc_flip_count": 229,
+      "acc_fr": 0.31805555555555554,
+      "mean_modified_tokens": 31.305555555555557
+    },
+    "64": {
+      "valid_queries": 720,
+      "acc_flip_count": 223,
+      "acc_fr": 0.30972222222222223,
+      "mean_modified_tokens": 36.3
+    },
+    "128": {
+      "valid_queries": 720,
+      "acc_flip_count": 223,
+      "acc_fr": 0.30972222222222223,
+      "mean_modified_tokens": 36.3
+    }
+  },
+  "first_matching_tested_budget": null,
+  "reaches_target_through_128": false,
+  "first_matching_budget": null,
+  "exact_integer_search": true
+}

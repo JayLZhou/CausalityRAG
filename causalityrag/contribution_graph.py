@@ -54,6 +54,34 @@ class ContributionGraphBuilder:
             k=k,
         )
 
+    def build_many(
+        self,
+        record: dict,
+        target_answer: str,
+        *,
+        k: int = 5,
+        receiver_beams: list[int],
+    ) -> dict[int, dict]:
+        """Build exact receiver-beam variants from one model trace."""
+
+        token_units = all_context_word_units(record, k=k)
+        message_flows = self._extractor.extract_many(
+            record,
+            target_answer,
+            k=k,
+            receiver_beams=receiver_beams,
+        )
+        return {
+            beam: contract_message_flow_row(
+                record,
+                target_answer,
+                message_flow,
+                token_units=token_units,
+                k=k,
+            )
+            for beam, message_flow in message_flows.items()
+        }
+
 
 def contract_message_flow_row(
     record: dict,
@@ -267,10 +295,20 @@ def ensure_executable_source_target_path(
         min(positive_reference) if positive_reference else 1e-6
     )
 
-    def strongest(weights: dict[str, float], *, avoid: str = "") -> str:
-        candidates = [unit_id for unit_id in domain if unit_id != avoid]
+    def strongest(
+        weights: dict[str, float],
+        *,
+        avoid: str = "",
+        candidate_ids: set[str] | None = None,
+    ) -> str:
+        available = (
+            domain
+            if candidate_ids is None
+            else domain.intersection(candidate_ids)
+        )
+        candidates = [unit_id for unit_id in available if unit_id != avoid]
         if not candidates:
-            candidates = list(domain)
+            candidates = list(available)
         return min(
             candidates,
             key=lambda unit_id: (
@@ -301,8 +339,15 @@ def ensure_executable_source_target_path(
         repaired_interactions,
         repaired_target,
     ):
-        left = strongest(repaired_source)
-        right = strongest(repaired_target, avoid=left)
+        left = strongest(
+            repaired_source,
+            candidate_ids=set(repaired_source),
+        )
+        right = strongest(
+            repaired_target,
+            avoid=left,
+            candidate_ids=set(repaired_target),
+        )
         capacity = min(repaired_source[left], repaired_target[right])
         repaired_interactions[(left, right)] = (
             repaired_interactions.get((left, right), 0.0) + capacity

@@ -1,0 +1,64 @@
+{
+  "queries": 100,
+  "population": "frozen clean-correct HotpotQA queries",
+  "methods": {
+    "reflow": {
+      "untargeted_successes": 83,
+      "untargeted_asr": 0.83,
+      "untargeted_asr_ci95": [
+        0.75,
+        0.9
+      ],
+      "targeted_successes": 16,
+      "targeted_asr": 0.16,
+      "targeted_asr_ci95": [
+        0.09,
+        0.23
+      ],
+      "mean_attack_token_footprint": 3.19,
+      "median_attack_token_footprint": 1.0
+    },
+    "poisonedrag": {
+      "untargeted_successes": 81,
+      "untargeted_asr": 0.81,
+      "untargeted_asr_ci95": [
+        0.73,
+        0.88
+      ],
+      "targeted_successes": 75,
+      "targeted_asr": 0.75,
+      "targeted_asr_ci95": [
+        0.66,
+        0.83
+      ],
+      "mean_attack_token_footprint": 174.9,
+      "median_attack_token_footprint": 166.5
+    },
+    "tparag": {
+      "untargeted_successes": 61,
+      "untargeted_asr": 0.61,
+      "untargeted_asr_ci95": [
+        0.51,
+        0.7
+      ],
+      "targeted_successes": 57,
+      "targeted_asr": 0.57,
+      "targeted_asr_ci95": [
+        0.47,
+        0.67
+      ],
+      "mean_attack_token_footprint": 538.2,
+      "median_attack_token_footprint": 519.5
+    }
+  },
+  "protocol": {
+    "retrieved_chunks": 5,
+    "reader": "qwen2.5-7b",
+    "retriever": "Qwen3-Embedding-0.6B",
+    "poisonedrag_injected_passages": 5,
+    "tparag_iterations": 5,
+    "tparag_candidates_per_iteration": 20,
+    "tparag_max_substitution_rate": 0.2,
+    "attack_footprint": "replaced tokens for ReFlow; all inserted passage tokens for PoisonedRAG and TPARAG"
+  }
+}

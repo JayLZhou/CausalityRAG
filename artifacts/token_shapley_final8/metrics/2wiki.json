@@ -1,0 +1,56 @@
+{
+  "dataset": "2wiki",
+  "queries": 1000,
+  "diagnostics": {
+    "factual_invalid": 5,
+    "control_invalid": 1,
+    "factual_unexecuted": 0,
+    "control_unexecuted": 159
+  },
+  "metrics": {
+    "Ans-FR": {
+      "flips": 548,
+      "denominator": 989,
+      "rate_percent": 55.409504550050556
+    },
+    "Ans-CFR": {
+      "factual_flips": 548,
+      "control_flips": 207,
+      "denominator": 989,
+      "rate_percent": 34.47927199191102
+    },
+    "F1-FR": {
+      "flips": 152,
+      "denominator": 292,
+      "rate_percent": 52.054794520547944
+    },
+    "F1-CFR": {
+      "factual_flips": 152,
+      "control_flips": 42,
+      "denominator": 292,
+      "rate_percent": 37.67123287671233
+    },
+    "EM-FR": {
+      "flips": 152,
+      "denominator": 292,
+      "rate_percent": 52.054794520547944
+    },
+    "EM-CFR": {
+      "factual_flips": 152,
+      "control_flips": 42,
+      "denominator": 292,
+      "rate_percent": 37.67123287671233
+    },
+    "Acc-FR": {
+      "flips": 160,
+      "denominator": 339,
+      "rate_percent": 47.1976401179941
+    },
+    "Acc-CFR": {
+      "factual_flips": 160,
+      "control_flips": 42,
+      "denominator": 339,
+      "rate_percent": 34.80825958702065
+    }
+  }
+}

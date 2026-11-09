@@ -42,3 +42,23 @@ def test_connectivity_repair_adds_missing_endpoint_edges():
     assert diagnostics["added_source_edges"]
     assert diagnostics["added_target_edges"]
     assert positive_source_target_path_exists(source, interactions, target)
+
+
+def test_connectivity_repair_selects_only_existing_endpoint_edges():
+    source, interactions, target, diagnostics = (
+        ensure_executable_source_target_path(
+            {"source-token", "target-token", "unrelated-a", "unrelated-b"},
+            {"source-token": 20.0},
+            {("unrelated-a", "unrelated-b"): 10.0},
+            {"target-token": 0.3},
+        )
+    )
+
+    assert diagnostics["added_interaction_edges"] == [
+        {
+            "source": "source-token",
+            "target": "target-token",
+            "capacity": 0.3,
+        }
+    ]
+    assert positive_source_target_path_exists(source, interactions, target)

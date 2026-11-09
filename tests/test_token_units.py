@@ -14,10 +14,10 @@ def test_context_units_check_context_hashes():
         "context_sha256": {
             "c1": hashlib.sha256(b"alpha beta").hexdigest(),
         },
-        "units": [{"unit_id": "u1"}],
+        "units": [{"unit_id": "u1", "chunk_id": "c1"}],
     }
 
-    assert units_from_context_row(record, row, k=1) == [{"unit_id": "u1"}]
+    assert units_from_context_row(record, row, k=1) == [{"unit_id": "u1", "chunk_id": "c1"}]
 
     row["context_sha256"]["c1"] = "bad"
     try:

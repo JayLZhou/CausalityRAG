@@ -1,0 +1,147 @@
+{
+  "queries": 100,
+  "attacks": {
+    "poisonedrag": {
+      "no_defense": {
+        "attacked_accuracy": 0.19,
+        "attacked_accuracy_ci95": [
+          0.12,
+          0.27
+        ],
+        "mean_defense_token_footprint": 0.0
+      },
+      "reflow_guard": {
+        "attacked_accuracy": 0.77,
+        "attacked_accuracy_ci95": [
+          0.69,
+          0.85
+        ],
+        "mean_defense_token_footprint": 57.66
+      },
+      "random_guard": {
+        "attacked_accuracy": 0.192,
+        "attacked_accuracy_ci95": [
+          0.14200000000000002,
+          0.24600000000000002
+        ],
+        "mean_defense_token_footprint": 52.466
+      },
+      "robustrag_voting": {
+        "attacked_accuracy": 0.17,
+        "attacked_accuracy_ci95": [
+          0.1,
+          0.25
+        ],
+        "mean_defense_token_footprint": 224.36
+      },
+      "robustrag_keyword": {
+        "attacked_accuracy": 0.17,
+        "attacked_accuracy_ci95": [
+          0.1,
+          0.25
+        ],
+        "mean_defense_token_footprint": 224.36
+      }
+    },
+    "tparag": {
+      "no_defense": {
+        "attacked_accuracy": 0.39,
+        "attacked_accuracy_ci95": [
+          0.3,
+          0.48
+        ],
+        "mean_defense_token_footprint": 0.0
+      },
+      "reflow_guard": {
+        "attacked_accuracy": 0.77,
+        "attacked_accuracy_ci95": [
+          0.69,
+          0.85
+        ],
+        "mean_defense_token_footprint": 57.66
+      },
+      "random_guard": {
+        "attacked_accuracy": 0.192,
+        "attacked_accuracy_ci95": [
+          0.14200000000000002,
+          0.24600000000000002
+        ],
+        "mean_defense_token_footprint": 52.466
+      },
+      "robustrag_voting": {
+        "attacked_accuracy": 0.14,
+        "attacked_accuracy_ci95": [
+          0.08,
+          0.21
+        ],
+        "mean_defense_token_footprint": 484.52
+      },
+      "robustrag_keyword": {
+        "attacked_accuracy": 0.21,
+        "attacked_accuracy_ci95": [
+          0.13,
+          0.29
+        ],
+        "mean_defense_token_footprint": 484.52
+      }
+    }
+  },
+  "macro": {
+    "no_defense": {
+      "attacked_accuracy": 0.29,
+      "attacked_accuracy_ci95": [
+        0.23,
+        0.355
+      ],
+      "mean_defense_token_footprint": 0.0
+    },
+    "reflow_guard": {
+      "attacked_accuracy": 0.77,
+      "attacked_accuracy_ci95": [
+        0.71,
+        0.825
+      ],
+      "mean_defense_token_footprint": 57.66
+    },
+    "random_guard": {
+      "attacked_accuracy": 0.192,
+      "attacked_accuracy_ci95": [
+        0.157,
+        0.229
+      ],
+      "mean_defense_token_footprint": 52.466
+    },
+    "robustrag_voting": {
+      "attacked_accuracy": 0.155,
+      "attacked_accuracy_ci95": [
+        0.105,
+        0.205
+      ],
+      "mean_defense_token_footprint": 354.44
+    },
+    "robustrag_keyword": {
+      "attacked_accuracy": 0.19,
+      "attacked_accuracy_ci95": [
+        0.135,
+        0.245
+      ],
+      "mean_defense_token_footprint": 354.44
+    }
+  },
+  "protocol": {
+    "attack_population": [
+      "poisonedrag",
+      "tparag"
+    ],
+    "reflow_guard": "verify clean evidence sentences containing ReFlow tokens",
+    "random_guard_seeds": [
+      11,
+      23,
+      47,
+      89,
+      131
+    ],
+    "robustrag": "per-passage isolation with voting or keyword aggregation",
+    "footprint": "tokens verified or isolated before defended generation"
+  }
+}

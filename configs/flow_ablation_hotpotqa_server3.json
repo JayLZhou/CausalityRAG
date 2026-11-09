@@ -1,0 +1,15 @@
+{
+  "dataset": "hotpotqa",
+  "input": "/data1/yujia/CausalityRAG/out/hotpotqa/retrieval/top10_1000.jsonl",
+  "units": "/data1/yujia/CausalityRAG/out/hotpotqa/inputs/token_units_top10_1000.jsonl",
+  "graphs": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/hotpotqa/graphs.jsonl",
+  "reflow": "/data1/yujia/CausalityRAG/out_no_frontier_repair_20260810/hotpotqa/results_1000.jsonl",
+  "pool": "/data1/yujia/CausalityRAG/out/hotpotqa/replacements/shared_pool_top10_v1/shared_pool_top10_final.jsonl",
+  "expected_sha256": {
+    "pool": "5f161ed2405becbda7cd39517d1d1291c562574a404c975e42f2d91ad8b31bef",
+    "reflow": "b1f91169d653c1e827670ff926b19660aae2d6a35d4b4821a1bae859a798ed4d"
+  },
+  "model": "/data1/yujia/models/Qwen2.5-7B-Instruct",
+  "k": 5,
+  "replacement_seed": 0
+}

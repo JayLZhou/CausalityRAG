@@ -1,0 +1,65 @@
+{
+  "queries": 100,
+  "attack_rows": 200,
+  "mean_protected_sentences": 1.93,
+  "methods": {
+    "no_defense": {
+      "attacked_accuracy": 0.645
+    },
+    "random_protect": {
+      "attacked_accuracy": 0.619
+    },
+    "keyword": {
+      "attacked_accuracy": 0.44
+    },
+    "decoding": {
+      "attacked_accuracy": 0.22
+    },
+    "reflow_protect": {
+      "attacked_accuracy": 0.7
+    }
+  },
+  "attacks": {
+    "poisonedrag": {
+      "no_defense": {
+        "attacked_accuracy": 0.57
+      },
+      "random_protect": {
+        "attacked_accuracy": 0.548
+      },
+      "keyword": {
+        "attacked_accuracy": 0.46
+      },
+      "decoding": {
+        "attacked_accuracy": 0.22
+      },
+      "reflow_protect": {
+        "attacked_accuracy": 0.61
+      }
+    },
+    "tparag": {
+      "no_defense": {
+        "attacked_accuracy": 0.72
+      },
+      "random_protect": {
+        "attacked_accuracy": 0.69
+      },
+      "keyword": {
+        "attacked_accuracy": 0.42
+      },
+      "decoding": {
+        "attacked_accuracy": 0.22
+      },
+      "reflow_protect": {
+        "attacked_accuracy": 0.79
+      }
+    }
+  },
+  "protocol": {
+    "reflow_protect": "prepend the clean ReFlow-selected sentences saved before attack",
+    "random_protect": "prepend the same number of random clean sentences; five fixed seeds",
+    "keyword": "native RobustRAG secure keyword aggregation",
+    "decoding": "native RobustRAG secure decoding",
+    "oracle_access": "the defense never receives the gold answer, attack label, or poisoned-chunk identity"
+  }
+}

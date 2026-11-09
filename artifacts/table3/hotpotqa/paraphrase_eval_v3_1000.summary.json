@@ -1,0 +1,186 @@
+{
+  "queries": 1000,
+  "methods": {
+    "arc_jsd": {
+      "queries": 1000,
+      "executed_queries": 988,
+      "answer_flips": 297,
+      "answer_flip_rate_itt": 0.297,
+      "f1_flips": 177,
+      "f1_flip_rate_itt": 0.177,
+      "em_flips": 111,
+      "em_flip_rate_itt": 0.111,
+      "acc_flips": 117,
+      "acc_flip_rate_itt": 0.117,
+      "status_histogram": {
+        "": 0,
+        "evaluated": 988
+      }
+    },
+    "attention_prompt_last": {
+      "queries": 1000,
+      "executed_queries": 986,
+      "answer_flips": 269,
+      "answer_flip_rate_itt": 0.269,
+      "f1_flips": 151,
+      "f1_flip_rate_itt": 0.151,
+      "em_flips": 98,
+      "em_flip_rate_itt": 0.098,
+      "acc_flips": 97,
+      "acc_flip_rate_itt": 0.097,
+      "status_histogram": {
+        "": 0,
+        "evaluated": 986,
+        "no_selected_tokens": 2
+      }
+    },
+    "gradient_x_input": {
+      "queries": 1000,
+      "executed_queries": 988,
+      "answer_flips": 307,
+      "answer_flip_rate_itt": 0.307,
+      "f1_flips": 178,
+      "f1_flip_rate_itt": 0.178,
+      "em_flips": 114,
+      "em_flip_rate_itt": 0.114,
+      "acc_flips": 111,
+      "acc_flip_rate_itt": 0.111,
+      "status_histogram": {
+        "": 0,
+        "evaluated": 988
+      }
+    },
+    "integrated_gradients": {
+      "queries": 1000,
+      "executed_queries": 988,
+      "answer_flips": 317,
+      "answer_flip_rate_itt": 0.317,
+      "f1_flips": 179,
+      "f1_flip_rate_itt": 0.179,
+      "em_flips": 111,
+      "em_flip_rate_itt": 0.111,
+      "acc_flips": 115,
+      "acc_flip_rate_itt": 0.115,
+      "status_histogram": {
+        "": 0,
+        "evaluated": 988
+      }
+    },
+    "mirage": {
+      "queries": 1000,
+      "executed_queries": 985,
+      "answer_flips": 300,
+      "answer_flip_rate_itt": 0.3,
+      "f1_flips": 168,
+      "f1_flip_rate_itt": 0.168,
+      "em_flips": 107,
+      "em_flip_rate_itt": 0.107,
+      "acc_flips": 100,
+      "acc_flip_rate_itt": 0.1,
+      "status_histogram": {
+        "": 0,
+        "evaluated": 985,
+        "no_selected_tokens": 3
+      }
+    },
+    "random_seed0": {
+      "queries": 1000,
+      "executed_queries": 988,
+      "answer_flips": 251,
+      "answer_flip_rate_itt": 0.251,
+      "f1_flips": 142,
+      "f1_flip_rate_itt": 0.142,
+      "em_flips": 90,
+      "em_flip_rate_itt": 0.09,
+      "acc_flips": 90,
+      "acc_flip_rate_itt": 0.09,
+      "status_histogram": {
+        "": 0,
+        "evaluated": 988
+      }
+    },
+    "random_seed1": {
+      "queries": 1000,
+      "executed_queries": 988,
+      "answer_flips": 251,
+      "answer_flip_rate_itt": 0.251,
+      "f1_flips": 140,
+      "f1_flip_rate_itt": 0.14,
+      "em_flips": 88,
+      "em_flip_rate_itt": 0.088,
+      "acc_flips": 87,
+      "acc_flip_rate_itt": 0.087,
+      "status_histogram": {
+        "": 0,
+        "evaluated": 988
+      }
+    },
+    "random_seed2": {
+      "queries": 1000,
+      "executed_queries": 988,
+      "answer_flips": 245,
+      "answer_flip_rate_itt": 0.245,
+      "f1_flips": 145,
+      "f1_flip_rate_itt": 0.145,
+      "em_flips": 96,
+      "em_flip_rate_itt": 0.096,
+      "acc_flips": 91,
+      "acc_flip_rate_itt": 0.091,
+      "status_histogram": {
+        "": 0,
+        "evaluated": 988
+      }
+    },
+    "random_seed3": {
+      "queries": 1000,
+      "executed_queries": 988,
+      "answer_flips": 263,
+      "answer_flip_rate_itt": 0.263,
+      "f1_flips": 147,
+      "f1_flip_rate_itt": 0.147,
+      "em_flips": 94,
+      "em_flip_rate_itt": 0.094,
+      "acc_flips": 91,
+      "acc_flip_rate_itt": 0.091,
+      "status_histogram": {
+        "": 0,
+        "evaluated": 988
+      }
+    },
+    "random_seed4": {
+      "queries": 1000,
+      "executed_queries": 988,
+      "answer_flips": 259,
+      "answer_flip_rate_itt": 0.259,
+      "f1_flips": 147,
+      "f1_flip_rate_itt": 0.147,
+      "em_flips": 94,
+      "em_flip_rate_itt": 0.094,
+      "acc_flips": 88,
+      "acc_flip_rate_itt": 0.088,
+      "status_histogram": {
+        "": 0,
+        "evaluated": 988
+      }
+    },
+    "reflow": {
+      "queries": 1000,
+      "executed_queries": 988,
+      "answer_flips": 365,
+      "answer_flip_rate_itt": 0.365,
+      "f1_flips": 220,
+      "f1_flip_rate_itt": 0.22,
+      "em_flips": 145,
+      "em_flip_rate_itt": 0.145,
+      "acc_flips": 151,
+      "acc_flip_rate_itt": 0.151,
+      "status_histogram": {
+        "evaluated": 988,
+        "no_selected_tokens": 12
+      }
+    }
+  },
+  "paraphrase_pool": "/data1/yujia/CausalityRAG_paraphrase_candidate/out/hotpotqa/audits/final_top10pool_k5/paraphrase_pool_v3.jsonl",
+  "paraphrase_pool_sha256": "724fd2acf5c8baebd79b31d5d42de97e9c125bc7fe1238926ee1828cf85a4844",
+  "replacement_seed": 0
+}

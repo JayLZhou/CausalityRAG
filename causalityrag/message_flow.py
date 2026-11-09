@@ -386,6 +386,28 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
         *,
         k: int = 5,
     ) -> dict:
+        """Extract one receiver-beam configuration."""
+
+        return self.extract_many(
+            record,
+            target_answer,
+            k=k,
+            receiver_beams=[self.max_receivers_per_layer],
+        )[self.max_receivers_per_layer]
+
+    def extract_many(
+        self,
+        record: dict,
+        target_answer: str,
+        *,
+        k: int = 5,
+        receiver_beams: list[int],
+    ) -> dict[int, dict]:
+        """Extract exact beam variants from one shared forward/backward trace."""
+
+        beams = list(dict.fromkeys(int(beam) for beam in receiver_beams))
+        if not beams or any(beam <= 0 for beam in beams):
+            raise ValueError("receiver_beams must contain positive integers")
         torch = self.torch
         contexts = self._truncate_contexts(retrieved_contexts(record)[:k])
         text, spans = self._render(record, contexts, target_answer)
@@ -393,13 +415,16 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
         sequence_tokens = int(encoded["input_ids"].shape[-1])
         sequence_limit = self._sequence_limit()
         if sequence_limit and sequence_tokens > sequence_limit:
-            return self._empty(
-                record,
-                target_answer,
-                "sequence_exceeds_model_context",
-                sequence_tokens,
-                {"sequence_limit": sequence_limit},
-            )
+            return {
+                beam: self._empty(
+                    record,
+                    target_answer,
+                    "sequence_exceeds_model_context",
+                    sequence_tokens,
+                    {"sequence_limit": sequence_limit, "receiver_beam": beam},
+                )
+                for beam in beams
+            }
         input_ids = encoded["input_ids"].to(self.device)
         offsets = [
             tuple(map(int, pair)) for pair in encoded["offset_mapping"][0].tolist()
@@ -412,12 +437,16 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
             position for position in answer_positions if position > 0
         ]
         if not all_target_positions:
-            return self._empty(
-                record,
-                target_answer,
-                "answer_tokens_missing",
-                len(token_meta),
-            )
+            return {
+                beam: self._empty(
+                    record,
+                    target_answer,
+                    "answer_tokens_missing",
+                    len(token_meta),
+                    {"receiver_beam": beam},
+                )
+                for beam in beams
+            }
 
         trace = self._install_trace_hooks()
         try:
@@ -454,20 +483,56 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
                     embeddings.detach(),
                     position_ids,
                 )
-            edges, flow_diagnostics = self._closed_flow_edges(
-                trace,
-                token_meta,
-                target_positions,
-                position_embeddings,
-            )
-            context_tokens, chunk_token_counts = self._closed_context_support(
-                embeddings,
-                token_meta,
-                edges,
-            )
+            rows = {}
+            for beam in beams:
+                edges, flow_diagnostics = self._closed_flow_edges(
+                    trace,
+                    token_meta,
+                    target_positions,
+                    position_embeddings,
+                    receiver_beam=beam,
+                )
+                context_tokens, chunk_token_counts = self._closed_context_support(
+                    embeddings,
+                    token_meta,
+                    edges,
+                )
+                rows[beam] = self._message_flow_row(
+                    record,
+                    target_answer,
+                    target_tensor=target_tensor,
+                    target_outputs=target_outputs,
+                    answer_positions=answer_positions,
+                    target_positions=target_positions,
+                    token_meta=token_meta,
+                    layer_count=layer_count,
+                    edges=edges,
+                    flow_diagnostics=flow_diagnostics,
+                    context_tokens=context_tokens,
+                    chunk_token_counts=chunk_token_counts,
+                    receiver_beam=beam,
+                )
         finally:
             trace.close()
+        return rows
 
+    def _message_flow_row(
+        self,
+        record: dict,
+        target_answer: str,
+        *,
+        target_tensor: Any,
+        target_outputs: list[dict],
+        answer_positions: list[int],
+        target_positions: list[int],
+        token_meta: list[dict],
+        layer_count: int,
+        edges: list[dict],
+        flow_diagnostics: dict,
+        context_tokens: list[dict],
+        chunk_token_counts: dict,
+        receiver_beam: int,
+    ) -> dict:
         kept_edges = edges
         graph_status = self._contribution_graph_status(
             kept_edges,
@@ -501,7 +566,7 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
                 "edges": kept_edges,
                 "edge_count": len(edges),
                 "positive_edge_policy": "retain_all_for_active_receivers",
-                "receiver_beam": self.max_receivers_per_layer,
+                "receiver_beam": receiver_beam,
                 "edge_weight_semantics": (
                     "backward-conserved positive flow allocated in proportion to signed "
                     "local objective contribution from the actual residual, attention "
@@ -563,9 +628,14 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
         token_meta: list[dict],
         target_positions: list[int],
         position_embeddings: tuple[Any, Any],
+        *,
+        receiver_beam: int | None = None,
     ) -> tuple[list[dict], dict]:
         """Trace conserved positive flow backward from the answer."""
 
+        beam = self.max_receivers_per_layer if receiver_beam is None else receiver_beam
+        if beam <= 0:
+            raise ValueError("receiver_beam must be positive")
         edges: list[dict] = []
         layer_count = len(self.decoder.layers)
         final_layer = layer_count - 1
@@ -706,7 +776,7 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
                 for source, _ in sorted(
                     source_mass.items(),
                     key=lambda item: (-item[1], item[0]),
-                )[: self.max_receivers_per_layer]
+                )[:beam]
             }
             if layer_index == 0:
                 input_context_sources = [
@@ -769,7 +839,7 @@ class _ClosedMessageFlowExtractor(_MessageTraceRuntime):
                     float(edge["contribution"]) for edge in answer_edges
                 ),
                 "positive_edge_policy": "retain_all_for_active_receivers",
-                "receiver_beam": self.max_receivers_per_layer,
+                "receiver_beam": beam,
                 "flow_edges": len(edges),
             }
         )

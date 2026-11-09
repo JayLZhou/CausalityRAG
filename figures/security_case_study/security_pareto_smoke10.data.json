@@ -1,0 +1,135 @@
+{
+  "attack_points": [
+    {
+      "method": "ReFlow",
+      "budget": 1,
+      "untargeted_asr": 0.6,
+      "untargeted_asr_ci95": [
+        0.3,
+        0.9
+      ],
+      "mean_attack_token_footprint": 1.0
+    },
+    {
+      "method": "ReFlow",
+      "budget": 2,
+      "untargeted_asr": 0.6,
+      "untargeted_asr_ci95": [
+        0.3,
+        0.9
+      ],
+      "mean_attack_token_footprint": 1.3
+    },
+    {
+      "method": "ReFlow",
+      "budget": 4,
+      "untargeted_asr": 0.7,
+      "untargeted_asr_ci95": [
+        0.4,
+        1.0
+      ],
+      "mean_attack_token_footprint": 1.8
+    },
+    {
+      "method": "ReFlow",
+      "budget": 8,
+      "untargeted_asr": 0.7,
+      "untargeted_asr_ci95": [
+        0.4,
+        1.0
+      ],
+      "mean_attack_token_footprint": 2.2
+    },
+    {
+      "method": "ReFlow",
+      "budget": 16,
+      "untargeted_asr": 0.7,
+      "untargeted_asr_ci95": [
+        0.4,
+        1.0
+      ],
+      "mean_attack_token_footprint": 3.0
+    },
+    {
+      "method": "ReFlow",
+      "budget": 32,
+      "untargeted_asr": 0.7,
+      "untargeted_asr_ci95": [
+        0.4,
+        1.0
+      ],
+      "mean_attack_token_footprint": 3.0
+    },
+    {
+      "method": "PoisonedRAG",
+      "untargeted_asr": 0.7,
+      "untargeted_asr_ci95": [
+        0.4,
+        1.0
+      ],
+      "mean_attack_token_footprint": 164.5
+    },
+    {
+      "method": "TPARAG",
+      "untargeted_asr": 0.3,
+      "untargeted_asr_ci95": [
+        0.0,
+        0.6
+      ],
+      "mean_attack_token_footprint": 502.1
+    }
+  ],
+  "defense_points": [
+    {
+      "method": "No defense",
+      "attacked_accuracy": 0.5,
+      "attacked_accuracy_ci95": [
+        0.3,
+        0.7
+      ],
+      "mean_defense_token_footprint": 0.0
+    },
+    {
+      "method": "ReFlow-Guard",
+      "attacked_accuracy": 0.8,
+      "attacked_accuracy_ci95": [
+        0.6,
+        0.95
+      ],
+      "mean_defense_token_footprint": 63.3
+    },
+    {
+      "method": "Random-Guard",
+      "attacked_accuracy": 0.12000000000000002,
+      "attacked_accuracy_ci95": [
+        0.05,
+        0.2
+      ],
+      "mean_defense_token_footprint": 53.580000000000005
+    },
+    {
+      "method": "RobustRAG-Vote",
+      "attacked_accuracy": 0.25,
+      "attacked_accuracy_ci95": [
+        0.05,
+        0.45
+      ],
+      "mean_defense_token_footprint": 326.4
+    },
+    {
+      "method": "RobustRAG-Keyword",
+      "attacked_accuracy": 0.45,
+      "attacked_accuracy_ci95": [
+        0.25,
+        0.65
+      ],
+      "mean_defense_token_footprint": 326.4
+    }
+  ],
+  "notes": {
+    "no_defense_log_position": 0.5,
+    "no_defense_true_footprint": 0,
+    "attack_population": "100 frozen clean-correct HotpotQA queries",
+    "defense_macro_population": "PoisonedRAG and TPARAG attacks"
+  }
+}

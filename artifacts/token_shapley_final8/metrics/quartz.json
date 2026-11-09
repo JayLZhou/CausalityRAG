@@ -1,0 +1,56 @@
+{
+  "dataset": "quartz",
+  "queries": 1000,
+  "diagnostics": {
+    "factual_invalid": 0,
+    "control_invalid": 0,
+    "factual_unexecuted": 0,
+    "control_unexecuted": 0
+  },
+  "metrics": {
+    "Ans-FR": {
+      "flips": 261,
+      "denominator": 1000,
+      "rate_percent": 26.1
+    },
+    "Ans-CFR": {
+      "factual_flips": 261,
+      "control_flips": 125,
+      "denominator": 1000,
+      "rate_percent": 13.6
+    },
+    "F1-FR": {
+      "flips": 143,
+      "denominator": 723,
+      "rate_percent": 19.778699861687414
+    },
+    "F1-CFR": {
+      "factual_flips": 143,
+      "control_flips": 44,
+      "denominator": 723,
+      "rate_percent": 13.692946058091286
+    },
+    "EM-FR": {
+      "flips": 143,
+      "denominator": 723,
+      "rate_percent": 19.778699861687414
+    },
+    "EM-CFR": {
+      "factual_flips": 143,
+      "control_flips": 44,
+      "denominator": 723,
+      "rate_percent": 13.692946058091286
+    },
+    "Acc-FR": {
+      "flips": 143,
+      "denominator": 723,
+      "rate_percent": 19.778699861687414
+    },
+    "Acc-CFR": {
+      "factual_flips": 143,
+      "control_flips": 44,
+      "denominator": 723,
+      "rate_percent": 13.692946058091286
+    }
+  }
+}

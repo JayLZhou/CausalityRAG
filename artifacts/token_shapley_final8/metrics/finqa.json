@@ -1,0 +1,56 @@
+{
+  "dataset": "finqa",
+  "queries": 1000,
+  "diagnostics": {
+    "factual_invalid": 5,
+    "control_invalid": 1,
+    "factual_unexecuted": 0,
+    "control_unexecuted": 661
+  },
+  "metrics": {
+    "Ans-FR": {
+      "flips": 599,
+      "denominator": 987,
+      "rate_percent": 60.68895643363729
+    },
+    "Ans-CFR": {
+      "factual_flips": 599,
+      "control_flips": 58,
+      "denominator": 987,
+      "rate_percent": 54.81256332320162
+    },
+    "F1-FR": {
+      "flips": 49,
+      "denominator": 81,
+      "rate_percent": 60.49382716049383
+    },
+    "F1-CFR": {
+      "factual_flips": 49,
+      "control_flips": 4,
+      "denominator": 81,
+      "rate_percent": 55.55555555555556
+    },
+    "EM-FR": {
+      "flips": 49,
+      "denominator": 81,
+      "rate_percent": 60.49382716049383
+    },
+    "EM-CFR": {
+      "factual_flips": 49,
+      "control_flips": 4,
+      "denominator": 81,
+      "rate_percent": 55.55555555555556
+    },
+    "Acc-FR": {
+      "flips": 64,
+      "denominator": 142,
+      "rate_percent": 45.070422535211264
+    },
+    "Acc-CFR": {
+      "factual_flips": 64,
+      "control_flips": 4,
+      "denominator": 142,
+      "rate_percent": 42.25352112676056
+    }
+  }
+}

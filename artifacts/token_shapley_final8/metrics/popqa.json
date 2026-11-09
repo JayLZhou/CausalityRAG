@@ -1,0 +1,56 @@
+{
+  "dataset": "popqa",
+  "queries": 1000,
+  "diagnostics": {
+    "factual_invalid": 3,
+    "control_invalid": 0,
+    "factual_unexecuted": 0,
+    "control_unexecuted": 66
+  },
+  "metrics": {
+    "Ans-FR": {
+      "flips": 453,
+      "denominator": 995,
+      "rate_percent": 45.527638190954775
+    },
+    "Ans-CFR": {
+      "factual_flips": 453,
+      "control_flips": 177,
+      "denominator": 995,
+      "rate_percent": 27.738693467336685
+    },
+    "F1-FR": {
+      "flips": 143,
+      "denominator": 463,
+      "rate_percent": 30.885529157667385
+    },
+    "F1-CFR": {
+      "factual_flips": 143,
+      "control_flips": 30,
+      "denominator": 463,
+      "rate_percent": 24.406047516198704
+    },
+    "EM-FR": {
+      "flips": 143,
+      "denominator": 463,
+      "rate_percent": 30.885529157667385
+    },
+    "EM-CFR": {
+      "factual_flips": 143,
+      "control_flips": 30,
+      "denominator": 463,
+      "rate_percent": 24.406047516198704
+    },
+    "Acc-FR": {
+      "flips": 153,
+      "denominator": 579,
+      "rate_percent": 26.424870466321245
+    },
+    "Acc-CFR": {
+      "factual_flips": 153,
+      "control_flips": 30,
+      "denominator": 579,
+      "rate_percent": 21.243523316062177
+    }
+  }
+}

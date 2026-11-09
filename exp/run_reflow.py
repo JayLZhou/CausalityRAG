@@ -25,6 +25,26 @@ from causalityrag.shared_replacement_pool import (
 from causalityrag.token_units import units_from_cache_row
 
 
+EMPTY_EXECUTABLE_FRONTIER = "empty_frontier_nonempty_executable_domain"
+
+
+def frontier_status(
+    identifier: str,
+    units: list[dict],
+    frontier: dict,
+    *,
+    record_empty_frontier: bool,
+) -> str:
+    if units and not frontier.get("candidates"):
+        if not record_empty_frontier:
+            raise RuntimeError(
+                f"{identifier}: nonempty executable domain produced an "
+                "empty frontier"
+            )
+        return EMPTY_EXECUTABLE_FRONTIER
+    return str(frontier.get("status", ""))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
@@ -37,6 +57,14 @@ def main() -> None:
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--n", type=int, default=1000)
     parser.add_argument("--k", type=int, default=5)
+    parser.add_argument(
+        "--record-empty-frontier",
+        action="store_true",
+        help=(
+            "Record an empty frontier for targeted graph repair instead of "
+            "failing immediately. Final repaired frontiers should omit this flag."
+        ),
+    )
     args = parser.parse_args()
 
     actual_pool_sha = file_sha256(args.shared_pool)
@@ -91,11 +119,12 @@ def main() -> None:
                 interactions,
                 target,
             )
-            if units and not frontier.get("candidates"):
-                raise RuntimeError(
-                    f"{identifier}: nonempty executable domain produced an "
-                    "empty frontier"
-                )
+            status = frontier_status(
+                identifier,
+                units,
+                frontier,
+                record_empty_frontier=args.record_empty_frontier,
+            )
             initial_flow = remaining_contribution_flow(
                 units,
                 source,
@@ -145,7 +174,7 @@ def main() -> None:
                     "graph_connectivity_repair": graph_repair,
                 },
                 "graph_connectivity_repair": graph_repair,
-                "frontier_status": frontier.get("status", ""),
+                "frontier_status": status,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             }
             rows.append(row)
@@ -161,6 +190,10 @@ def main() -> None:
         "queries": len(rows),
         "queries_with_frontier": sum(
             bool(row["frontier_candidates"]) for row in rows
+        ),
+        "recorded_empty_frontiers": sum(
+            row["frontier_status"] == EMPTY_EXECUTABLE_FRONTIER
+            for row in rows
         ),
         "mean_frontier_size": statistics.fmean(
             row["n_frontier"] for row in rows

@@ -28,7 +28,7 @@ from causalityrag.shared_replacement_pool import (
     stable_shared_candidate,
 )
 from causalityrag.token_units import units_from_cache_row
-from scripts.evaluate_matched_budget_baselines import ranked_ids
+from scripts.evaluate_matched_budget_baselines import LocalReaderAdapter, ranked_ids
 from scripts.evaluate_reflow import candidate_rows, valid_clean_answer
 
 
@@ -404,6 +404,13 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=48)
     parser.add_argument("--llm-base-url", default="")
     parser.add_argument("--llm-model", default="")
+    parser.add_argument("--model-path", default="")
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--dtype", default="bfloat16")
+    parser.add_argument(
+        "--reader-mode",
+        default=os.environ.get("CAUSALITYRAG_READER_MODE", "short_answer"),
+    )
     parser.add_argument("--reader-max-tokens", type=int, default=128)
     args = parser.parse_args()
 
@@ -441,11 +448,22 @@ def main() -> None:
             raise ValueError(f"misaligned row {index}: {identifier} vs {aligned}")
 
     pool = FrozenSharedReplacementPool(args.shared_pool)
-    reader = ReaderClient(
-        base_url=args.llm_base_url or None,
-        model=args.llm_model or None,
-        max_tokens=args.reader_max_tokens,
-    )
+    if args.model_path:
+        if args.workers != 1:
+            raise ValueError("local-HF evaluation requires --workers 1")
+        reader = LocalReaderAdapter(
+            args.model_path,
+            device=args.device,
+            dtype=args.dtype,
+            reader_mode=args.reader_mode,
+        )
+    else:
+        reader = ReaderClient(
+            base_url=args.llm_base_url or None,
+            model=args.llm_model or None,
+            max_tokens=args.reader_max_tokens,
+            reader_mode=args.reader_mode,
+        )
     output_path = Path(args.out)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     expected_ids = {record_id(record) for record in records}

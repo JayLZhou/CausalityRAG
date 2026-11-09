@@ -1,0 +1,64 @@
+{
+  "dataset": "musique",
+  "queries": 1000,
+  "clean_acc_queries": 235,
+  "reflow": {
+    "valid_queries": 235,
+    "acc_flip_count": 210,
+    "acc_fr": 0.8936170212765957
+  },
+  "token_shapley": {
+    "1": {
+      "valid_queries": 235,
+      "acc_flip_count": 129,
+      "acc_fr": 0.548936170212766,
+      "mean_modified_tokens": 1.0
+    },
+    "2": {
+      "valid_queries": 235,
+      "acc_flip_count": 146,
+      "acc_fr": 0.6212765957446809,
+      "mean_modified_tokens": 2.0
+    },
+    "4": {
+      "valid_queries": 234,
+      "acc_flip_count": 149,
+      "acc_fr": 0.6367521367521367,
+      "mean_modified_tokens": 4.0
+    },
+    "8": {
+      "valid_queries": 235,
+      "acc_flip_count": 151,
+      "acc_fr": 0.6425531914893617,
+      "mean_modified_tokens": 8.0
+    },
+    "16": {
+      "valid_queries": 234,
+      "acc_flip_count": 150,
+      "acc_fr": 0.6410256410256411,
+      "mean_modified_tokens": 16.0
+    },
+    "32": {
+      "valid_queries": 233,
+      "acc_flip_count": 153,
+      "acc_fr": 0.6566523605150214,
+      "mean_modified_tokens": 32.0
+    },
+    "64": {
+      "valid_queries": 234,
+      "acc_flip_count": 162,
+      "acc_fr": 0.6923076923076923,
+      "mean_modified_tokens": 64.0
+    },
+    "128": {
+      "valid_queries": 232,
+      "acc_flip_count": 194,
+      "acc_fr": 0.8362068965517241,
+      "mean_modified_tokens": 127.84051724137932
+    }
+  },
+  "first_matching_tested_budget": null,
+  "reaches_target_through_128": false,
+  "first_matching_budget": null,
+  "exact_integer_search": true
+}

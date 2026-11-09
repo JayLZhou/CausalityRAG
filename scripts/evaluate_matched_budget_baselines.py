@@ -15,9 +15,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from causalityrag.io import gold_answers, load_records, record_id
 from causalityrag.reader import (
+    LocalHFReader,
     ReaderClient,
     ReaderProtocolError,
     canonicalize_reader_answer,
+    parse_json_object,
     reader_answers_exact_match,
 )
 from causalityrag.revision import apply_token_replacements
@@ -28,6 +30,40 @@ from causalityrag.shared_replacement_pool import (
 )
 from causalityrag.token_units import units_from_cache_row
 from scripts.evaluate_reflow import valid_clean_answer
+
+
+class LocalReaderAdapter:
+    """Expose ``LocalHFReader`` through the reader interface used below."""
+
+    def __init__(
+        self,
+        model_path: str,
+        *,
+        device: str,
+        dtype: str,
+        reader_mode: str,
+    ) -> None:
+        self.reader_mode = reader_mode
+        self.reader = LocalHFReader(
+            model_path,
+            device=device,
+            dtype=dtype,
+            attn_implementation="sdpa",
+        )
+
+    def answer(self, question: str, contexts: list[dict]) -> str:
+        response = self.reader.generate_responses_batch(question, [contexts])[0]
+        parsed = parse_json_object(response)
+        answer = (
+            str(parsed["answer"]).strip()
+            if isinstance(parsed, dict) and parsed.get("answer") is not None
+            else response.strip()
+        )
+        return canonicalize_reader_answer(
+            question,
+            answer,
+            reader_mode=self.reader_mode,
+        )
 
 
 def _safe_score(value: object) -> float:
@@ -395,6 +431,13 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=48)
     parser.add_argument("--llm-base-url", default="")
     parser.add_argument("--llm-model", default="")
+    parser.add_argument("--model-path", default="")
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--dtype", default="bfloat16")
+    parser.add_argument(
+        "--reader-mode",
+        default=os.environ.get("CAUSALITYRAG_READER_MODE", "short_answer"),
+    )
     args = parser.parse_args()
 
     actual_pool_sha = file_sha256(args.shared_pool)
@@ -419,10 +462,21 @@ def main() -> None:
     random_seeds = [
         int(value) for value in args.random_seeds.split(",") if value.strip()
     ]
-    reader = ReaderClient(
-        base_url=args.llm_base_url or None,
-        model=args.llm_model or None,
-    )
+    if args.model_path:
+        if args.workers != 1:
+            raise ValueError("local-HF evaluation requires --workers 1")
+        reader = LocalReaderAdapter(
+            args.model_path,
+            device=args.device,
+            dtype=args.dtype,
+            reader_mode=args.reader_mode,
+        )
+    else:
+        reader = ReaderClient(
+            base_url=args.llm_base_url or None,
+            model=args.llm_model or None,
+            reader_mode=args.reader_mode,
+        )
     lock = Lock()
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 

@@ -1,0 +1,13 @@
+{
+  "baseline": "attention_filtered_token_leverage_shap",
+  "method": "attention_filtered_token_leverage_shap",
+  "queries": 250,
+  "queries_added": 250,
+  "budget": 0,
+  "budget_multiplier": 3.0,
+  "attention_candidates": 128,
+  "coalition_batch_size": 8,
+  "total_unique_coalition_evaluations": 95904,
+  "total_seconds": 6172.476000000003,
+  "mean_seconds": 24.689904
+}

@@ -18,8 +18,86 @@ from causalityrag.paraphrase_control import (
     excluded_from_paraphrase_control,
 )
 from causalityrag.semantic_filter import ensure_wordnet_available
+from causalityrag.reader import model_context_window, parse_json_object
 from causalityrag.shared_replacement_pool import file_sha256
 from scripts.build_paraphrase_control_pool import generate_batch, target_from_unit
+
+
+class LocalSentenceParaphraseClient(SentenceParaphraseClient):
+    """Run the existing paraphrase prompts with one local HF checkpoint."""
+
+    def __init__(self, model_path: str, *, device: str, dtype: str) -> None:
+        super().__init__(base_url="http://127.0.0.1:1/v1", model="local")
+        import torch
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+
+        self.torch = torch
+        self.device = device
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+        )
+        config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+        if hasattr(config, "base_model_tp_plan"):
+            config.base_model_tp_plan = None
+        if hasattr(config, "base_model_pp_plan"):
+            config.base_model_pp_plan = None
+        self.context_window = model_context_window(config)
+        self.local_model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            config=config,
+            torch_dtype=getattr(torch, dtype),
+            trust_remote_code=True,
+            attn_implementation="sdpa",
+        ).to(device)
+        self.local_model.eval()
+
+    def _request(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        temperature: float,
+        max_tokens: int,
+    ) -> object:
+        with self._lock:
+            self._calls += 1
+            call_index = self._calls
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
+        rendered = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        inputs = self.tokenizer(
+            rendered,
+            return_tensors="pt",
+            add_special_tokens=False,
+        ).to(self.device)
+        prompt_tokens = int(inputs["input_ids"].shape[1])
+        available = self.context_window - prompt_tokens
+        if available <= 0:
+            return {}
+        do_sample = temperature > 0
+        self.torch.manual_seed(20260813 + call_index)
+        generation = {
+            "do_sample": do_sample,
+            "max_new_tokens": min(max_tokens, available),
+            "pad_token_id": self.tokenizer.eos_token_id,
+            "eos_token_id": self.tokenizer.eos_token_id,
+        }
+        if do_sample:
+            generation.update({"temperature": temperature, "top_p": 0.9})
+        with self.torch.inference_mode():
+            output = self.local_model.generate(**inputs, **generation)
+        response = self.tokenizer.decode(
+            output[0, prompt_tokens:],
+            skip_special_tokens=True,
+        ).strip()
+        return parse_json_object(response)
 
 
 def main() -> None:
@@ -35,8 +113,11 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=24)
     parser.add_argument("--attempts", type=int, default=6)
     parser.add_argument("--max-candidates", type=int, default=3)
-    parser.add_argument("--llm-base-url", required=True)
-    parser.add_argument("--llm-model", required=True)
+    parser.add_argument("--llm-base-url", default="")
+    parser.add_argument("--llm-model", default="")
+    parser.add_argument("--model-path", default="")
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--dtype", default="bfloat16")
     args = parser.parse_args()
 
     ensure_wordnet_available()
@@ -94,10 +175,19 @@ def main() -> None:
         missing[start : start + args.batch_size]
         for start in range(0, len(missing), args.batch_size)
     ]
-    client = SentenceParaphraseClient(
-        base_url=args.llm_base_url,
-        model=args.llm_model,
-    )
+    if args.model_path:
+        if args.workers != 1:
+            raise ValueError("local-HF generation requires --workers 1")
+        client = LocalSentenceParaphraseClient(
+            args.model_path,
+            device=args.device,
+            dtype=args.dtype,
+        )
+    else:
+        client = SentenceParaphraseClient(
+            base_url=args.llm_base_url or None,
+            model=args.llm_model or None,
+        )
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = [
             executor.submit(

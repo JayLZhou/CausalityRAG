@@ -1,0 +1,56 @@
+{
+  "dataset": "triviaqa",
+  "queries": 1000,
+  "diagnostics": {
+    "factual_invalid": 4,
+    "control_invalid": 2,
+    "factual_unexecuted": 0,
+    "control_unexecuted": 196
+  },
+  "metrics": {
+    "Ans-FR": {
+      "flips": 156,
+      "denominator": 975,
+      "rate_percent": 16.0
+    },
+    "Ans-CFR": {
+      "factual_flips": 156,
+      "control_flips": 65,
+      "denominator": 975,
+      "rate_percent": 9.333333333333334
+    },
+    "F1-FR": {
+      "flips": 56,
+      "denominator": 718,
+      "rate_percent": 7.7994428969359335
+    },
+    "F1-CFR": {
+      "factual_flips": 56,
+      "control_flips": 12,
+      "denominator": 718,
+      "rate_percent": 6.128133704735376
+    },
+    "EM-FR": {
+      "flips": 56,
+      "denominator": 716,
+      "rate_percent": 7.82122905027933
+    },
+    "EM-CFR": {
+      "factual_flips": 56,
+      "control_flips": 12,
+      "denominator": 716,
+      "rate_percent": 6.145251396648045
+    },
+    "Acc-FR": {
+      "flips": 51,
+      "denominator": 820,
+      "rate_percent": 6.219512195121951
+    },
+    "Acc-CFR": {
+      "factual_flips": 51,
+      "control_flips": 9,
+      "denominator": 820,
+      "rate_percent": 5.121951219512195
+    }
+  }
+}

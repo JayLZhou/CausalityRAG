@@ -1,0 +1,55 @@
+{
+  "queries": 1000,
+  "diagnostics": {
+    "factual_invalid": 6,
+    "control_invalid": 2,
+    "factual_unexecuted": 0,
+    "control_unexecuted": 143
+  },
+  "metrics": {
+    "Ans-FR": {
+      "flips": 750,
+      "denominator": 983,
+      "rate_percent": 76.2970498474059
+    },
+    "Ans-CFR": {
+      "factual_flips": 749,
+      "control_flips": 272,
+      "denominator": 981,
+      "rate_percent": 48.62385321100918
+    },
+    "F1-FR": {
+      "flips": 282,
+      "denominator": 398,
+      "rate_percent": 70.85427135678393
+    },
+    "F1-CFR": {
+      "factual_flips": 282,
+      "control_flips": 61,
+      "denominator": 398,
+      "rate_percent": 55.527638190954775
+    },
+    "EM-FR": {
+      "flips": 282,
+      "denominator": 398,
+      "rate_percent": 70.85427135678393
+    },
+    "EM-CFR": {
+      "factual_flips": 282,
+      "control_flips": 61,
+      "denominator": 398,
+      "rate_percent": 55.527638190954775
+    },
+    "Acc-FR": {
+      "flips": 342,
+      "denominator": 540,
+      "rate_percent": 63.333333333333336
+    },
+    "Acc-CFR": {
+      "factual_flips": 342,
+      "control_flips": 62,
+      "denominator": 540,
+      "rate_percent": 51.851851851851855
+    }
+  }
+}

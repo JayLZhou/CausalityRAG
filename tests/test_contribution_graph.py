@@ -123,6 +123,58 @@ def test_builds_contribution_graph_from_closed_message_flow() -> None:
     assert diagnostics["raw_edge_mass"]["contracted_internal"] == 0.8
 
 
+def test_build_many_contracts_each_exact_receiver_beam() -> None:
+    record = {
+        "id": "q1",
+        "question": "q",
+        "answer": "a",
+        "retrieved": [{"chunk_id": "c1", "text": "Alpha", "rank": 1}],
+    }
+
+    def message_flow(beam: int) -> dict:
+        return {
+            "status": "ok",
+            "context_token_supports": [
+                {
+                    "position": 0,
+                    "chunk_id": "c1",
+                    "chunk_char_start": 0,
+                    "chunk_char_end": 5,
+                    "support": float(beam),
+                }
+            ],
+            "graph": {
+                "receiver_beam": beam,
+                "token_partitions": {"query": []},
+                "target_positions": [],
+                "edges": [],
+            },
+        }
+
+    class FakeExtractor:
+        def extract_many(self, *args, receiver_beams, **kwargs):
+            return {beam: message_flow(beam) for beam in receiver_beams}
+
+    builder = ContributionGraphBuilder.__new__(ContributionGraphBuilder)
+    builder._extractor = FakeExtractor()
+    rows = builder.build_many(
+        record,
+        "answer",
+        k=1,
+        receiver_beams=[16, 32, 64],
+    )
+
+    assert list(rows) == [16, 32, 64]
+    assert {
+        beam: row["message_flow_diagnostics"]["receiver_beam"]
+        for beam, row in rows.items()
+    } == {16: 16, 32: 32, 64: 64}
+    assert {
+        beam: row["contribution_graph"]["source_edges"][0]["capacity"]
+        for beam, row in rows.items()
+    } == {16: 16.0, 32: 32.0, 64: 64.0}
+
+
 def test_support_shortcut_handles_a_flow_without_direct_source_or_target_edges() -> None:
     message_flow = {
         "context_token_supports": [{

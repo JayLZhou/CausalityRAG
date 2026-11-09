@@ -1,0 +1,96 @@
+{
+  "queries": 100,
+  "attack_rows": 200,
+  "sentence_budget": 3,
+  "methods": {
+    "no_defense": {
+      "attacked_accuracy": 0.65
+    },
+    "random_guard": {
+      "attacked_accuracy": 0.684,
+      "poison_removal_rate": 0.156,
+      "false_positive_chunks": 0.0,
+      "attacked_accuracy_std": 0.014628738838327757
+    },
+    "keyword_guard": {
+      "attacked_accuracy": 0.845,
+      "poison_removal_rate": 0.665,
+      "false_positive_chunks": 0.0
+    },
+    "decoding_guard": {
+      "attacked_accuracy": 0.68,
+      "poison_removal_rate": 0.085,
+      "false_positive_chunks": 0.0
+    },
+    "reflow_guard": {
+      "attacked_accuracy": 0.935,
+      "poison_removal_rate": 0.7,
+      "false_positive_chunks": 0.0
+    }
+  },
+  "attacks": {
+    "poisonedrag": {
+      "no_defense": {
+        "attacked_accuracy": 0.56
+      },
+      "random_guard": {
+        "attacked_accuracy": 0.596,
+        "poison_removal_rate": 0.096,
+        "false_positive_chunks": 0.0
+      },
+      "keyword_guard": {
+        "attacked_accuracy": 0.81,
+        "poison_removal_rate": 0.66,
+        "false_positive_chunks": 0.0
+      },
+      "decoding_guard": {
+        "attacked_accuracy": 0.61,
+        "poison_removal_rate": 0.08,
+        "false_positive_chunks": 0.0
+      },
+      "reflow_guard": {
+        "attacked_accuracy": 0.94,
+        "poison_removal_rate": 0.81,
+        "false_positive_chunks": 0.0
+      }
+    },
+    "tparag": {
+      "no_defense": {
+        "attacked_accuracy": 0.74
+      },
+      "random_guard": {
+        "attacked_accuracy": 0.772,
+        "poison_removal_rate": 0.216,
+        "false_positive_chunks": 0.0
+      },
+      "keyword_guard": {
+        "attacked_accuracy": 0.88,
+        "poison_removal_rate": 0.67,
+        "false_positive_chunks": 0.0
+      },
+      "decoding_guard": {
+        "attacked_accuracy": 0.75,
+        "poison_removal_rate": 0.09,
+        "false_positive_chunks": 0.0
+      },
+      "reflow_guard": {
+        "attacked_accuracy": 0.93,
+        "poison_removal_rate": 0.59,
+        "false_positive_chunks": 0.0
+      }
+    }
+  },
+  "protocol": {
+    "ranking_budget": "exactly three sentences per query and attack",
+    "verification": "chunk ID and SHA-256 text hash against the frozen pre-attack vector-store manifest",
+    "response": "reject failed chunks and regenerate once from the retained context",
+    "oracle_access": "none during ranking or verification; attack labels are used only for post-hoc diagnostics",
+    "random_seeds": [
+      11,
+      23,
+      47,
+      89,
+      131
+    ]
+  }
+}

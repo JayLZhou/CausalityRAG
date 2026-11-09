@@ -7,6 +7,8 @@ set -euo pipefail
 REPO=${REPO:-/data1/yujia/CausalityRAG_release_quartz_repair_20260809}
 PYTHON=${PYTHON:-/data1/yujia/envs/graphrag/bin/python}
 FROZEN_ROOT=${FROZEN_ROOT:-/data1/yujia/CausalityRAG/out}
+QWEN25_ROOT=${QWEN25_ROOT:-$FROZEN_ROOT}
+QWEN25_FRONTIER=${QWEN25_FRONTIER:-$QWEN25_ROOT/quartz/methods/reflow/frontier_top5_1000.jsonl}
 SWEEP_ROOT=${SWEEP_ROOT:-$FROZEN_ROOT/model_sensitivity_v1}
 RUN_ID=${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
 QUARTZ_INPUT="$FROZEN_ROOT/quartz/retrieval/top10_1000.jsonl"
@@ -147,7 +149,7 @@ proxy_port() {
 
 model_root() {
   case "$1" in
-    qwen2.5-7b) echo "$FROZEN_ROOT" ;;
+    qwen2.5-7b) echo "$QWEN25_ROOT" ;;
     *) echo "$SWEEP_ROOT/$1" ;;
   esac
 }
@@ -200,7 +202,7 @@ frontier_path() {
   local root
   root=$(model_root "$1")
   if [[ "$1" == qwen2.5-7b ]]; then
-    echo "$root/quartz/methods/reflow/frontier_top5_1000.jsonl"
+    echo "$QWEN25_FRONTIER"
   else
     echo "$root/quartz/frontier/frontier_top5.jsonl"
   fi
@@ -219,7 +221,7 @@ postprocess() {
   )
   if [[ "$model_key" == qwen2.5-7b ]]; then
     command+=(
-      --baselines "$FROZEN_ROOT/quartz/audits/final_top10pool_k5/baselines_1000.jsonl"
+      --baselines "$(model_root "$model_key")/quartz/audits/final_top10pool_k5/baselines_1000.jsonl"
       --baselines-out "$output_root/baselines/results.jsonl"
     )
   fi
@@ -387,7 +389,7 @@ stop_owned_readers
 trap - EXIT
 
 "$PYTHON" "$REPO/scripts/render_table3_rows.py" \
-  --metrics-root "$FROZEN_ROOT" --datasets quartz \
-  --out "$FROZEN_ROOT/quartz/choice_postprocess_v1/table3_quartz_rows.tex"
+  --metrics-root "$QWEN25_ROOT" --datasets quartz \
+  --out "$QWEN25_ROOT/quartz/choice_postprocess_v1/table3_quartz_rows.tex"
 
 echo "[quartz-repair] all models complete"
