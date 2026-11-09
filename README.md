@@ -48,14 +48,18 @@ Here $\Psi$ swaps a token for a same-type alternative that makes its sentence st
 ## ⚙️ How it works
 
 ```mermaid
-flowchart LR
-    A["📥 Query + retrieved chunks"] --> B["🤖 One LLM execution<br/>forward + backward pass"]
-    B --> C["🕸️ Contribution graph<br/>token-to-token messages"]
-    C --> D["💰 Priced min-cut search<br/>at most n+1 candidate sets"]
-    D --> E["✏️ Replace tokens<br/>smallest candidate first"]
-    E --> F{"🔁 Answer<br/>changed?"}
-    F -- "no, next candidate" --> E
-    F -- "yes" --> G["🎉 Counterfactual<br/>explanation"]
+flowchart TB
+    subgraph S1["🕸️ Stage 1: build the graph from one LLM execution"]
+        direction LR
+        A["📥 Query +<br/>retrieved chunks"] --> B["🤖 Forward +<br/>backward pass"] --> C["🕸️ Contribution<br/>graph"]
+    end
+    subgraph S2["💰 Stage 2: search and verify"]
+        direction LR
+        D["💰 Priced min-cuts<br/>at most n+1 sets"] --> E["✏️ Replace tokens<br/>smallest set first"] --> F{"🔁 Answer<br/>changed?"}
+        F -- "no" --> E
+        F -- "yes" --> G["🎉 Explanation"]
+    end
+    S1 --> S2
 ```
 
 | Stage | What happens | Code |
